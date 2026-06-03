@@ -1,0 +1,301 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>GottFA80 · LISYcontrol</title>
+<style>
+  :root{
+    --bg:#0d1017; --panel:#161b24; --panel2:#1d2430; --line:#2a3340;
+    --txt:#e7ecf3; --muted:#8b97a8; --accent:#39b6ff; --ok:#3ddc84;
+    --warn:#ffb020; --bad:#ff5d5d; --closed:#ff5d5d; --lamp:#ffd23f; --r:12px;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;background:var(--bg);color:var(--txt);
+    font-family:system-ui,-apple-system,Segoe UI,Roboto,sans-serif;-webkit-text-size-adjust:100%}
+  header{position:sticky;top:0;z-index:10;background:#0d1017f2;backdrop-filter:blur(6px);
+    border-bottom:1px solid var(--line);padding:.6rem .9rem}
+  .top{display:flex;align-items:center;gap:.6rem}
+  .top h1{font-size:1rem;margin:0;font-weight:650}
+  .dot{width:10px;height:10px;border-radius:50%;background:var(--bad);box-shadow:0 0 8px var(--bad)}
+  .dot.ok{background:var(--ok);box-shadow:0 0 8px var(--ok)}
+  .dot.demo{background:var(--warn);box-shadow:0 0 8px var(--warn)}
+  .grow{flex:1}.conn{font-size:.78rem;color:var(--muted)}
+  .game{font-size:.78rem;color:var(--accent);margin-top:.2rem}
+  .master{display:flex;align-items:center;gap:.5rem;margin-top:.55rem;
+    background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:.55rem .7rem}
+  .master .lbl{font-size:.82rem}.master .sub{font-size:.7rem;color:var(--muted)}
+  .switch{position:relative;width:46px;height:26px;flex:none}
+  .switch input{opacity:0;width:0;height:0}
+  .slide{position:absolute;inset:0;background:#39414f;border-radius:26px;transition:.15s;cursor:pointer}
+  .slide:before{content:"";position:absolute;height:20px;width:20px;left:3px;top:3px;background:#fff;border-radius:50%;transition:.15s}
+  .switch input:checked + .slide{background:var(--bad)}
+  .switch input:checked + .slide:before{transform:translateX(20px)}
+  nav{display:flex;gap:.25rem;overflow-x:auto;padding:.55rem .6rem 0;scrollbar-width:none}
+  nav::-webkit-scrollbar{display:none}
+  nav button{flex:none;background:transparent;color:var(--muted);border:0;border-bottom:2px solid transparent;
+    padding:.5rem .7rem;font-size:.88rem;border-radius:8px 8px 0 0;cursor:pointer}
+  nav button.active{color:var(--txt);border-bottom-color:var(--accent)}
+  main{padding:.9rem;max-width:820px;margin:0 auto}
+  section{display:none} section.active{display:block}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);padding:.9rem;margin-bottom:.8rem}
+  .panel h2{margin:.1rem 0 .8rem;font-size:.9rem;color:var(--muted);font-weight:600;text-transform:uppercase;letter-spacing:.6px}
+  .row{display:flex;gap:.5rem;flex-wrap:wrap;align-items:center}
+  .btn{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:10px;
+    padding:.5rem .8rem;font-size:.85rem;cursor:pointer;user-select:none}
+  .btn:active{transform:scale(.97)}.btn.accent{border-color:var(--accent);color:var(--accent)}
+  .disabled{opacity:.4;pointer-events:none}
+  /* switch matrix: RED = closed (faithful to LISY) */
+  .mat{display:grid;grid-template-columns:auto repeat(8,1fr);gap:5px}
+  .mat .h{font-size:.66rem;color:var(--muted);text-align:center;align-self:center}
+  .cell{aspect-ratio:1;border-radius:8px;background:var(--panel2);border:1px solid var(--line);
+    display:flex;flex-direction:column;align-items:center;justify-content:center;gap:1px;
+    font-size:.58rem;color:var(--muted);cursor:pointer;line-height:1;text-align:center;padding:1px}
+  .cell .nm{font-size:.5rem;opacity:.8;max-width:100%;overflow:hidden}
+  .cell.on{background:var(--closed);border-color:var(--closed);color:#2a0606;font-weight:700;box-shadow:0 0 10px #ff5d5d55}
+  .grid{display:grid;grid-template-columns:repeat(8,1fr);gap:6px}
+  .lamp{aspect-ratio:1;border-radius:9px;background:var(--panel2);border:1px solid var(--line);
+    color:var(--muted);font-size:.66rem;display:flex;flex-direction:column;align-items:center;justify-content:center;cursor:pointer;text-align:center;line-height:1.05;padding:2px}
+  .lamp .nm{font-size:.5rem;opacity:.85}
+  .lamp.on{background:var(--lamp);border-color:var(--lamp);color:#3a2c00;font-weight:700;box-shadow:0 0 12px #ffd23f66}
+  @keyframes blink{50%{opacity:.25}} .blinking .lamp.on{animation:blink .5s steps(1,end) infinite}
+  .coils{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+  .coil{background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:.6rem .4rem;text-align:center;cursor:pointer}
+  .coil:active,.coil.fire{background:var(--accent);border-color:var(--accent);color:#04243a}
+  .coil .n{font-size:1.05rem;font-weight:700}.coil .t{font-size:.62rem;color:var(--muted)}.coil.fire .t{color:#04243a}
+  .snds{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+  .snd{aspect-ratio:1.4;border-radius:8px;background:var(--panel2);border:1px solid var(--line);
+    color:var(--txt);font-size:.7rem;display:flex;align-items:center;justify-content:center;cursor:pointer;text-align:center;padding:2px;line-height:1}
+  .snd.on{background:var(--accent);border-color:var(--accent);color:#04243a;font-weight:700}
+  input[type=range]{width:100%}
+  input[type=text],input[type=number]{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:.5rem;font-size:.9rem;width:100%;font-family:ui-monospace,monospace}
+  .kv{display:flex;justify-content:space-between;padding:.3rem 0;border-bottom:1px solid var(--line);font-size:.85rem}
+  .kv .k{color:var(--muted)}.kv:last-child{border-bottom:0}
+  .note{font-size:.74rem;color:var(--muted);margin-top:.4rem}.warn{color:var(--warn)}
+  label.fld{display:block;font-size:.75rem;color:var(--muted);margin:.5rem 0 .2rem}
+  .dips{display:grid;grid-template-columns:repeat(2,1fr);gap:.5rem}
+  .dip{display:flex;align-items:center;justify-content:space-between;background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:.4rem .6rem;font-size:.8rem}
+</style>
+</head>
+<body>
+<header>
+  <div class="top">
+    <span class="dot" id="dot"></span>
+    <h1>GottFA80 · LISYcontrol</h1>
+    <span class="grow"></span>
+    <span class="conn" id="conn">…</span>
+  </div>
+  <div class="game" id="game">jeu : —</div>
+  <div class="master">
+    <label class="switch"><input type="checkbox" id="mst"><span class="slide"></span></label>
+    <div>
+      <div class="lbl">Mode contrôle <span id="mstState" class="sub">(jeu en marche)</span></div>
+      <div class="sub warn">Activer = arrêter le jeu et piloter le hardware (mode lisyctrl).</div>
+    </div>
+  </div>
+</header>
+
+<nav id="tabs">
+  <button data-t="sw" class="active">Switches</button>
+  <button data-t="lamp">Lampes</button>
+  <button data-t="coil">Bobines</button>
+  <button data-t="disp">Display</button>
+  <button data-t="snd">Son</button>
+  <button data-t="adj">Réglages</button>
+  <button data-t="info">Info</button>
+</nav>
+
+<main>
+  <section id="sw" class="active">
+    <div class="panel">
+      <h2>Matrice de contacts — 8 strobes × 8 retours</h2>
+      <div class="mat" id="mat"></div>
+      <div class="note"><b style="color:var(--closed)">Rouge = contact fermé</b> (fidèle à LISY). N° = strobe×10+retour. En démo, clique une case.</div>
+    </div>
+  </section>
+
+  <section id="lamp">
+    <div class="panel">
+      <h2>Lampes (48)</h2>
+      <div class="row" style="margin-bottom:.7rem">
+        <button class="btn" onclick="lampAll(1)">Tout allumer</button>
+        <button class="btn" onclick="lampAll(0)">Tout éteindre</button>
+        <button class="btn" id="blinkBtn" onclick="lampBlink()">Clignoter</button>
+      </div>
+      <div class="grid" id="lamps"></div>
+    </div>
+  </section>
+
+  <section id="coil">
+    <div class="panel">
+      <h2>Bobines / solénoïdes</h2>
+      <label class="fld">Durée d'impulsion : <b id="pwv">60</b> ms</label>
+      <input type="range" id="pw" min="10" max="150" value="60" step="5" oninput="pwv.textContent=this.value">
+      <div class="coils" id="coils" style="margin-top:.7rem"></div>
+      <div class="note warn">Impulsion momentanée (watchdog FPGA). Pas de maintien = pas de bobine collée.</div>
+    </div>
+  </section>
+
+  <section id="disp">
+    <div class="panel" id="disp80">
+      <h2>Afficheurs 80 / 80A</h2>
+      <div id="dispFields"></div>
+    </div>
+    <div class="panel" id="disp80b" style="display:none">
+      <h2>Afficheur 80B (2 × 20)</h2>
+      <label class="fld">Ligne 1</label><input type="text" id="r1" maxlength="20" placeholder="····················">
+      <label class="fld">Ligne 2</label><input type="text" id="r2" maxlength="20" placeholder="····················">
+    </div>
+    <button class="btn accent" onclick="sendDisp()">Envoyer</button>
+  </section>
+
+  <section id="snd">
+    <div class="panel">
+      <h2>Son (0–31, ré-appuyer = stop)</h2>
+      <div class="snds" id="sndPad"></div>
+    </div>
+  </section>
+
+  <section id="adj">
+    <div class="panel">
+      <h2>DIP / Réglages</h2>
+      <div class="dips" id="dips"></div>
+      <div class="note">ON/OFF par DIP (cmd LISY « V »). Les libellés viennent du CSV du jeu.</div>
+    </div>
+  </section>
+
+  <section id="info">
+    <div class="panel">
+      <h2>État</h2>
+      <div class="kv"><span class="k">Firmware</span><span id="i_fw">—</span></div>
+      <div class="kv"><span class="k">FPGA IDCODE</span><span id="i_id">—</span></div>
+      <div class="kv"><span class="k">WiFi / IP</span><span id="i_ip">—</span></div>
+      <div class="kv"><span class="k">Jeu</span><span id="i_game">—</span></div>
+      <div class="kv"><span class="k">Système</span><span id="i_sys">—</span></div>
+      <div class="kv"><span class="k">Mode contrôle</span><span id="i_mode">—</span></div>
+      <div class="kv"><span class="k">Watchdog bobines</span><span id="i_wd">—</span></div>
+    </div>
+  </section>
+</main>
+
+<script>
+"use strict";
+const N_LAMP=48, N_COIL=9, N_SND=32, N_DIP=32;
+const st={ws:null,connected:false,demo:false,outputs:false,is80B:false,blink:false,
+  sw:Array(8).fill(0), lamps:Array(N_LAMP).fill(0), snd:Array(N_SND).fill(0), dip:Array(N_DIP).fill(0),
+  names:{sw:{},lamp:{},coil:{},snd:{}}};
+
+/* ---------- build ---------- */
+function el(cls,html){const d=document.createElement('div');d.className=cls;if(html!=null)d.innerHTML=html;return d;}
+function buildMatrix(){
+  const m=document.getElementById('mat'); m.innerHTML='';
+  m.appendChild(el('h',''));
+  for(let s=0;s<8;s++) m.appendChild(el('h','S'+s));
+  for(let r=0;r<8;r++){
+    m.appendChild(el('h','R'+r));
+    for(let s=0;s<8;s++){
+      const no=s*10+r;                        // LISY numbering: strobe*10+return
+      const c=el('cell','<div>'+pad(no)+'</div><div class="nm" id="swn'+no+'"></div>');
+      c.id='c'+s+'_'+r; c.onclick=()=>swClick(s,r); m.appendChild(c);
+    }
+  }
+}
+function buildLamps(){const g=document.getElementById('lamps');g.innerHTML='';
+  for(let i=0;i<N_LAMP;i++){const b=el('lamp','<div>'+(i+1)+'</div><div class="nm" id="ln'+i+'"></div>');b.id='l'+i;b.onclick=()=>lamp(i);g.appendChild(b);}}
+const COIL_DEF=["","Knocker","Coil 2","Coil 3","Coil 4","Coil 5","Coil 6","Coil 7","Coil 8","Outhole"];
+function buildCoils(){const g=document.getElementById('coils');g.innerHTML='';
+  for(let i=1;i<=N_COIL;i++){const d=el('coil','<div class="n">'+i+'</div><div class="t" id="kn'+i+'">'+COIL_DEF[i]+'</div>');d.id='k'+i;d.onclick=()=>coil(i);g.appendChild(d);}}
+function buildSnd(){const g=document.getElementById('sndPad');g.innerHTML='';
+  for(let i=0;i<N_SND;i++){const b=el('snd','<div>'+i+'</div>');b.id='s'+i;b.onclick=()=>sound(i);g.appendChild(b);}}
+function buildDisp(){const f=document.getElementById('dispFields');f.innerHTML='';
+  ['Crédit / Bille (D0)','Joueur 1','Joueur 2','Joueur 3','Joueur 4'].forEach((p,i)=>{
+    f.insertAdjacentHTML('beforeend','<label class="fld">'+p+'</label><input type="text" id="d'+i+'" maxlength="7" placeholder="·······">');});}
+function buildDips(){const g=document.getElementById('dips');g.innerHTML='';
+  for(let i=0;i<N_DIP;i++){g.insertAdjacentHTML('beforeend',
+    '<div class="dip"><span>DIP '+pad(i+1)+'</span><label class="switch"><input type="checkbox" id="dp'+i+'" onchange="dip('+i+',this.checked)"><span class="slide"></span></label></div>');}}
+function pad(n){return (n<10?'0':'')+n;}
+
+/* ---------- actions ---------- */
+function gate(){return st.outputs;}
+function need(){toast('Active le « mode contrôle »');}
+function lamp(i){if(!gate())return need();st.lamps[i]^=1;renderLamps();send({c:'lamp',i,v:st.lamps[i]});}
+function lampAll(v){if(!gate())return need();st.lamps.fill(v);renderLamps();send({c:'lampAll',v});}
+function lampBlink(){if(!gate())return need();st.blink=!st.blink;document.getElementById('lamps').classList.toggle('blinking',st.blink);
+  document.getElementById('blinkBtn').classList.toggle('accent',st.blink);send({c:'lampBlink',v:st.blink?1:0});}
+function coil(i){if(!gate())return need();const ms=+pw.value,e=document.getElementById('k'+i);
+  e.classList.add('fire');setTimeout(()=>e.classList.remove('fire'),Math.max(120,ms));send({c:'coil',i,ms});}
+function sound(i){if(!gate())return need();st.snd[i]^=1;if(st.snd[i])st.snd.forEach((v,j)=>{if(j!=i)st.snd[j]=0});renderSnd();send({c:'sound',n:i});}
+function swClick(s,r){if(st.demo){st.sw[s]^=(1<<r);renderSw();}}
+function dip(i,v){st.dip[i]=v?1:0;send({c:'dip',i,v:v?1:0});}
+function sendDisp(){if(!gate())return need();
+  if(st.is80B){send({c:'disp',p:0,txt:r1.value});send({c:'disp',p:1,txt:r2.value});}
+  else for(let i=0;i<5;i++)send({c:'disp',p:i,txt:document.getElementById('d'+i).value});}
+
+/* ---------- render ---------- */
+function renderSw(){for(let s=0;s<8;s++)for(let r=0;r<8;r++)document.getElementById('c'+s+'_'+r).classList.toggle('on',!!(st.sw[s]&(1<<r)));}
+function renderLamps(){for(let i=0;i<N_LAMP;i++)document.getElementById('l'+i).classList.toggle('on',!!st.lamps[i]);}
+function renderSnd(){for(let i=0;i<N_SND;i++)document.getElementById('s'+i).classList.toggle('on',!!st.snd[i]);}
+function renderGate(){document.querySelectorAll('#lamp .grid,#lamp .row,#coil .coils,#snd .snds,#dispFields,#disp80b')
+  .forEach(e=>e.classList.toggle('disabled',!gate()));}
+function renderNames(){
+  for(const k in st.names.sw){const e=document.getElementById('swn'+k);if(e)e.textContent=st.names.sw[k];}
+  for(const k in st.names.lamp){const e=document.getElementById('ln'+k);if(e)e.textContent=st.names.lamp[k];}
+  for(const k in st.names.coil){const e=document.getElementById('kn'+k);if(e)e.textContent=st.names.coil[k];}}
+function applySys(){document.getElementById('disp80').style.display=st.is80B?'none':'block';
+  document.getElementById('disp80b').style.display=st.is80B?'block':'none';
+  document.getElementById('i_sys').textContent=st.is80B?'System 80B':'System 80 / 80A';}
+
+/* ---------- transport ---------- */
+function send(o){if(st.connected&&st.ws)st.ws.send(JSON.stringify(o));else mock(o);}
+function setConn(s){const d=document.getElementById('dot'),c=document.getElementById('conn');
+  d.className='dot '+(s==='ok'?'ok':s==='demo'?'demo':'');
+  c.textContent=s==='ok'?'connecté':s==='demo'?'DÉMO (hors-ligne)':'déconnecté…';}
+function connect(){
+  if(location.protocol==='file:'){startDemo();return;}
+  try{st.ws=new WebSocket('ws://'+location.host+'/ws');
+    st.ws.onopen=()=>{st.connected=true;st.demo=false;setConn('ok');send({c:'hello'});};
+    st.ws.onmessage=e=>handle(JSON.parse(e.data));
+    st.ws.onclose=()=>{st.connected=false;setConn('');setTimeout(connect,1500);};
+    st.ws.onerror=()=>st.ws.close();
+  }catch(e){startDemo();}
+}
+function handle(m){
+  if(m.t==='info'){i_fw.textContent=m.fw;i_id.textContent=m.idcode;i_ip.textContent=(m.mode||'')+' '+(m.ip||'');
+    const g=m.game||'—';i_game.textContent=g;document.getElementById('game').textContent='jeu : '+g+(m.gamenr?(' (#'+m.gamenr+')'):'');
+    if('is80B'in m){st.is80B=!!m.is80B;applySys();} if('outputs'in m)setOutputs(!!m.outputs,true);}
+  else if(m.t==='sw'){st.sw=m.d.slice(0,8);renderSw();}
+  else if(m.t==='lamps'){for(let i=0;i<N_LAMP;i++)st.lamps[i]=(m.d[i>>3]>>(i&7))&1;renderLamps();}
+  else if(m.t==='sound'){for(let i=0;i<N_SND;i++)st.snd[i]=(m.d[i>>3]>>(i&7))&1;renderSnd();}
+  else if(m.t==='dip'){for(let i=0;i<N_DIP;i++){st.dip[i]=(m.d[i>>3]>>(i&7))&1;const e=document.getElementById('dp'+i);if(e)e.checked=!!st.dip[i];}}
+  else if(m.t==='names'){if(m.sw)st.names.sw=m.sw;if(m.lamp)st.names.lamp=m.lamp;if(m.coil)st.names.coil=m.coil;renderNames();}
+  else if(m.t==='status'){setOutputs(!!m.outputs,true);i_wd.textContent=m.wd?'⚠ déclenché':'ok';}
+}
+
+/* ---------- demo / mock ---------- */
+function startDemo(){st.demo=true;st.connected=false;setConn('demo');
+  i_fw.textContent='demo';i_id.textContent='0x020F10DD';i_ip.textContent='file://';
+  i_game.textContent='—';i_wd.textContent='ok';applySys();
+  setInterval(()=>{if(!st.outputs)return;const s=Math.random()*8|0,r=Math.random()*8|0;st.sw[s]^=(1<<r);renderSw();},900);}
+function mock(o){if(o.c==='coil')console.log('demo pulse coil',o.i,o.ms+'ms');if(o.c==='sound')toast('son '+o.n);}
+
+/* ---------- master ---------- */
+function setOutputs(v,srv){st.outputs=v;document.getElementById('mst').checked=v;
+  document.getElementById('mstState').textContent=v?'(jeu ARRÊTÉ — contrôle actif)':'(jeu en marche)';
+  i_mode.textContent=v?'lisyctrl (jeu arrêté)':'jeu en marche';renderGate();
+  if(!v&&st.blink)lampBlink();
+  if(!srv)send({c:'outputs',v:v?1:0});}
+document.getElementById('mst').onchange=e=>setOutputs(e.target.checked,false);
+
+/* ---------- tabs + toast ---------- */
+document.getElementById('tabs').onclick=e=>{if(e.target.dataset.t){
+  document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b===e.target));
+  document.querySelectorAll('section').forEach(s=>s.classList.toggle('active',s.id===e.target.dataset.t));}};
+let tT;function toast(msg){const c=document.getElementById('conn'),o=c.textContent;c.textContent=msg;
+  clearTimeout(tT);tT=setTimeout(()=>setConn(st.connected?'ok':st.demo?'demo':''),1400);}
+
+/* ---------- boot ---------- */
+buildMatrix();buildLamps();buildCoils();buildSnd();buildDisp();buildDips();
+applySys();renderGate();setConn('');connect();
+</script>
+</body>
+</html>
