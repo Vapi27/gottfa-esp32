@@ -90,7 +90,7 @@
     <label class="switch"><input type="checkbox" id="mst"><span class="slide"></span></label>
     <div>
       <div class="lbl">Mode contrôle <span id="mstState" class="sub">(jeu en marche)</span></div>
-      <div class="sub warn">Activer = arrêter le jeu et piloter le hardware (mode lisyctrl).</div>
+      <div class="sub warn">Mode diag = appui long sur le bouton TEST de la portière. Ici on arme les sorties.</div>
     </div>
   </div>
 </header>
@@ -169,6 +169,8 @@
       <h2>État</h2>
       <div class="kv"><span class="k">Firmware</span><span id="i_fw">—</span></div>
       <div class="kv"><span class="k">FPGA IDCODE</span><span id="i_id">—</span></div>
+      <div class="kv"><span class="k">Bus diag</span><span id="i_bus">—</span></div>
+      <div class="kv"><span class="k">lisyctrl</span><span id="i_lisy">—</span></div>
       <div class="kv"><span class="k">WiFi / IP</span><span id="i_ip">—</span></div>
       <div class="kv"><span class="k">Jeu</span><span id="i_game">—</span></div>
       <div class="kv"><span class="k">Système</span><span id="i_sys">—</span></div>
@@ -181,7 +183,7 @@
 <script>
 "use strict";
 const N_LAMP=48, N_COIL=9, N_SND=32, N_DIP=32;
-const st={ws:null,connected:false,demo:false,outputs:false,is80B:false,blink:false,
+const st={ws:null,connected:false,demo:false,outputs:false,is80B:false,blink:false,bus:'normal',lisy:'—',
   sw:Array(8).fill(0), lamps:Array(N_LAMP).fill(0), snd:Array(N_SND).fill(0), dip:Array(N_DIP).fill(0),
   names:{sw:{},lamp:{},coil:{},snd:{}}};
 
@@ -255,14 +257,14 @@ function connect(){
   try{st.ws=new WebSocket('ws://'+location.host+'/ws');
     st.ws.onopen=()=>{st.connected=true;st.demo=false;setConn('ok');send({c:'hello'});};
     st.ws.onmessage=e=>handle(JSON.parse(e.data));
-    st.ws.onclose=()=>{st.connected=false;setConn('');setTimeout(connect,1500);};
+    st.ws.onclose=()=>{st.connected=false;st.bus='normal';st.lisy='—';applyBus();setConn('');setTimeout(connect,1500);};
     st.ws.onerror=()=>st.ws.close();
   }catch(e){startDemo();}
 }
 function handle(m){
   if(m.t==='info'){i_fw.textContent=m.fw;i_id.textContent=m.idcode;i_ip.textContent=(m.mode||'')+' '+(m.ip||'');
     const g=m.game||'—';i_game.textContent=g;document.getElementById('game').textContent='jeu : '+g+(m.gamenr?(' (#'+m.gamenr+')'):'');
-    if('is80B'in m){st.is80B=!!m.is80B;applySys();} if('outputs'in m)setOutputs(!!m.outputs,true);}
+    if('is80B'in m){st.is80B=!!m.is80B;applySys();} if('bus'in m){st.bus=m.bus;st.lisy=m.lisy||'—';applyBus();} if('outputs'in m)setOutputs(!!m.outputs,true);}
   else if(m.t==='sw'){st.sw=m.d.slice(0,8);renderSw();}
   else if(m.t==='lamps'){for(let i=0;i<N_LAMP;i++)st.lamps[i]=(m.d[i>>3]>>(i&7))&1;renderLamps();}
   else if(m.t==='sound'){for(let i=0;i<N_SND;i++)st.snd[i]=(m.d[i>>3]>>(i&7))&1;renderSnd();}
@@ -275,16 +277,31 @@ function handle(m){
 function startDemo(){st.demo=true;st.connected=false;setConn('demo');
   i_fw.textContent='demo';i_id.textContent='0x020F10DD';i_ip.textContent='file://';
   i_game.textContent='—';i_wd.textContent='ok';applySys();
+  st.bus='diag';st.lisy='0x80 (démo)';applyBus();
   setInterval(()=>{if(!st.outputs)return;const s=Math.random()*8|0,r=Math.random()*8|0;st.sw[s]^=(1<<r);renderSw();},900);}
 function mock(o){if(o.c==='coil')console.log('demo pulse coil',o.i,o.ms+'ms');if(o.c==='sound')toast('son '+o.n);}
 
-/* ---------- master ---------- */
+/* ---------- master / bus ---------- */
+function canControl(){return st.demo||st.bus==='diag';}
+function applyBus(){
+  const ok=canControl(), mst=document.getElementById('mst'); mst.disabled=!ok;
+  document.getElementById('mstState').textContent =
+    st.demo ? '(démo)' :
+    st.bus==='diag' ? (st.outputs?'(jeu ARRÊTÉ — contrôle actif)':'(mode diag — prêt)') :
+    st.bus==='bus?' ? '(bus pris — lisyctrl muet ?)' :
+    '(appui long bouton TEST portière)';
+  const ib=document.getElementById('i_bus'); if(ib)ib.textContent=st.demo?'démo':st.bus;
+  const il=document.getElementById('i_lisy'); if(il)il.textContent=st.lisy||'—';
+  if(!ok&&st.outputs)setOutputs(false,true);          // lost diag mode -> outputs off in UI
+}
 function setOutputs(v,srv){st.outputs=v;document.getElementById('mst').checked=v;
-  document.getElementById('mstState').textContent=v?'(jeu ARRÊTÉ — contrôle actif)':'(jeu en marche)';
-  i_mode.textContent=v?'lisyctrl (jeu arrêté)':'jeu en marche';renderGate();
+  document.getElementById('mstState').textContent=v?'(jeu ARRÊTÉ — contrôle actif)':(canControl()?'(mode diag — prêt)':'(appui long bouton TEST portière)');
+  i_mode.textContent=v?'sorties armées (jeu arrêté)':(st.bus==='diag'?'mode diag — prêt':'jeu en marche');renderGate();
   if(!v&&st.blink)lampBlink();
   if(!srv)send({c:'outputs',v:v?1:0});}
-document.getElementById('mst').onchange=e=>setOutputs(e.target.checked,false);
+document.getElementById('mst').onchange=e=>{
+  if(!canControl()){e.target.checked=false;toast('Mode diag requis : bouton TEST portière');return;}
+  setOutputs(e.target.checked,false);};
 
 /* ---------- tabs + toast ---------- */
 document.getElementById('tabs').onclick=e=>{if(e.target.dataset.t){
@@ -295,7 +312,7 @@ let tT;function toast(msg){const c=document.getElementById('conn'),o=c.textConte
 
 /* ---------- boot ---------- */
 buildMatrix();buildLamps();buildCoils();buildSnd();buildDisp();buildDips();
-applySys();renderGate();setConn('');connect();
+applySys();applyBus();renderGate();setConn('');connect();
 </script>
 </body>
 </html>

@@ -1,14 +1,21 @@
 #include <ESPAsyncWebServer.h>
 #include <ArduinoJson.h>
+#include <SPI.h>
 #include "diag.h"
+#include "board_config.h"
 
 // ===========================================================================
 //  LISYcontrol backend.  Browser <--WebSocket(JSON)--> here <--SPI--> lisyctrl.
-//  The SPI side is stubbed (bridgeWrite/bridgeRead) so the UI runs with no FPGA;
-//  each handler notes the lisyctrl register it will drive. Register map = LISYCTRL.md.
+//  Real shared-bus SPI bridge: the FPGA releases the SD/EEPROM SPI bus to the ESP
+//  only while diag mode is active, signalled on the Debug pin (= lisy_active).
+//  Frames are mode-0, MSB-first, 2 bytes, separated by a >1.3us idle gap.
+//  WRITE = {0x80|addr, val};  READ = {addr, 0x00} -> value in the 2nd byte.
+//  Register map = LISYCTRL.md / lisyctrl.vhd.
 // ===========================================================================
 
 // lisyctrl SPI registers (see lisyctrl.vhd / LISYCTRL.md)
+#define REG_ID       0x00   // reads 0x80 (slave-alive magic)
+#define REG_STATUS   0x02   // b0 active, b1 wd_tripped, b2 is80B
 #define REG_CTRL     0x03   // b0 outputs_en, b1 lamp_blink
 #define REG_SW_ROW0  0x10   // 0x10..0x17  switch matrix (bit=return, 1=closed)
 #define REG_DIPSLAM  0x18
@@ -31,20 +38,37 @@ namespace {
   // info
   char fw[12]="?", idcode[12]="0x0", mode[12]="?", ip[20]="0.0.0.0";
   char game[24]="—"; uint16_t gamenr=0; bool is80B=false;
+  char busmode[8]="normal";      // diag-bus state: "normal" | "diag" | "bus?"
+  uint8_t lisyId=0;              // lisyctrl ID register (0x80 = slave answering)
 
-  uint32_t lastTick=0, lastSw=0, seed=0xC0FFEE;
+  uint32_t lastTick=0;
 
-  // ---- SPI bridge stubs (TODO: ESP32 SPI master + bus arbitration) ----
-  inline void bridgeWrite(uint8_t reg, uint8_t val) { (void)reg; (void)val; /* TODO SPI */ }
-  inline uint8_t bridgeRead(uint8_t reg) { (void)reg; return 0; /* TODO SPI */ }
+  // ---- shared-bus SPI bridge to the lisyctrl slave -------------------------
+  const SPISettings SPI_CFG(1000000, MSBFIRST, SPI_MODE0);  // 1 MHz (clk >= ~6x SCLK)
+  bool    busOwned=false;        // do we currently own the shared SPI bus?
+  uint8_t dbgConfirm=0;          // debounce counter for the Debug handshake
 
-  uint32_t prng(){ seed^=seed<<13; seed^=seed>>17; seed^=seed<<5; return seed; }
+  inline void bridgeWrite(uint8_t reg, uint8_t val) {
+    if(!busOwned) return;
+    uint8_t b[2]={ (uint8_t)(0x80|(reg&0x7F)), val };       // bit7=1 -> write
+    delayMicroseconds(3);                                   // ensure the >1.3us frame gap
+    SPI.beginTransaction(SPI_CFG); SPI.transfer(b,2); SPI.endTransaction();
+  }
+  inline uint8_t bridgeRead(uint8_t reg) {
+    if(!busOwned) return 0;
+    uint8_t b[2]={ (uint8_t)(reg&0x7F), 0x00 };             // bit7=0 -> read; value in byte1
+    delayMicroseconds(3);
+    SPI.beginTransaction(SPI_CFG); SPI.transfer(b,2); SPI.endTransaction();
+    return b[1];
+  }
 
   void txt(AsyncWebSocketClient*c, const String&s){ if(c) c->text(s); else if(g_ws) g_ws->textAll(s); }
 
   void sendInfo(AsyncWebSocketClient*c){
     JsonDocument d; d["t"]="info"; d["fw"]=fw; d["idcode"]=idcode; d["ip"]=ip; d["mode"]=mode;
     d["game"]=game; d["gamenr"]=gamenr; d["is80B"]=is80B?1:0; d["outputs"]=outputs?1:0;
+    char lid[8]; snprintf(lid,sizeof(lid),"0x%02X",lisyId);
+    d["bus"]=busmode; d["lisy"]=lid;                        // diag-bus state + lisyctrl ID
     String s; serializeJson(d,s); txt(c,s);
   }
   void sendStatus(){ JsonDocument d; d["t"]="status"; d["outputs"]=outputs?1:0; d["wd"]=wd_tripped?1:0;
@@ -53,9 +77,39 @@ namespace {
     JsonDocument d; d["t"]=type; JsonArray j=d["d"].to<JsonArray>();
     for(int i=0;i<n;i++) j.add(a[i]); String s; serializeJson(d,s); txt(c,s);
   }
+
+  // ---- bus arbitration: follow the FPGA Debug handshake (= lisy_active) -----
+  void busRelease(){
+    if(busOwned) SPI.end();
+    busOwned=false;
+    pinMode(PIN_SPI_SCLK,INPUT); pinMode(PIN_SPI_MOSI,INPUT); pinMode(PIN_SPI_MISO,INPUT);
+    lisyId=0; outputs=false; blink=false;
+    strncpy(busmode,"normal",sizeof(busmode)-1); busmode[sizeof(busmode)-1]=0;
+    memset(sw,0,sizeof(sw));
+    Serial.println("[diag] bus released -> Hi-Z (FPGA owns SPI)");
+    sendInfo(nullptr); sendArr("sw",sw,8,nullptr); sendStatus();
+  }
+  void busAcquire(){
+    SPI.begin(PIN_SPI_SCLK,PIN_SPI_MISO,PIN_SPI_MOSI,-1);   // shared bus, no hardware CS
+    busOwned=true;
+    lisyId = bridgeRead(REG_ID);                            // 0x80 if lisyctrl answers
+    uint8_t st = bridgeRead(REG_STATUS);                    // b0 active,b1 wd,b2 is80B
+    is80B = (st&0x04)!=0; wd_tripped=(st&0x02)!=0;
+    bridgeWrite(REG_CTRL,0x00);                             // outputs OFF (safe on entry)
+    outputs=false; blink=false;
+    memset(lamps,0,sizeof(lamps)); memset(sw,0,sizeof(sw));
+    strncpy(busmode,(lisyId==0x80)?"diag":"bus?",sizeof(busmode)-1); busmode[sizeof(busmode)-1]=0;
+    Serial.printf("[diag] bus acquired: lisy ID=0x%02X status=0x%02X\n",lisyId,st);
+    sendInfo(nullptr); sendArr("lamps",lamps,6,nullptr); sendArr("sw",sw,8,nullptr); sendStatus();
+  }
 }
 
-void diag::begin() {}
+void diag::begin() {
+  pinMode(PIN_FPGA_DEBUG, INPUT_PULLDOWN);     // FPGA drives it; pulldown = safe when FPGA unconfigured
+  pinMode(PIN_SPI_SCLK, INPUT);                // Group-A stays Hi-Z until the bus is granted
+  pinMode(PIN_SPI_MOSI, INPUT);
+  pinMode(PIN_SPI_MISO, INPUT);
+}
 void diag::attach(AsyncWebSocket *ws){ g_ws = ws; }
 void diag::setInfo(const char*f,uint32_t id,const char*m,const char*i){
   strncpy(fw,f,sizeof(fw)-1); fw[sizeof(fw)-1]=0;
@@ -78,6 +132,7 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
   if(!strcmp(cmd,"hello")) { onConnect(c); }
 
   else if(!strcmp(cmd,"outputs")) {
+    if(!busOwned) return;                       // can only arm outputs while we own the bus
     outputs = (int)d["v"]!=0;
     bridgeWrite(REG_CTRL, (outputs?0x01:0x00) | (blink?0x02:0x00));   // lisyctrl CTRL
     if(!outputs){ memset(lamps,0,6); memset(sw,0,8); sendArr("lamps",lamps,6,nullptr); sendArr("sw",sw,8,nullptr); }
@@ -106,7 +161,8 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
   else if(!strcmp(cmd,"sound")) {
     if(!outputs) return; int n=d["n"]|0;
     if(n>=0&&n<32){ bool on=!((snd[n>>3]>>(n&7))&1); memset(snd,0,4); if(on) snd[n>>3]|=(1<<(n&7)); }
-    bridgeWrite(REG_U5, 0); // TODO: sound code via U6_PA on lisyctrl
+    // TODO: System 80 sound = 5-bit code on U6_PA; needs a dedicated lisyctrl sound
+    // register (none yet). Track UI state for now; add REG_SOUND in lisyctrl.vhd.
     sendArr("sound",snd,4,nullptr);
   }
   else if(!strcmp(cmd,"disp")) {
@@ -121,12 +177,21 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
 }
 
 void diag::tick(){
+  // bus arbitration: acquire/release following the FPGA Debug handshake (lisy_active)
+  bool dbg = digitalRead(PIN_FPGA_DEBUG)==HIGH;
+  if(dbg!=busOwned){ if(++dbgConfirm>=3){ dbgConfirm=0; if(dbg) busAcquire(); else busRelease(); } }
+  else dbgConfirm=0;
+
   uint32_t now=millis();
-  if(now-lastTick<40) return; lastTick=now;            // ~25 Hz
-  // MOCK: keep the switch grid alive in control mode.
-  // REAL: read lisyctrl SW_ROW (0x10..0x17) over SPI and broadcast on change.
-  if(outputs && now-lastSw>120){
-    uint32_t r=prng(); sw[(r>>3)&7]^=(1<<((r>>8)&7));
-    sendArr("sw",sw,8,nullptr); lastSw=now;
-  }
+  if(now-lastTick<40) return; lastTick=now;              // ~25 Hz
+  if(!busOwned) return;
+
+  // real switch scan: read the 8 strobe rows, broadcast on change
+  bool changed=false;
+  for(int s=0;s<8;s++){ uint8_t v=bridgeRead(REG_SW_ROW0+s); if(v!=sw[s]){ sw[s]=v; changed=true; } }
+  if(changed) sendArr("sw",sw,8,nullptr);
+
+  // watchdog flag (STATUS b1)
+  bool wd=(bridgeRead(REG_STATUS)&0x02)!=0;
+  if(wd!=wd_tripped){ wd_tripped=wd; sendStatus(); }
 }

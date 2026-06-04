@@ -9,7 +9,7 @@
 // ============================================================================
 
 #define FW_NAME    "GottFA80-PLuS ESP32-S3 companion"
-#define FW_VERSION "0.2.0"
+#define FW_VERSION "0.3.0"
 #define MDNS_HOST  "gottfa"               // -> http://gottfa.local/
 
 // ---- WiFi -------------------------------------------------------------------
