@@ -14,6 +14,7 @@ int Mixer::trigger(FillFn fill, void* ctx, uint8_t gain) {
 
 void Mixer::stop(int id)    { if (id >= 0 && id < MAX_VOICES) v_[id].active = false; }
 void Mixer::stopAll()       { for (auto& vo : v_) vo.active = false; }
+bool Mixer::active(int id) const { return (id >= 0 && id < MAX_VOICES) && v_[id].active; }
 int  Mixer::activeCount() const { int c = 0; for (auto& vo : v_) if (vo.active) c++; return c; }
 
 void Mixer::mix(int16_t* out, size_t frames) {

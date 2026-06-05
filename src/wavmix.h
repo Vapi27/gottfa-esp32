@@ -34,6 +34,7 @@ public:
   int  trigger(FillFn fill, void* ctx, uint8_t gain = 255);
   void stop(int id);
   void stopAll();
+  bool active(int id) const;           // is voice id still playing?
   int  activeCount() const;
   // mix `frames` stereo frames into out[] (2*frames interleaved samples), saturating.
   void mix(int16_t* out, size_t frames);

@@ -3,6 +3,7 @@
 #include <SPI.h>
 #include "diag.h"
 #include "board_config.h"
+#include "wavplayer.h"
 
 // ===========================================================================
 //  LISYcontrol backend.  Browser <--WebSocket(JSON)--> here <--SPI--> lisyctrl.
@@ -177,6 +178,11 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
     if(n>=0&&n<32){ bool on=!((snd[n>>3]>>(n&7))&1); memset(snd,0,4);
       if(on){ snd[n>>3]|=(1<<(n&7)); bridgeWrite(REG_SOUND,(uint8_t)n); } }   // play via gosof80
     sendArr("sound",snd,4,nullptr);
+  }
+  else if(!strcmp(cmd,"snd")) {        // ESP WAV player test (S3 sound tier): {c:'snd',n:5}
+#ifndef BOARD_C3
+    wavplayer::play(d["n"]|0);
+#endif
   }
   else if(!strcmp(cmd,"disp")) {
     if(!outputs) return; Serial.printf("[diag] disp %d='%s'\n",(int)(d["p"]|0),(const char*)(d["txt"]|""));

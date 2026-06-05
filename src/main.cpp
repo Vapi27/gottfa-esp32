@@ -3,6 +3,7 @@
 #include "board_config.h"
 #include "jtag.h"
 #include "net.h"
+#include "wavplayer.h"
 
 // In NORMAL mode the FPGA is master of the shared SD/EEPROM SPI bus, so the ESP
 // must present Hi-Z on those lines until it is explicitly granted the bus.
@@ -33,6 +34,9 @@ void setup() {
   netSetFpgaIdcode(id);
 
   netBegin();
+#ifndef BOARD_C3
+  wavplayer::begin();          // SD + I2S polyphonic WAV sound (S3 sound tier)
+#endif
   Serial.println("[boot] ready.");
 }
 

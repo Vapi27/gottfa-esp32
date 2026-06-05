@@ -1,8 +1,9 @@
-// host_wav_test.cpp — host unit test for wavmix (STEREO) + wavfile. No ESP/hardware.
+// host_wav_test.cpp — host unit test for wavmix (STEREO) + wavfile + wavsrc. No HW.
 // Build & run on the container:
-//   g++ -std=c++17 -Isrc tools/host_wav_test.cpp src/wavmix.cpp src/wavfile.cpp -o /tmp/wt && /tmp/wt
+//   g++ -std=c++17 -Isrc tools/host_wav_test.cpp src/wavmix.cpp src/wavfile.cpp src/wavsrc.cpp -o /tmp/wt && /tmp/wt
 #include "wavmix.h"
 #include "wavfile.h"
+#include "wavsrc.h"
 #include <cstdio>
 #include <cstring>
 
@@ -11,6 +12,13 @@ struct Tone { int16_t l, r; size_t left; };
 static size_t fill_tone(void* c, int16_t* d, size_t frames) {
   Tone* s = (Tone*)c; size_t k = frames < s->left ? frames : s->left;
   for (size_t i = 0; i < k; i++) { d[2*i] = s->l; d[2*i+1] = s->r; } s->left -= k; return k;
+}
+
+// memory byte reader for wavsrc (stands in for an SD file)
+struct MemRd { const uint8_t* p; size_t len, pos; };
+static size_t mem_read(void* c, uint8_t* d, size_t n) {
+  MemRd* m = (MemRd*)c; size_t k = n; if (k > m->len - m->pos) k = m->len - m->pos;
+  for (size_t i = 0; i < k; i++) d[i] = m->p[m->pos + i]; m->pos += k; return k;
 }
 
 static int fails = 0;
@@ -70,6 +78,37 @@ int main() {
   uint8_t h2[44]; memcpy(h2, h, 44); h2[22] = 2;   // 2 channels
   WavInfo w2 = wav_parse(h2, 44);
   CHECK(w2.ok && w2.channels == 2, "stereo WAV header parsed");
+
+  // 8) wavsrc: mono PCM16 -> stereo frames (L=R) + EOF (samples 100,200,300)
+  {
+    uint8_t mono[] = {100,0, 200,0, 0x2C,0x01};
+    MemRd mr{mono, sizeof(mono), 0};
+    wavsrc::Source ws; wavsrc::init(ws, mem_read, &mr, 1);
+    int16_t fr[8 * 2];
+    size_t got = wavsrc::fill(&ws, fr, 8);
+    CHECK(got == 3 && fr[0] == 100 && fr[1] == 100 && fr[4] == 300 && fr[5] == 300,
+          "wavsrc mono -> stereo upmix + EOF");
+  }
+  // 9) wavsrc: stereo PCM16 passthrough (L=1000, R=-1000)
+  {
+    uint8_t st[] = {0xE8,0x03, 0x18,0xFC};
+    MemRd mr{st, sizeof(st), 0};
+    wavsrc::Source ws; wavsrc::init(ws, mem_read, &mr, 2);
+    int16_t fr[4 * 2];
+    size_t got = wavsrc::fill(&ws, fr, 4);
+    CHECK(got == 1 && fr[0] == 1000 && fr[1] == -1000, "wavsrc stereo passthrough");
+  }
+  // 10) wavsrc drives a mixer voice end-to-end (mono 10,20,30,40 then ends)
+  {
+    uint8_t mono[] = {10,0, 20,0, 30,0, 40,0};
+    MemRd mr{mono, sizeof(mono), 0};
+    wavsrc::Source ws; wavsrc::init(ws, mem_read, &mr, 1);
+    wavmix::Mixer mx; mx.reset();
+    mx.trigger(wavsrc::fill, &ws);
+    int16_t o[8 * 2]; mx.mix(o, 8);
+    CHECK(o[0] == 10 && o[6] == 40 && o[8] == 0 && mx.activeCount() == 0,
+          "wavsrc -> mixer voice, plays then frees");
+  }
 
   printf(fails ? "\n=== %d FAIL ===\n" : "\n===== WAVMIX STEREO TESTS PASSED =====\n", fails);
   return fails ? 1 : 0;

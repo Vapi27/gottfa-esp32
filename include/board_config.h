@@ -54,6 +54,16 @@
 #define PIN_JTAG_TDI     6
 #define PIN_JTAG_TDO     7
 #define PIN_COIL_SENSE   1   // ADC1_CH0 — optional coil current-sense input
+// Sound tier (S3): I2S DAC (PCM5102A) -> +12V stereo amp (PAM8610), + a dedicated SD
+// for the WAV sets. Pins are free S3 GPIOs (verify vs your exact module/wiring).
+#define AUDIO_RATE     44100
+#define PIN_I2S_BCK      16
+#define PIN_I2S_WS       17
+#define PIN_I2S_DOUT     18
+#define PIN_SD_SCK       38
+#define PIN_SD_MISO      39
+#define PIN_SD_MOSI      40
+#define PIN_SD_CS        41
 #endif
 
 // ---- Coil current sense (OPTIONAL — needs a shunt; default OFF) -------------
