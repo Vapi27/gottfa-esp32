@@ -4,6 +4,7 @@
 #include "diag.h"
 #include "board_config.h"
 #include "wavplayer.h"
+#include "fpgalink.h"
 
 // ===========================================================================
 //  LISYcontrol backend.  Browser <--WebSocket(JSON)--> here <--SPI--> lisyctrl.
@@ -110,7 +111,7 @@ namespace {
 }
 
 void diag::begin() {
-  pinMode(PIN_FPGA_DEBUG, INPUT_PULLDOWN);     // FPGA drives it; pulldown = safe when FPGA unconfigured
+  // the FPGA Debug pin is now the fpgalink UART (diag-mode token + sound) -> fpgalink owns it
   pinMode(PIN_SPI_SCLK, INPUT);                // Group-A stays Hi-Z until the bus is granted
   pinMode(PIN_SPI_MOSI, INPUT);
   pinMode(PIN_SPI_MISO, INPUT);
@@ -196,8 +197,9 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
 }
 
 void diag::tick(){
-  // bus arbitration: acquire/release following the FPGA Debug handshake (lisy_active)
-  bool dbg = digitalRead(PIN_FPGA_DEBUG)==HIGH;
+  // bus arbitration: acquire/release following the FPGA diag-mode token on the link UART
+  // (fpgalink), which replaces the old Debug level. diag and gameplay sound never overlap.
+  bool dbg = fpgalink::diagActive();
   if(dbg!=busOwned){ if(++dbgConfirm>=3){ dbgConfirm=0; if(dbg) busAcquire(); else busRelease(); } }
   else dbgConfirm=0;
 

@@ -9,7 +9,7 @@
 // ============================================================================
 
 #define FW_NAME    "GottFA80-PLuS ESP32-S3 companion"
-#define FW_VERSION "0.4.0"
+#define FW_VERSION "0.5.0"
 #define MDNS_HOST  "gottfa"               // -> http://gottfa.local/
 
 // ---- WiFi -------------------------------------------------------------------
@@ -35,7 +35,7 @@
 #define PIN_SPI_MISO     5
 #define PIN_SPI_CS_SD    7
 #define PIN_FPGA_RESET  10
-#define PIN_FPGA_DEBUG   3
+#define PIN_FPGA_LINK    3   // UART RX from FPGA Debug pin: diag-mode token
 #define PIN_JTAG_TCK     0
 #define PIN_JTAG_TMS     1
 #define PIN_JTAG_TDI    20
@@ -48,23 +48,24 @@
 #define PIN_SPI_MISO    13
 #define PIN_SPI_CS_SD   10
 #define PIN_FPGA_RESET  14
-#define PIN_FPGA_DEBUG  15
 #define PIN_JTAG_TCK     4
 #define PIN_JTAG_TMS     5
 #define PIN_JTAG_TDI     6
 #define PIN_JTAG_TDO     7
 #define PIN_COIL_SENSE   1   // ADC1_CH0 — optional coil current-sense input
-// Sound tier (S3): I2S DAC (PCM5102A) -> +12V stereo amp (PAM8610), + a dedicated SD
-// for the WAV sets. Pins are free S3 GPIOs (verify vs your exact module/wiring).
+// Sound tier (S3): MCP4921 12-bit SPI DAC (MONO) -> DAC_R (Audio1 socket pin 4) ->
+// on-board TDA7267 (+12 V mono amp) -> speaker. Mirrors Ralf's GOSOWAV. A dedicated
+// SD holds the WAV sets (the board SD is FPGA-owned). All 3.3 V.
+// MCP4921: /LDAC tied to GND on the board (output updates on /CS rising edge).
 #define AUDIO_RATE     44100
-#define PIN_I2S_BCK      16
-#define PIN_I2S_WS       17
-#define PIN_I2S_DOUT     18
+#define PIN_DAC_SCK      16   // MCP4921 SCK
+#define PIN_DAC_SDI      17   // MCP4921 SDI  (ESP MOSI)
+#define PIN_DAC_CS       18   // MCP4921 /CS  (hardware-framed per sample)
 #define PIN_SD_SCK       38
 #define PIN_SD_MISO      39
 #define PIN_SD_MOSI      40
 #define PIN_SD_CS        41
-#define PIN_SOUNDLINK_RX  8   // UART RX from the FPGA sound_link (live sound# / game#)
+#define PIN_FPGA_LINK     8   // UART RX from FPGA Debug pin (K2): diag-mode token + sound#/game#
 #endif
 
 // ---- Coil current sense (OPTIONAL — needs a shunt; default OFF) -------------

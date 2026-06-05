@@ -1,5 +1,11 @@
 // wavplayer.cpp — see wavplayer.h. ESP32-S3 sound tier. Not built on C3.
-// I2S via the legacy driver/i2s.h API (Arduino-ESP32 2.0.x / IDF 4.4).
+//
+// Output: MCP4921 12-bit SPI DAC (mono). The MCP4921 has no clock of its own and
+// latches one 16-bit word per /CS frame, so samples must be clocked out at the audio
+// rate. We dedicate core 0 to a cycle-paced "dac" task that pops a lock-free ring and
+// writes one framed SPI word per sample (legal Arduino SPI — no ISR/flash hazard).
+// The "mix" task (core 1) owns the mixer + SD, streams/mixes WAVs, down-mixes to mono
+// 12-bit, and fills the ring in blocks. Ring is single-producer / single-consumer.
 // (C) 2026 Valere Pilpil / Pstore. Original implementation.
 #ifndef BOARD_C3
 #include "wavplayer.h"
@@ -11,23 +17,35 @@
 #include <SPI.h>
 #include <SD.h>
 #include <string.h>
-#include "driver/i2s.h"
+#include <atomic>
 #include "esp_task_wdt.h"
 
 namespace {
-  constexpr i2s_port_t I2S_PORT = I2S_NUM_0;
   constexpr int RATE   = AUDIO_RATE;
-  constexpr int FRAMES = 256;                 // stereo frames per mix block
+  constexpr int FRAMES = 256;                  // stereo frames mixed per block
 
-  wavmix::Mixer mixer;                         // owned solely by the audio task
-  SPIClass      sdspi(HSPI);                   // dedicated SPI bus for the sound SD
-  char          theme[24] = "orgsnd";          // owned solely by the audio task
+  // MCP4921 command nibble (bits 15..12): DAC-A, unbuffered Vref, 1x gain, active.
+  // The low 12 bits carry the sample. Output = Vref * D / 4096.
+  constexpr uint16_t DAC_CFG = 0x3000;
+  constexpr uint16_t DAC_MID = 0x0800;         // mid-scale = silence (no DC step)
+
+  // Lock-free SPSC ring of mono 12-bit samples (power-of-two size). ~93 ms @ 44.1 kHz
+  // absorbs SD-read latency spikes, mirroring the old 16 x 256-frame I2S DMA reserve.
+  constexpr uint32_t RING = 4096;
+  uint16_t              ringBuf[RING];
+  std::atomic<uint32_t> rHead{0};              // producer: mix task
+  std::atomic<uint32_t> rTail{0};              // consumer: dac task
+
+  wavmix::Mixer mixer;                          // owned solely by the mix task
+  SPIClass      sdspi(HSPI);                    // dedicated SPI bus for the sound SD
+  SPIClass      dacspi(FSPI);                   // dedicated SPI bus for the MCP4921
+  char          theme[24] = "orgsnd";          // owned solely by the mix task
   volatile bool g_ready = false;
 
   struct Slot { File f; wavsrc::Source src; int vid; bool used; };
   Slot slot[wavmix::MAX_VOICES];
 
-  // one queued request: a sound to play, or a theme change (audio task owns 'theme')
+  // one queued request: a sound to play, or a theme change (mix task owns 'theme')
   struct Req { uint8_t type; int sound; char theme[24]; };   // type 0=play, 1=set-theme
   QueueHandle_t reqQ = nullptr;
 
@@ -91,43 +109,45 @@ namespace {
     else { char p[64]; snprintf(p, sizeof(p), "/%s/%d.wav", theme, r.sound); startVoice(p); }
   }
 
-  void audioTask(void*) {
+  // --- core 1: mixer + SD owner; fills the ring in whole blocks ---------------
+  void mixTask(void*) {
     static int16_t buf[FRAMES * 2];
-    esp_task_wdt_add(nullptr);                                       // feed the WDT from our progress
+    esp_task_wdt_add(nullptr);                                      // catch an SD hang
     Req req;
-    size_t written;
     for (;;) {
-      if (xQueueReceive(reqQ, &req, 0) == pdTRUE) handleReq(req);    // at most one SD op per pass
-      mixer.mix(buf, FRAMES);
-      i2s_write(I2S_PORT, buf, sizeof(buf), &written, portMAX_DELAY);
-      esp_task_wdt_reset();
-      for (int i = 0; i < wavmix::MAX_VOICES; i++)                    // reap finished voices
+      if (xQueueReceive(reqQ, &req, 0) == pdTRUE) handleReq(req);   // at most one SD op per pass
+      uint32_t h    = rHead.load(std::memory_order_relaxed);
+      uint32_t t    = rTail.load(std::memory_order_acquire);
+      uint32_t freeN = RING - 1 - (h - t);
+      if (freeN >= (uint32_t)FRAMES) {
+        mixer.mix(buf, FRAMES);                                     // interleaved L/R int16
+        for (int i = 0; i < FRAMES; i++) {
+          int32_t mono = ((int32_t)buf[2 * i] + buf[2 * i + 1]) >> 1;     // down-mix to mono
+          ringBuf[(h + i) & (RING - 1)] = (uint16_t)((mono + 32768) >> 4); // -> 0..4095
+        }
+        rHead.store(h + FRAMES, std::memory_order_release);
+      } else {
+        vTaskDelay(1);                                              // ring full: let dac drain
+      }
+      for (int i = 0; i < wavmix::MAX_VOICES; i++)                  // reap finished voices
         if (slot[i].used && !mixer.active(slot[i].vid)) { slot[i].f.close(); slot[i].used = false; }
+      esp_task_wdt_reset();
     }
   }
 
-  bool i2sInit() {
-    i2s_config_t cfg = {};
-    cfg.mode                 = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
-    cfg.sample_rate          = RATE;
-    cfg.bits_per_sample      = I2S_BITS_PER_SAMPLE_16BIT;
-    cfg.channel_format       = I2S_CHANNEL_FMT_RIGHT_LEFT;   // stereo
-    cfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
-    cfg.intr_alloc_flags     = 0;
-    cfg.dma_buf_count        = 16;                           // 16 x 256 frames ~= 93 ms reserve
-    cfg.dma_buf_len          = FRAMES;
-    cfg.use_apll             = false;
-    cfg.tx_desc_auto_clear   = true;
-    if (i2s_driver_install(I2S_PORT, &cfg, 0, nullptr) != ESP_OK) return false;
-    i2s_pin_config_t pins = {};
-    pins.mck_io_num   = I2S_PIN_NO_CHANGE;
-    pins.bck_io_num   = PIN_I2S_BCK;
-    pins.ws_io_num    = PIN_I2S_WS;
-    pins.data_out_num = PIN_I2S_DOUT;
-    pins.data_in_num  = I2S_PIN_NO_CHANGE;
-    if (i2s_set_pin(I2S_PORT, &pins) != ESP_OK) return false;
-    i2s_zero_dma_buffer(I2S_PORT);
-    return true;
+  // --- core 0: cycle-paced DAC clock; one framed SPI word per sample ----------
+  void dacTask(void*) {
+    const uint32_t cyc = getCpuFrequencyMhz() * 1000000UL / RATE;   // CPU cycles per sample
+    uint32_t next = ESP.getCycleCount();
+    for (;;) {
+      next += cyc;
+      while ((int32_t)(ESP.getCycleCount() - next) < 0) { }         // spin to the next tick
+      uint32_t t = rTail.load(std::memory_order_relaxed);
+      uint32_t h = rHead.load(std::memory_order_acquire);
+      uint16_t s = DAC_MID;
+      if (h != t) { s = ringBuf[t & (RING - 1)]; rTail.store(t + 1, std::memory_order_release); }
+      dacspi.transfer16(DAC_CFG | (s & 0x0FFF));                    // /CS hardware-framed
+    }
   }
 }
 
@@ -136,14 +156,27 @@ namespace wavplayer {
 bool begin() {
   reqQ = xQueueCreate(8, sizeof(Req));
   if (!reqQ) return false;
+
   sdspi.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
   if (!SD.begin(PIN_SD_CS, sdspi, 20000000)) { log_e("[snd] SD mount failed"); return false; }  // 20 MHz
-  if (!i2sInit())                            { log_e("[snd] I2S init failed");  return false; }
+
+  // MCP4921 on a dedicated bus; hardware CS frames each 16-bit word. MCP4921 takes
+  // up to 20 MHz SCK -> one sample ~0.8 us, far inside the 22.7 us sample period.
+  dacspi.begin(PIN_DAC_SCK, -1, PIN_DAC_SDI, PIN_DAC_CS);
+  dacspi.setHwCs(true);
+  dacspi.beginTransaction(SPISettings(20000000, MSBFIRST, SPI_MODE0));
+
   mixer.reset();
-  // audio task on core 0 (the Arduino loop / net run on core 1); 8 KB stack for the SD/FATFS depth
-  xTaskCreatePinnedToCore(audioTask, "audio", 8192, nullptr, 6, nullptr, 0);
+  rHead.store(0); rTail.store(0);
+
+  // core 0 is dedicated to clocking the DAC (busy-loop) -> drop its idle WDT watcher.
+  disableCore0WDT();
+  xTaskCreatePinnedToCore(dacTask, "dac", 2048, nullptr, configMAX_PRIORITIES - 1, nullptr, 0);
+  // mixer + SD on core 1 (alongside the Arduino loop / net); 8 KB stack for FATFS depth
+  xTaskCreatePinnedToCore(mixTask, "mix", 8192, nullptr, 3, nullptr, 1);
+
   g_ready = true;
-  log_i("[snd] wavplayer ready (%d Hz stereo)", RATE);
+  log_i("[snd] wavplayer ready (MCP4921, %d Hz mono)", RATE);
   return true;
 }
 

@@ -4,7 +4,7 @@
 #include "jtag.h"
 #include "net.h"
 #include "wavplayer.h"
-#include "soundlink.h"
+#include "fpgalink.h"
 
 // In NORMAL mode the FPGA is master of the shared SD/EEPROM SPI bus, so the ESP
 // must present Hi-Z on those lines until it is explicitly granted the bus.
@@ -13,7 +13,6 @@ static void idleGroupA() {
   pinMode(PIN_SPI_MOSI,   INPUT);
   pinMode(PIN_SPI_MISO,   INPUT);
   pinMode(PIN_SPI_CS_SD,  INPUT);
-  pinMode(PIN_FPGA_DEBUG, INPUT);
   pinMode(PIN_FPGA_RESET, INPUT);   // open-drain released (board pull-up holds high)
 }
 
@@ -36,16 +35,14 @@ void setup() {
 
   netBegin();
 #ifndef BOARD_C3
-  wavplayer::begin();          // SD + I2S polyphonic WAV sound (S3 sound tier)
-  soundlink::begin();          // UART from the FPGA: live sound# / game#
+  wavplayer::begin();          // SD + MCP4921 polyphonic WAV sound (S3 sound tier)
 #endif
+  fpgalink::begin();           // UART from the FPGA Debug pin: diag-mode token (+ sound on S3)
   Serial.println("[boot] ready.");
 }
 
 void loop() {
+  fpgalink::poll();            // refresh diag-mode (+ S3: play sounds) before diag::tick reads it
   netLoop();
-#ifndef BOARD_C3
-  soundlink::poll();
-#endif
   delay(2);
 }
