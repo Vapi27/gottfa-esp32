@@ -18,7 +18,7 @@ bool Mixer::active(int id) const { return (id >= 0 && id < MAX_VOICES) && v_[id]
 int  Mixer::activeCount() const { int c = 0; for (auto& vo : v_) if (vo.active) c++; return c; }
 
 void Mixer::mix(int16_t* out, size_t frames) {
-  int32_t acc[BLOCK * 2];                 // interleaved L,R accumulator
+  int32_t* acc = acc_;                    // member buffer (interleaved L,R) -> off the stack
   size_t done = 0;
   while (done < frames) {
     size_t blk = frames - done; if (blk > (size_t)BLOCK) blk = BLOCK;

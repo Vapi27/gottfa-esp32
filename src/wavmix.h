@@ -42,6 +42,7 @@ private:
   struct Voice { FillFn fill; void* ctx; uint8_t gain; bool active; };
   Voice   v_[MAX_VOICES] = {};
   int16_t tmp_[BLOCK * 2];             // per-voice stereo scratch (L,R interleaved)
+  int32_t acc_[BLOCK * 2];             // mix accumulator (member -> kept off the audio-task stack)
 };
 
 } // namespace wavmix

@@ -20,7 +20,7 @@ WavInfo wav_parse(const uint8_t* p, size_t n) {
     } else if (tag(ck, "data")) {
       w.dataOffset = (uint32_t)(off + 8);
       w.dataLen    = len;
-      w.ok = (w.format == 1 && w.channels >= 1 && w.bits == 16);  // prototype: PCM16
+      w.ok = (w.format == 1 && (w.channels == 1 || w.channels == 2) && w.bits == 16);  // PCM16 mono/stereo only
       return w;
     }
     off += 8 + len + (len & 1);          // chunks are word-aligned
