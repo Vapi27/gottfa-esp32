@@ -9,7 +9,7 @@
 // ============================================================================
 
 #define FW_NAME    "GottFA80-PLuS ESP32-S3 companion"
-#define FW_VERSION "0.3.0"
+#define FW_VERSION "0.4.0"
 #define MDNS_HOST  "gottfa"               // -> http://gottfa.local/
 
 // ---- WiFi -------------------------------------------------------------------
@@ -40,6 +40,7 @@
 #define PIN_JTAG_TMS     1
 #define PIN_JTAG_TDI    20
 #define PIN_JTAG_TDO    21
+#define PIN_COIL_SENSE   2   // ADC1_CH2 — optional coil current-sense input
 #else
 // --- ESP32-S3 (DevKitC-1): avoid strapping(0,3,45,46), USB(19,20), UART0(43,44), flash/PSRAM(26-37) ---
 #define PIN_SPI_SCLK    12
@@ -52,7 +53,18 @@
 #define PIN_JTAG_TMS     5
 #define PIN_JTAG_TDI     6
 #define PIN_JTAG_TDO     7
+#define PIN_COIL_SENSE   1   // ADC1_CH0 — optional coil current-sense input
 #endif
+
+// ---- Coil current sense (OPTIONAL — needs a shunt; default OFF) -------------
+// True overcurrent/short detection needs a current sensor: fit a low-side shunt
+// on the solenoid common return -> amp/divider to 0-3.3V -> PIN_COIL_SENSE (ADC).
+// Then set COIL_SENSE_ENABLE 1 and calibrate the thresholds (12-bit ADC counts).
+// Without it the FPGA still protects coils (pulse clamp + cooldown + watchdog =>
+// COIL_FAULT reg 0x32); this just adds the electrical open/short read.
+#define COIL_SENSE_ENABLE   0
+#define COIL_SENSE_OPEN     200    // amp (peak-baseline) <= this during a pulse => open coil
+#define COIL_SENSE_SHORT    3500   // peak >= this => overcurrent / short
 
 // ---- FPGA identity (JTAG IDCODE) -------------------------------------------
 // Cyclone 10 LP 10CL006 reuses the Cyclone IV E die -> same IDCODE.

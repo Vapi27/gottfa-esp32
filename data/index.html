@@ -63,6 +63,8 @@
   .coil{background:var(--panel2);border:1px solid var(--line);border-radius:11px;padding:.6rem .4rem;text-align:center;cursor:pointer}
   .coil:active,.coil.fire{background:var(--accent);border-color:var(--accent);color:#04243a}
   .coil .n{font-size:1.05rem;font-weight:700}.coil .t{font-size:.62rem;color:var(--muted)}.coil.fire .t{color:#04243a}
+  .coil.cshort{background:#3a0d12;border-color:var(--bad);color:var(--bad)}
+  .coil.copen{background:#3a2a0d;border-color:var(--warn);color:var(--warn)}
   .snds{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
   .snd{aspect-ratio:1.4;border-radius:8px;background:var(--panel2);border:1px solid var(--line);
     color:var(--txt);font-size:.7rem;display:flex;align-items:center;justify-content:center;cursor:pointer;text-align:center;padding:2px;line-height:1}
@@ -176,6 +178,7 @@
       <div class="kv"><span class="k">Système</span><span id="i_sys">—</span></div>
       <div class="kv"><span class="k">Mode contrôle</span><span id="i_mode">—</span></div>
       <div class="kv"><span class="k">Watchdog bobines</span><span id="i_wd">—</span></div>
+      <div class="kv"><span class="k">Défaut bobine</span><span id="i_cf">—</span></div>
     </div>
   </section>
 </main>
@@ -271,6 +274,17 @@ function handle(m){
   else if(m.t==='dip'){for(let i=0;i<N_DIP;i++){st.dip[i]=(m.d[i>>3]>>(i&7))&1;const e=document.getElementById('dp'+i);if(e)e.checked=!!st.dip[i];}}
   else if(m.t==='names'){if(m.sw)st.names.sw=m.sw;if(m.lamp)st.names.lamp=m.lamp;if(m.coil)st.names.coil=m.coil;renderNames();}
   else if(m.t==='status'){setOutputs(!!m.outputs,true);i_wd.textContent=m.wd?'⚠ déclenché':'ok';}
+  else if(m.t==='coilfault'){
+    if(m.raw){ const r=m.clamp?'pulse écrêtée':m.refire?'tir trop rapproché':m.wd?'watchdog (bobine restée ON)':'défaut';
+      i_cf.textContent='bobine '+m.coil+' : '+r; toast('⚠ Bobine '+m.coil+' : '+r);
+      const e=document.getElementById('k'+m.coil); if(e){e.classList.add('cshort');setTimeout(()=>e.classList.remove('cshort'),2500);} }
+    else i_cf.textContent='—';
+  }
+  else if(m.t==='coilsense'){
+    const e=document.getElementById('k'+m.i), cls=m.v==='short'?'cshort':m.v==='open'?'copen':'';
+    if(e&&cls){e.classList.add(cls);setTimeout(()=>e.classList.remove(cls),2500);}
+    toast('Bobine '+m.i+' : '+(m.v==='short'?'COURT-CIRCUIT':m.v==='open'?'ouverte/absente':'ok')+' ('+m.adc+')');
+  }
 }
 
 /* ---------- demo / mock ---------- */

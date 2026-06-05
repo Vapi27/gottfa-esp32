@@ -22,8 +22,10 @@
 #define REG_LAMP0    0x20   // 0x20..0x25  48 lamp bits
 #define REG_COIL     0x30   // write coil# -> pulse
 #define REG_PULSE_MS 0x31
+#define REG_COIL_FAULT 0x32 // R: b0 clamp,b1 refire-blocked,b2 wd-with-coil; b7..4 coil#. W clears
 #define REG_SEG_A    0x40   // 0x40..0x42 display segments
 #define REG_U5       0x43
+#define REG_SOUND    0x44   // write System 80 sound code 0..31 -> play via gosof80
 
 namespace {
   AsyncWebSocket *g_ws = nullptr;
@@ -34,6 +36,7 @@ namespace {
   uint8_t sw[8]    = {0};        // 8 strobes x 8 returns (1=closed)
   uint8_t snd[4]   = {0};        // 32 sound bits (toggle)
   uint8_t dipv[4]  = {0};        // 32 dip bits
+  uint8_t coilFault= 0;          // last COIL_FAULT (0x32): b0 clamp,b1 refire,b2 wd; b7..4 coil#
 
   // info
   char fw[12]="?", idcode[12]="0x0", mode[12]="?", ip[20]="0.0.0.0";
@@ -83,7 +86,7 @@ namespace {
     if(busOwned) SPI.end();
     busOwned=false;
     pinMode(PIN_SPI_SCLK,INPUT); pinMode(PIN_SPI_MOSI,INPUT); pinMode(PIN_SPI_MISO,INPUT);
-    lisyId=0; outputs=false; blink=false;
+    lisyId=0; outputs=false; blink=false; coilFault=0;
     strncpy(busmode,"normal",sizeof(busmode)-1); busmode[sizeof(busmode)-1]=0;
     memset(sw,0,sizeof(sw));
     Serial.println("[diag] bus released -> Hi-Z (FPGA owns SPI)");
@@ -96,6 +99,7 @@ namespace {
     uint8_t st = bridgeRead(REG_STATUS);                    // b0 active,b1 wd,b2 is80B
     is80B = (st&0x04)!=0; wd_tripped=(st&0x02)!=0;
     bridgeWrite(REG_CTRL,0x00);                             // outputs OFF (safe on entry)
+    bridgeWrite(REG_COIL_FAULT,0x00); coilFault=0;          // clear any latched coil fault
     outputs=false; blink=false;
     memset(lamps,0,sizeof(lamps)); memset(sw,0,sizeof(sw));
     strncpy(busmode,(lisyId==0x80)?"diag":"bus?",sizeof(busmode)-1); busmode[sizeof(busmode)-1]=0;
@@ -157,12 +161,21 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
     if(!outputs) return; int i=d["i"]|0, ms=d["ms"]|60;
     bridgeWrite(REG_PULSE_MS, (uint8_t)ms); bridgeWrite(REG_COIL, (uint8_t)i);  // lisyctrl pulse
     Serial.printf("[diag] coil %d %dms\n", i, ms);
+#if COIL_SENSE_ENABLE
+    // optional electrical check: peak vs baseline on the shunt during the pulse
+    // (needs a current-sense shunt + amp on the solenoid return — see board_config.h)
+    int base=analogRead(PIN_COIL_SENSE), peak=base; uint32_t win=(ms<80?ms:80), t0=millis();
+    while(millis()-t0<win){ int v=analogRead(PIN_COIL_SENSE); if(v>peak)peak=v; }
+    int amp=peak-base; const char* vd=(peak>=COIL_SENSE_SHORT)?"short":(amp<=COIL_SENSE_OPEN)?"open":"ok";
+    JsonDocument cs; cs["t"]="coilsense"; cs["i"]=i; cs["adc"]=peak; cs["amp"]=amp; cs["v"]=vd;
+    String s; serializeJson(cs,s); txt(nullptr,s);
+    Serial.printf("[coil] sense i=%d peak=%d amp=%d -> %s\n", i, peak, amp, vd);
+#endif
   }
   else if(!strcmp(cmd,"sound")) {
     if(!outputs) return; int n=d["n"]|0;
-    if(n>=0&&n<32){ bool on=!((snd[n>>3]>>(n&7))&1); memset(snd,0,4); if(on) snd[n>>3]|=(1<<(n&7)); }
-    // TODO: System 80 sound = 5-bit code on U6_PA; needs a dedicated lisyctrl sound
-    // register (none yet). Track UI state for now; add REG_SOUND in lisyctrl.vhd.
+    if(n>=0&&n<32){ bool on=!((snd[n>>3]>>(n&7))&1); memset(snd,0,4);
+      if(on){ snd[n>>3]|=(1<<(n&7)); bridgeWrite(REG_SOUND,(uint8_t)n); } }   // play via gosof80
     sendArr("sound",snd,4,nullptr);
   }
   else if(!strcmp(cmd,"disp")) {
@@ -194,4 +207,13 @@ void diag::tick(){
   // watchdog flag (STATUS b1)
   bool wd=(bridgeRead(REG_STATUS)&0x02)!=0;
   if(wd!=wd_tripped){ wd_tripped=wd; sendStatus(); }
+
+  // coil-fault latch (0x32): report decoded fault when it changes
+  uint8_t cf=bridgeRead(REG_COIL_FAULT);
+  if(cf!=coilFault){ coilFault=cf;
+    JsonDocument fd; fd["t"]="coilfault"; fd["raw"]=cf; fd["coil"]=(cf>>4)&0x0F;
+    fd["clamp"]=(cf&1)?1:0; fd["refire"]=(cf&2)?1:0; fd["wd"]=(cf&4)?1:0;
+    String s; serializeJson(fd,s); txt(nullptr,s);
+    if(cf) Serial.printf("[coil] FAULT 0x%02X coil=%d\n", cf, (cf>>4)&0x0F);
+  }
 }
