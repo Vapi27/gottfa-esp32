@@ -64,6 +64,7 @@
 #define PIN_SD_MISO      39
 #define PIN_SD_MOSI      40
 #define PIN_SD_CS        41
+#define PIN_SOUNDLINK_RX  8   // UART RX from the FPGA sound_link (live sound# / game#)
 #endif
 
 // ---- Coil current sense (OPTIONAL — needs a shunt; default OFF) -------------
