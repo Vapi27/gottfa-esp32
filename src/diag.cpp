@@ -262,6 +262,7 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
       tourneyFpga=(bridgeRead(REG_CTRL2)&1)!=0; }                    // read back the latched value
     JsonDocument a; a["t"]="tfpga"; a["on"]=tourneyFpga?1:0; a["bus"]=busOwned?1:0;
     String s; serializeJson(a,s); txt(nullptr,s); }
+  else if(!strcmp(cmd,"t_arm"))    { tourney::arm(d["id"]|0); sendTourney(nullptr); }  // auto-time this player
   else if(!strcmp(cmd,"sndtheme")) {                                  // load a game's PSOWAV set
 #ifndef BOARD_C3
     const char* nm=d["name"]|""; if(nm[0]) wavplayer::setTheme(nm);
@@ -289,6 +290,17 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
 
 void diag::tick(){
   if(rebootAt && (int32_t)(millis()-rebootAt) > 0){ Serial.println("[sys] restarting"); delay(50); ESP.restart(); }
+
+  // tournament time-attack auto-timer: the FPGA game-state edge starts/stops the clock for the
+  // armed player (no manual start/stop). game_running comes on the link (0xF3/0xF2 -> fpgalink).
+  { static bool lastGr=false; bool gr=fpgalink::gameRunning();
+    if(gr!=lastGr){ lastGr=gr;
+      if(tourney::curMode()==1 && tourney::armed()>0){
+        if(gr){ tourney::startGame(tourney::armed(), millis());
+          JsonDocument a; a["t"]="timer"; a["id"]=tourney::activePlayer(); String s; serializeJson(a,s); txt(nullptr,s); }
+        else  { uint32_t sc=tourney::stopGame(millis());
+          JsonDocument a; a["t"]="timer"; a["id"]=0; a["score"]=sc; String s; serializeJson(a,s); txt(nullptr,s);
+          sendTourney(nullptr); } } } }
   // bus arbitration: acquire/release following the FPGA diag-mode token on the link UART
   // (fpgalink), which replaces the old Debug level. diag and gameplay sound never overlap.
   bool dbg = fpgalink::diagActive();

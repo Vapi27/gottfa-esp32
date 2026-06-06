@@ -16,6 +16,7 @@ namespace {
   uint32_t startPts = 1000000;   // time-attack: starting points
   uint32_t decayPS  = 10000;     // time-attack: points lost per second
   int activeId = 0; uint32_t startMs = 0;   // time-attack live timer (transient)
+  int armedId = 0;                          // player armed for FPGA-driven auto-timing
 
   uint32_t ptotal(const Player& p){ uint32_t t = 0; for (int i = 0; i < p.n; i++) t += p.score[i]; return t; }
   uint32_t pbest (const Player& p){ uint32_t b = 0; for (int i = 0; i < p.n; i++) if (p.score[i] > b) b = p.score[i]; return b; }
@@ -90,6 +91,9 @@ uint32_t stopGame(uint32_t nowMs){
 }
 bool gameActive(){ return activeId != 0; }
 int  activePlayer(){ return activeId; }
+void arm(int id){ armedId = find(id) ? id : 0; }
+int  armed(){ return armedId; }
+uint8_t curMode(){ return mode; }
 
 String json(){
   int idx[MAXP], n = 0;
@@ -102,6 +106,7 @@ String json(){
     o["games"] = p.n; o["last"] = p.n ? p.score[p.n - 1] : 0; }
   d["n"] = n;
   d["mode"] = mode; d["start"] = startPts; d["decay"] = decayPS; d["active"] = activeId;  // mode + live timer
+  d["armed"] = armedId;                                                                  // FPGA auto-timer armed player
   String s; serializeJson(d, s); return s;
 }
 

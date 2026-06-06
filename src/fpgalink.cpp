@@ -10,6 +10,7 @@
 namespace {
   HardwareSerial& port = Serial1;     // dedicated UART for the FPGA link (Debug pin)
   bool g_diag = false;                // last diag-mode token (touched only from poll())
+  bool g_gameRunning = false;         // last game-state token (0xF2/0xF3) — tournament auto-timer
 }
 
 namespace fpgalink {
@@ -24,6 +25,9 @@ void poll() {
     if ((b & 0xFE) == 0xF0) {                 // diag-mode token: 0xF0 normal / 0xF1 diag
       g_diag = (b & 0x01) != 0;
     }
+    else if ((b & 0xFE) == 0xF2) {            // game-state: 0xF2 over / 0xF3 running (tournament timer)
+      g_gameRunning = (b & 0x01) != 0;
+    }
 #ifndef BOARD_C3
     else if ((b & 0xE0) == 0x80) {            // sound command 0x80..0x9F
       wavplayer::play(b & 0x1F);
@@ -35,5 +39,6 @@ void poll() {
 }
 
 bool diagActive() { return g_diag; }
+bool gameRunning() { return g_gameRunning; }
 
 } // namespace fpgalink

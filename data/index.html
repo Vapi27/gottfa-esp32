@@ -289,9 +289,10 @@
         </div>
         <div class="row" id="taStartRow" style="margin-top:.7rem">
           <select id="taPlayer" style="flex:1"></select>
-          <button class="btn accent" onclick="tStartGame()">▶ Démarrer la partie</button>
+          <button class="btn" onclick="tStartGame()">▶ Manuel</button>
+          <button class="btn accent" onclick="tArm()">🎯 Auto</button>
         </div>
-        <div class="note">Démarre au lancement de la partie, « Game over » à la fin. Score = max(0, départ − perte × secondes).</div>
+        <div class="note"><b>Auto</b> = armé pour la prochaine partie ; le FPGA lance/arrête le chrono tout seul <span id="taArmed"></span>. <b>Manuel</b> = tu lances/arrêtes toi-même.</div>
       </div>
     </div>
     <div class="panel">
@@ -331,7 +332,7 @@ const N_LAMP=48, N_COIL=9, N_SND=32, N_DIP=32;
 const st={ws:null,connected:false,demo:false,outputs:false,is80B:false,blink:false,bus:'normal',lisy:'—',
   sw:Array(8).fill(0), lamps:Array(N_LAMP).fill(0), snd:Array(N_SND).fill(0), dip:Array(N_DIP).fill(0),
   ps:{ready:false,theme:'',mask:0,loop:0,voice:0,n:0,themes:[]}, games:[], tourney:[],
-  ta:{mode:0,start:1000000,decay:10000,running:0,t0:0,name:''}, tfpga:0, tfpgaBus:0,
+  ta:{mode:0,start:1000000,decay:10000,running:0,t0:0,name:''}, tfpga:0, tfpgaBus:0, armed:0,
   names:{sw:{},lamp:{},coil:{},snd:{}}};
 
 /* ---------- build ---------- */
@@ -450,6 +451,7 @@ function renderMode(){const t=st.ta;
   if(live)live.style.display=t.running?'block':'none';
   if(row)row.style.display=t.running?'none':'flex';
   const who=document.getElementById('taWho'); if(who)who.textContent=t.running?t.name:'';
+  const ar=document.getElementById('taArmed'); if(ar){const p=st.tourney.find(x=>x.id===st.armed);ar.textContent=p?('· armé : '+p.name):'';}
   taUpdate();}
 function taUpdate(){const el=document.getElementById('taScore');if(!el)return;
   let v=st.ta.start; if(st.ta.running)v=Math.max(0,st.ta.start-st.ta.decay*((Date.now()-st.ta.t0)/1000));
@@ -460,6 +462,7 @@ function stopTaTick(){if(taTimer){clearInterval(taTimer);taTimer=null;}}
 function tSetMode(m){send({c:'t_mode',mode:m,start:+document.getElementById('taStart').value||1000000,decay:+document.getElementById('taDecay').value||10000});}
 function tCfg(){send({c:'t_mode',mode:1,start:+document.getElementById('taStart').value||1000000,decay:+document.getElementById('taDecay').value||10000});}
 function tStartGame(){const id=+document.getElementById('taPlayer').value;if(id>0)send({c:'t_start',id});}
+function tArm(){const id=+document.getElementById('taPlayer').value;if(id>0)send({c:'t_arm',id});}
 function tStop(){send({c:'t_stop'});}
 function tFpga(on){send({c:'t_fpga',on:on?1:0});}
 function renderTfpga(){const cb=document.getElementById('tfpga'),st2=document.getElementById('tfpgaSt');
@@ -514,6 +517,7 @@ function handle(m){
   else if(m.t==='gamelist'){st.games=m.g||[];renderGames();}
   else if(m.t==='tourney'){st.tourney=m.players||[];
     if('mode'in m){st.ta.mode=m.mode;st.ta.start=m.start||1000000;st.ta.decay=m.decay||10000;}
+    if('armed'in m)st.armed=m.armed||0;
     renderTourney();renderMode();}
   else if(m.t==='tfpga'){st.tfpga=m.on?1:0;if('bus'in m)st.tfpgaBus=m.bus?1:0;renderTfpga();}
   else if(m.t==='timer'){
@@ -571,6 +575,7 @@ function demoTourney(o){
   if(o.c==='t_mode'){st.ta.mode=o.mode;st.ta.start=o.start;st.ta.decay=o.decay;renderMode();return;}
   if(o.c==='t_start'){const p=st.tourney.find(x=>x.id===o.id);if(p){st.ta.running=o.id;st.ta.t0=Date.now();st.ta.name=p.name;startTaTick();renderMode();}return;}
   if(o.c==='t_stop'){if(st.ta.running){const sc=Math.max(0,Math.round(st.ta.start-st.ta.decay*((Date.now()-st.ta.t0)/1000)));const p=st.tourney.find(x=>x.id===st.ta.running);if(p){p.total+=sc;p.games++;p.last=sc;if(sc>p.best)p.best=sc;}st.ta.running=0;stopTaTick();toast('Score : '+fmtScore(sc));}st.tourney.sort((a,b)=>b.total-a.total);renderTourney();renderMode();return;}
+  if(o.c==='t_arm'){st.armed=o.id;renderMode();toast('armé pour la prochaine partie');return;}
   if(o.c==='t_add')st.tourney.push({id:(st._tid=(st._tid||9)+1),name:o.name,total:0,best:0,games:0,last:0});
   else if(o.c==='t_del')st.tourney=st.tourney.filter(p=>p.id!==o.id);
   else if(o.c==='t_score'){const p=st.tourney.find(x=>x.id===o.id);if(p){p.total+=o.v;p.games++;p.last=o.v;if(o.v>p.best)p.best=o.v;}}

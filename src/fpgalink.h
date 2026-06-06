@@ -10,4 +10,5 @@ namespace fpgalink {
   void begin();        // open the UART (RX only) on PIN_FPGA_LINK
   void poll();         // drain the FIFO: update diag mode (+ S3: play sounds). Call from loop().
   bool diagActive();   // last diag-mode token (0xF1 -> true, 0xF0 -> false)
+  bool gameRunning();  // last game-state token (0xF3 -> true, 0xF2 -> false) — tournament timer
 }
