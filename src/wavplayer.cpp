@@ -4,8 +4,8 @@
 // framed SPI word per sample from a lock-free SPSC ring that the "mix"+SD task (core 1)
 // fills. The mix task owns the mixer + SD + the sound-set index (wavset): it scans the
 // theme folder, resolves a sound id (incl. random/sequential groups) to a file, applies
-// the pwavplayer-style attributes (loop / break / kill / soft-kill / quit / voice bus /
-// per-sound volume), streams the WAV into a mixer voice, mixes, down-mixes to mono 12-bit.
+// the PSOWAV attributes (loop / break / kill / soft-kill / quit / voice bus / per-sound
+// volume), streams the WAV into a mixer voice, mixes, down-mixes to mono 12-bit.
 // (C) 2026 Valere Pilpil / Pstore. Original implementation.
 #ifndef BOARD_C3
 #include "wavplayer.h"
@@ -41,6 +41,14 @@ namespace {
   SPIClass       dacspi(FSPI);
   char           theme[24] = "orgsnd";          // mix task only
   volatile bool  g_ready = false;
+  // cached status for the web UI (written by mix task, read for display elsewhere)
+  volatile uint32_t sndMask = 0;                  // bit i => sound id i present in the set
+  volatile uint32_t loopM = 0, voiceM = 0;        // bit i => sound i loops / is on the voice bus
+  volatile int   nSnd   = 0;                       // # sounds in the loaded set
+  char           themes[24][24];                   // SD-root game folders (cached at begin)
+  volatile int   nThemes = 0;
+  char           gameMap[64][24] = {{0}};          // /games.txt: FPGA game No -> romname/folder
+  volatile int   g_lastSound = -1;                 // last sound id played (OLED/status)
 
   struct Slot {
     File f; wavsrc::Source src;
@@ -156,6 +164,12 @@ namespace {
     }
     if (dir) dir.close();
     mixer.setMix(cfg.mix);
+    { uint32_t m = 0, lm = 0, vm = 0; for (int i = 0; i < sndset.nEntry; i++) {
+        const wavset::Entry& e = sndset.entry[i]; if (e.id < 0 || e.id >= 32) continue;
+        m |= (1u << e.id);
+        if (e.attr & wavset::A_LOOP)  lm |= (1u << e.id);
+        if (e.attr & wavset::A_VOICE) vm |= (1u << e.id); }            // cache set status for web UI
+      sndMask = m; loopM = lm; voiceM = vm; nSnd = sndset.nEntry; }
     log_i("[snd] theme '%s': %d sounds, %d groups", theme, sndset.nEntry, sndset.nGroup);
     for (int i = 0; i < sndset.nEntry; i++)               // autoplay init/background sounds
       if (sndset.entry[i].attr & wavset::A_INIT) startVoice(&sndset.entry[i]);
@@ -163,6 +177,7 @@ namespace {
 
   void handleReq(const Req& r) {
     if (r.type == 1) { loadTheme(r.theme); return; }
+    if (r.type == 2) { mixer.stopAll(); reapSlots(); return; }   // stop all voices (web UI)
     int id = sndset.pick(r.sound, esp_random());          // resolve random/sequential group
     const wavset::Entry* e = sndset.find(id);
     if (e) startVoice(e);
@@ -216,6 +231,23 @@ namespace {
     wavset::parseConfig(txt, cfg);
     log_i("[snd] config: mix=%d volv=%d vols=%d stheme=%s", cfg.mix, cfg.volv, cfg.vols, cfg.stheme);
   }
+
+  // /games.txt at SD root: lines "<No> <romname>" (# = comment). FPGA game-select No -> folder.
+  // No = GottFA80_PLuS gamelist index (manual Appendix A), as sent on the link (0x40|No).
+  void loadGames() {
+    for (int i = 0; i < 64; i++) gameMap[i][0] = 0;
+    File f = SD.open("/games.txt", FILE_READ);
+    if (!f) { log_i("[snd] no /games.txt (FPGA game-select uses raw number)"); return; }
+    char buf[2048]; size_t len = f.read((uint8_t*)buf, sizeof(buf) - 1); buf[len] = 0; f.close();
+    int n = 0; char* save = nullptr;
+    for (char* line = strtok_r(buf, "\n", &save); line; line = strtok_r(nullptr, "\n", &save)) {
+      if (line[0] == '#' || line[0] == '\r' || !line[0]) continue;
+      int no; char rom[24];
+      if (sscanf(line, "%d %23s", &no, rom) == 2 && no >= 0 && no < 64) {
+        strncpy(gameMap[no], rom, 23); gameMap[no][23] = 0; n++; }
+    }
+    log_i("[snd] games.txt: %d game mappings", n);
+  }
 }
 
 namespace wavplayer {
@@ -233,7 +265,20 @@ bool begin() {
 
   mixer.reset();
   rHead.store(0); rTail.store(0);
+
+  // cache the game folders on the SD root for the web UI (now, before the tasks touch SD)
+  nThemes = 0;
+  { File root = SD.open("/");
+    if (root && root.isDirectory())
+      for (File f = root.openNextFile(); f && nThemes < 24; f = root.openNextFile()) {
+        if (f.isDirectory()) { const char* nm = f.name(); const char* b = strrchr(nm, '/'); b = b ? b + 1 : nm;
+          if (b[0] != '.' && strcmp(b, "System Volume Information")) {
+            strncpy(themes[nThemes], b, 23); themes[nThemes][23] = 0; nThemes++; } }
+        f.close(); }
+    if (root) root.close(); }
+
   loadConfig();
+  loadGames();                                    // /games.txt FPGA game-select map
   loadTheme(cfg.stheme);                          // index + autoplay init sounds
 
   disableCore0WDT();                              // core 0 is the DAC busy-loop
@@ -254,6 +299,7 @@ void setTheme(const char* t) {
 
 bool play(int soundId) {
   if (!g_ready || !reqQ) return false;
+  g_lastSound = soundId;
   Req r; r.type = 0; r.sound = soundId; r.theme[0] = 0;
   bool ok = xQueueSend(reqQ, &r, 0) == pdTRUE;
   if (!ok) {
@@ -263,8 +309,27 @@ bool play(int soundId) {
   return ok;
 }
 
-void stopAll() { /* voices end naturally; kill via a 'k'-tagged sound or theme change */ }
+void stopAll() {
+  if (!g_ready || !reqQ) return;
+  Req r; r.type = 2; r.sound = 0; r.theme[0] = 0;
+  xQueueSend(reqQ, &r, 0);                         // mix task does mixer.stopAll()
+}
 bool ready()   { return g_ready; }
+
+// --- cached status for the web UI (benign cross-task reads, display only) ---
+const char* curTheme()        { return theme; }
+uint32_t    soundMask()       { return sndMask; }
+uint32_t    loopMask()        { return loopM; }
+uint32_t    voiceMask()       { return voiceM; }
+int         soundCount()      { return nSnd; }
+int         themeCount()      { return nThemes; }
+const char* themeName(int i)  { return (i >= 0 && i < nThemes) ? themes[i] : ""; }
+const char* gameRom(int no)   { return (no >= 0 && no < 64) ? gameMap[no] : ""; }
+int         lastSound()       { return g_lastSound; }
+void selectGame(int no) {                         // FPGA game No -> load that game's set
+  if (no < 0 || no >= 64 || !gameMap[no][0]) { log_w("[snd] game No %d not in games.txt", no); return; }
+  setTheme(gameMap[no]);
+}
 
 } // namespace wavplayer
 #endif // !BOARD_C3

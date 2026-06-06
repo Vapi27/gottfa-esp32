@@ -44,6 +44,9 @@
   .btn{background:var(--panel2);color:var(--txt);border:1px solid var(--line);border-radius:10px;
     padding:.5rem .8rem;font-size:.85rem;cursor:pointer;user-select:none}
   .btn:active{transform:scale(.97)}.btn.accent{border-color:var(--accent);color:var(--accent)}
+  .btn.danger{border-color:var(--bad);color:var(--bad)}
+  input[type=file]{color:var(--muted);font-size:.84rem;width:100%}
+  code{background:var(--panel2);padding:.08rem .35rem;border-radius:5px;font-size:.82em;color:var(--accent)}
   .disabled{opacity:.4;pointer-events:none}
   /* switch matrix: RED = closed (faithful to LISY) */
   .mat{display:grid;grid-template-columns:auto repeat(8,1fr);gap:5px}
@@ -70,7 +73,31 @@
     color:var(--txt);font-size:.7rem;display:flex;align-items:center;justify-content:center;cursor:pointer;text-align:center;padding:2px;line-height:1}
   .snd.on{background:var(--accent);border-color:var(--accent);color:#04243a;font-weight:700}
   input[type=range]{width:100%}
-  input[type=text],input[type=number]{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:.5rem;font-size:.9rem;width:100%;font-family:ui-monospace,monospace}
+  input[type=text],input[type=number],select{background:var(--panel2);border:1px solid var(--line);color:var(--txt);border-radius:8px;padding:.5rem;font-size:.9rem;width:100%;font-family:ui-monospace,monospace}
+  .snd{position:relative}
+  .snd.absent{opacity:.32;pointer-events:none}
+  .snd.play{background:var(--ok);border-color:var(--ok);color:#062b15;font-weight:700}
+  .snd.loop::after{content:"\21BB";position:absolute;top:0;right:3px;font-size:.62rem;opacity:.6}
+  .snd.voice::after{content:"\25CF";position:absolute;top:1px;right:3px;font-size:.5rem;color:var(--accent)}
+  .gl{display:grid;grid-template-columns:auto 1fr;gap:.15rem .6rem;font-size:.8rem;max-height:260px;overflow:auto}
+  .gl .n{color:var(--muted);font-variant-numeric:tabular-nums;text-align:right}
+  .gl .cur{color:var(--ok);font-weight:700}
+  .lbr{background:var(--panel2);border:1px solid var(--line);border-radius:10px;padding:.6rem .7rem;margin-bottom:.5rem}
+  .lbr.lead{border-color:var(--lamp);box-shadow:0 0 10px #ffd23f33}
+  .lbtop{display:flex;align-items:baseline;gap:.5rem}
+  .lbtop .rk{font-weight:700;color:var(--accent);font-size:1.1rem;min-width:1.6rem}
+  .lbr.lead .rk{color:var(--lamp)}
+  .lbtop .pn{font-weight:650;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lbtop .pt{font-variant-numeric:tabular-nums;font-weight:700}
+  .lbsub{font-size:.7rem;color:var(--muted);margin:.2rem 0 .45rem 2.1rem}
+  .ctl{display:flex;gap:.4rem}.ctl .tsin{flex:1}
+  .taLive{background:var(--panel2);border:1px solid var(--ok);border-radius:12px;padding:.9rem;margin:.6rem 0;text-align:center}
+  .taScore{font-size:2.6rem;font-weight:800;color:var(--ok);font-variant-numeric:tabular-nums;letter-spacing:1px;line-height:1.1}
+  .taScore.zero{color:var(--bad)}
+  .taWho{color:var(--muted);margin:.2rem 0 .7rem}
+  .modebtn.on{border-color:var(--accent);color:var(--accent);background:#0e2230}
+  .pill{font-size:.7rem;padding:.15rem .5rem;border-radius:20px;border:1px solid var(--line);color:var(--muted)}
+  .pill.on{background:var(--ok);border-color:var(--ok);color:#062b15}
   .kv{display:flex;justify-content:space-between;padding:.3rem 0;border-bottom:1px solid var(--line);font-size:.85rem}
   .kv .k{color:var(--muted)}.kv:last-child{border-bottom:0}
   .note{font-size:.74rem;color:var(--muted);margin-top:.4rem}.warn{color:var(--warn)}
@@ -104,6 +131,9 @@
   <button data-t="disp">Display</button>
   <button data-t="snd">Son</button>
   <button data-t="adj">Réglages</button>
+  <button data-t="sys">Système</button>
+  <button data-t="deploy">Déploiement</button>
+  <button data-t="tourney">Tournoi</button>
   <button data-t="info">Info</button>
 </nav>
 
@@ -153,8 +183,21 @@
 
   <section id="snd">
     <div class="panel">
-      <h2>Son (0–31, ré-appuyer = stop)</h2>
+      <h2>Son PSOWAV — moteur WAV de l'ESP</h2>
+      <div class="row" style="margin-bottom:.6rem;align-items:center">
+        <span class="pill" id="ps_ready">moteur : —</span>
+        <span class="grow"></span>
+        <button class="btn" onclick="psStop()">⏹ Stop</button>
+      </div>
+      <label class="fld">Jeu (set son sur la SD)</label>
+      <select id="ps_theme" onchange="psTheme(this.value)"></select>
+      <div class="snds" id="psPad" style="margin-top:.7rem"></div>
+      <div class="note">Joue le son <b>directement par l'ESP</b> (MCP4921 → ampli → HP) — pas besoin du mode diag. Cases grisées = absentes du set · <b>↻</b> boucle · <b style="color:var(--accent)">●</b> voix.</div>
+    </div>
+    <div class="panel">
+      <h2>Test son FPGA (gosof80 — mode contrôle)</h2>
       <div class="snds" id="sndPad"></div>
+      <div class="note">Envoie le code son 0–31 à la carte <b>via le FPGA</b> (nécessite le mode contrôle). Ré-appuyer = stop.</div>
     </div>
   </section>
 
@@ -163,6 +206,104 @@
       <h2>DIP / Réglages</h2>
       <div class="dips" id="dips"></div>
       <div class="note">ON/OFF par DIP (cmd LISY « V »). Les libellés viennent du CSV du jeu.</div>
+    </div>
+  </section>
+
+  <section id="sys">
+    <div class="panel">
+      <h2>Appareil — ESP32</h2>
+      <div class="kv"><span class="k">Firmware</span><span id="s_fw">—</span></div>
+      <div class="kv"><span class="k">WiFi</span><span id="s_wifi">—</span></div>
+      <div class="kv"><span class="k">FPGA IDCODE</span><span id="s_id">—</span></div>
+      <div class="kv"><span class="k">Mémoire libre</span><span id="s_heap">—</span></div>
+      <div class="kv"><span class="k">Uptime</span><span id="s_up">—</span></div>
+      <div class="kv"><span class="k">Carte SD</span><span id="s_sd">—</span></div>
+      <div class="row" style="margin-top:.8rem">
+        <button class="btn" onclick="reqSys()">↻ Rafraîchir</button>
+        <button class="btn danger" onclick="reboot()">⏻ Redémarrer l'ESP</button>
+      </div>
+    </div>
+  </section>
+
+  <section id="deploy">
+    <div class="panel">
+      <h2>Sets son PSOWAV (carte SD)</h2>
+      <div class="kv"><span class="k">Jeu actif</span><span id="d_game">—</span></div>
+      <div class="kv"><span class="k">Sets sur la SD</span><span id="d_sets">—</span></div>
+      <label class="fld">Changer le jeu actif</label>
+      <select id="d_theme" onchange="psTheme(this.value)"></select>
+      <div class="note">Sets générés hors-ligne (<code>psowavgen</code>) puis copiés sur la SD :
+        <code>/&lt;jeu&gt;/NNNN-attr-VVV-snd.wav</code> + <code>/config.txt</code>.</div>
+    </div>
+    <div class="panel">
+      <h2>Game select — DIP S1 → jeu</h2>
+      <div class="gl" id="gl"></div>
+      <div class="note">N° = DIP S1 du FPGA (gamelist GottFA80_PLuS). Jeu actif en <b style="color:var(--ok)">vert</b>. Source <code>games.txt</code>.</div>
+    </div>
+    <div class="panel">
+      <h2>Firmware ESP — OTA WiFi</h2>
+      <div class="kv"><span class="k">Version</span><span id="d_fw">—</span></div>
+      <label class="fld">Nouveau firmware (.bin)</label>
+      <input type="file" id="otaFile" accept=".bin">
+      <div class="row" style="margin-top:.6rem">
+        <button class="btn accent" onclick="doOta()">⇪ Mettre à jour + redémarrer</button>
+        <span id="otaMsg" class="note"></span>
+      </div>
+      <div class="note">Build : <code>pio run -e esp32s3</code> → <code>.pio/build/esp32s3/firmware.bin</code>.
+        OTA nécessite une partition OTA ; sinon flash USB <code>pio run -t upload</code>.</div>
+    </div>
+    <div class="panel">
+      <h2>FPGA / ROM jeu — flash 1 clic <span class="pill">à venir</span></h2>
+      <div class="note">Prévu : l'ESP programme le <b>bitstream</b> (EPCS16 via JTAG SFL) + la <b>ROM jeu</b>
+        (NOR/SD), en une action. En développement.</div>
+    </div>
+  </section>
+
+  <section id="tourney">
+    <div class="panel">
+      <h2>Tournoi — classement</h2>
+      <div id="lb"></div>
+      <div class="note">Saisie <b>manuelle</b> : lis le score sur le flipper et entre-le par joueur. Classé au total. Persisté (survit au reboot).</div>
+    </div>
+    <div class="panel">
+      <h2>Mode de jeu</h2>
+      <div class="row">
+        <button class="btn modebtn" id="mb0" onclick="tSetMode(0)">Score flipper</button>
+        <button class="btn modebtn" id="mb1" onclick="tSetMode(1)">⏱ Time-attack</button>
+      </div>
+      <div class="row" style="margin-top:.7rem;align-items:center">
+        <span class="grow" style="font-size:.84rem">Mode tournoi <b>FPGA</b> <span id="tfpgaSt" class="pill">—</span></span>
+        <label class="switch"><input type="checkbox" id="tfpga" onchange="tFpga(this.checked)"><span class="slide"></span></label>
+      </div>
+      <div class="note">Décompte sur l'afficheur de la machine + anti free-game. À armer en <b>mode diag</b> ; persiste en jeu.</div>
+      <div id="taCfg" style="display:none">
+        <div class="row" style="margin-top:.7rem;align-items:flex-end">
+          <label class="fld" style="flex:1;margin:0">Départ (pts)<input type="number" id="taStart" value="1000000"></label>
+          <label class="fld" style="flex:1;margin:0">Perte / sec<input type="number" id="taDecay" value="10000"></label>
+          <button class="btn" onclick="tCfg()">OK</button>
+        </div>
+        <div class="taLive" id="taLive" style="display:none">
+          <div class="taScore" id="taScore">1 000 000</div>
+          <div class="taWho" id="taWho">—</div>
+          <button class="btn danger" onclick="tStop()">⏹ Game over</button>
+        </div>
+        <div class="row" id="taStartRow" style="margin-top:.7rem">
+          <select id="taPlayer" style="flex:1"></select>
+          <button class="btn accent" onclick="tStartGame()">▶ Démarrer la partie</button>
+        </div>
+        <div class="note">Démarre au lancement de la partie, « Game over » à la fin. Score = max(0, départ − perte × secondes).</div>
+      </div>
+    </div>
+    <div class="panel">
+      <h2>Joueurs</h2>
+      <div class="row">
+        <input type="text" id="t_name" placeholder="nom du joueur" maxlength="20" style="flex:1">
+        <button class="btn accent" onclick="tAdd()">+ Ajouter</button>
+      </div>
+      <div class="row" style="margin-top:.7rem">
+        <button class="btn" onclick="tReset()">Scores → 0</button>
+        <button class="btn danger" onclick="tClear()">Tout effacer</button>
+      </div>
     </div>
   </section>
 
@@ -179,6 +320,7 @@
       <div class="kv"><span class="k">Mode contrôle</span><span id="i_mode">—</span></div>
       <div class="kv"><span class="k">Watchdog bobines</span><span id="i_wd">—</span></div>
       <div class="kv"><span class="k">Défaut bobine</span><span id="i_cf">—</span></div>
+      <div class="kv"><span class="k">Son PSOWAV</span><span id="i_snd">—</span></div>
     </div>
   </section>
 </main>
@@ -188,6 +330,8 @@
 const N_LAMP=48, N_COIL=9, N_SND=32, N_DIP=32;
 const st={ws:null,connected:false,demo:false,outputs:false,is80B:false,blink:false,bus:'normal',lisy:'—',
   sw:Array(8).fill(0), lamps:Array(N_LAMP).fill(0), snd:Array(N_SND).fill(0), dip:Array(N_DIP).fill(0),
+  ps:{ready:false,theme:'',mask:0,loop:0,voice:0,n:0,themes:[]}, games:[], tourney:[],
+  ta:{mode:0,start:1000000,decay:10000,running:0,t0:0,name:''}, tfpga:0, tfpgaBus:0,
   names:{sw:{},lamp:{},coil:{},snd:{}}};
 
 /* ---------- build ---------- */
@@ -212,6 +356,8 @@ function buildCoils(){const g=document.getElementById('coils');g.innerHTML='';
   for(let i=1;i<=N_COIL;i++){const d=el('coil','<div class="n">'+i+'</div><div class="t" id="kn'+i+'">'+COIL_DEF[i]+'</div>');d.id='k'+i;d.onclick=()=>coil(i);g.appendChild(d);}}
 function buildSnd(){const g=document.getElementById('sndPad');g.innerHTML='';
   for(let i=0;i<N_SND;i++){const b=el('snd','<div>'+i+'</div>');b.id='s'+i;b.onclick=()=>sound(i);g.appendChild(b);}}
+function buildPsPad(){const g=document.getElementById('psPad');g.innerHTML='';
+  for(let i=0;i<N_SND;i++){const b=el('snd absent','<div>'+i+'</div>');b.id='ps'+i;b.onclick=()=>psPlay(i);g.appendChild(b);}}
 function buildDisp(){const f=document.getElementById('dispFields');f.innerHTML='';
   ['Crédit / Bille (D0)','Joueur 1','Joueur 2','Joueur 3','Joueur 4'].forEach((p,i)=>{
     f.insertAdjacentHTML('beforeend','<label class="fld">'+p+'</label><input type="text" id="d'+i+'" maxlength="7" placeholder="·······">');});}
@@ -230,6 +376,12 @@ function lampBlink(){if(!gate())return need();st.blink=!st.blink;document.getEle
 function coil(i){if(!gate())return need();const ms=+pw.value,e=document.getElementById('k'+i);
   e.classList.add('fire');setTimeout(()=>e.classList.remove('fire'),Math.max(120,ms));send({c:'coil',i,ms});}
 function sound(i){if(!gate())return need();st.snd[i]^=1;if(st.snd[i])st.snd.forEach((v,j)=>{if(j!=i)st.snd[j]=0});renderSnd();send({c:'sound',n:i});}
+/* ---- PSOWAV (ESP WAV engine — independent of diag mode) ---- */
+function psPlay(i){if(!(st.ps.mask&(1<<i)))return;const e=document.getElementById('ps'+i);
+  e.classList.add('play');setTimeout(()=>e.classList.remove('play'),350);send({c:'snd',n:i});}
+function psStop(){send({c:'sndstop'});}
+function psTheme(name){if(!name)return;send({c:'sndtheme',name});toast('chargement '+name+'…');
+  setTimeout(()=>send({c:'sndinfo'}),500);}   // refresh once the mix task has loaded the set
 function swClick(s,r){if(st.demo){st.sw[s]^=(1<<r);renderSw();}}
 function dip(i,v){st.dip[i]=v?1:0;send({c:'dip',i,v:v?1:0});}
 function sendDisp(){if(!gate())return need();
@@ -240,6 +392,89 @@ function sendDisp(){if(!gate())return need();
 function renderSw(){for(let s=0;s<8;s++)for(let r=0;r<8;r++)document.getElementById('c'+s+'_'+r).classList.toggle('on',!!(st.sw[s]&(1<<r)));}
 function renderLamps(){for(let i=0;i<N_LAMP;i++)document.getElementById('l'+i).classList.toggle('on',!!st.lamps[i]);}
 function renderSnd(){for(let i=0;i<N_SND;i++)document.getElementById('s'+i).classList.toggle('on',!!st.snd[i]);}
+function renderPs(){const p=st.ps;
+  for(let i=0;i<N_SND;i++){const e=document.getElementById('ps'+i);if(!e)continue;
+    const has=!!(p.mask&(1<<i)),v=!!(p.voice&(1<<i)),l=!!(p.loop&(1<<i));
+    e.classList.toggle('absent',!has);e.classList.toggle('voice',has&&v);e.classList.toggle('loop',has&&l&&!v);}
+  const pill=document.getElementById('ps_ready');
+  pill.textContent='moteur : '+(p.ready?'prêt':'hors-ligne')+(p.theme?(' · '+p.theme+' ('+p.n+')'):'');
+  pill.classList.toggle('on',p.ready);
+  ['ps_theme','d_theme'].forEach(id=>{const sel=document.getElementById(id);if(!sel)return;
+    if(sel.dataset.n!==String(p.themes.length)){sel.innerHTML='';
+      if(!p.themes.length)sel.insertAdjacentHTML('beforeend','<option>(aucun set sur la SD)</option>');
+      p.themes.forEach(t=>{const o=document.createElement('option');o.value=t;o.textContent=t;sel.appendChild(o);});
+      sel.dataset.n=String(p.themes.length);}
+    if(p.theme)sel.value=p.theme;});
+  const inf=document.getElementById('i_snd');if(inf)inf.textContent=p.ready?((p.theme||'?')+' · '+p.n+' sons'):'—';
+  const dg=document.getElementById('d_game');if(dg)dg.textContent=p.theme||'—';
+  const ds=document.getElementById('d_sets');if(ds)ds.textContent=p.themes.length?(p.themes.length+' : '+p.themes.join(', ')):'—';}
+function renderGames(){const g=document.getElementById('gl');if(!g)return;g.innerHTML='';
+  if(!st.games.length){g.innerHTML='<div class="n">—</div><div>games.txt absent</div>';return;}
+  st.games.forEach(x=>{const c=x.rom===st.ps.theme?' cur':'';
+    g.insertAdjacentHTML('beforeend','<div class="n'+c+'">'+x.n+'</div><div class="'+(c?'cur':'')+'">'+x.rom+'</div>');});}
+function reqGames(){send({c:'gamelist'});}
+/* ---- tournament / scores ---- */
+function esc(s){return (''+s).replace(/[<>&"]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c]));}
+function fmtScore(n){return (n||0).toLocaleString('fr-FR');}
+function renderTourney(){const lb=document.getElementById('lb');if(!lb)return;lb.innerHTML='';
+  if(!st.tourney.length){lb.innerHTML='<div class="note">Aucun joueur — ajoute-en ci-dessous.</div>';return;}
+  st.tourney.forEach((p,i)=>{lb.insertAdjacentHTML('beforeend',
+    '<div class="lbr'+(i===0?' lead':'')+'">'+
+      '<div class="lbtop"><span class="rk">'+(i+1)+'</span><span class="pn">'+esc(p.name)+'</span><span class="pt">'+fmtScore(p.total)+'</span></div>'+
+      '<div class="lbsub">'+p.games+' partie'+(p.games>1?'s':'')+' · meilleur '+fmtScore(p.best)+(p.games?(' · dernier '+fmtScore(p.last)):'')+'</div>'+
+      '<div class="ctl"><input class="tsin" type="number" inputmode="numeric" id="ts'+p.id+'" placeholder="nouveau score">'+
+        '<button class="btn accent" onclick="tScore('+p.id+')">+</button>'+
+        '<button class="btn" onclick="tUndo('+p.id+')" title="annuler le dernier">↶</button>'+
+        '<button class="btn danger" onclick="tDel('+p.id+')">×</button></div>'+
+    '</div>');});}
+function tAdd(){const n=document.getElementById('t_name');const v=n.value.trim();if(v){send({c:'t_add',name:v});n.value='';}}
+function tScore(id){const e=document.getElementById('ts'+id);const v=parseInt(e.value,10)||0;if(v>0){send({c:'t_score',id,v});e.value='';}}
+function tUndo(id){send({c:'t_undo',id});}
+function tDel(id){if(confirm('Retirer ce joueur ?'))send({c:'t_del',id});}
+function tReset(){if(confirm('Remettre tous les scores à 0 ?'))send({c:'t_reset'});}
+function tClear(){if(confirm('Effacer tous les joueurs ?'))send({c:'t_clear'});}
+/* ---- time-attack mode ---- */
+function renderMode(){const t=st.ta;
+  const m0=document.getElementById('mb0'),m1=document.getElementById('mb1');
+  if(m0)m0.classList.toggle('on',t.mode===0); if(m1)m1.classList.toggle('on',t.mode===1);
+  const cfg=document.getElementById('taCfg'); if(cfg)cfg.style.display=t.mode===1?'block':'none';
+  const si=document.getElementById('taStart'),di=document.getElementById('taDecay');
+  if(si&&document.activeElement!==si)si.value=t.start;
+  if(di&&document.activeElement!==di)di.value=t.decay;
+  const sel=document.getElementById('taPlayer');
+  if(sel){const cur=sel.value;sel.innerHTML='';
+    if(!st.tourney.length)sel.insertAdjacentHTML('beforeend','<option value="0">(ajoute des joueurs)</option>');
+    st.tourney.forEach(p=>{const o=document.createElement('option');o.value=p.id;o.textContent=p.name;sel.appendChild(o);});
+    if(cur)sel.value=cur;}
+  const live=document.getElementById('taLive'),row=document.getElementById('taStartRow');
+  if(live)live.style.display=t.running?'block':'none';
+  if(row)row.style.display=t.running?'none':'flex';
+  const who=document.getElementById('taWho'); if(who)who.textContent=t.running?t.name:'';
+  taUpdate();}
+function taUpdate(){const el=document.getElementById('taScore');if(!el)return;
+  let v=st.ta.start; if(st.ta.running)v=Math.max(0,st.ta.start-st.ta.decay*((Date.now()-st.ta.t0)/1000));
+  v=Math.round(v);el.textContent=fmtScore(v);el.classList.toggle('zero',v===0);}
+let taTimer=null;
+function startTaTick(){stopTaTick();taTimer=setInterval(taUpdate,200);}
+function stopTaTick(){if(taTimer){clearInterval(taTimer);taTimer=null;}}
+function tSetMode(m){send({c:'t_mode',mode:m,start:+document.getElementById('taStart').value||1000000,decay:+document.getElementById('taDecay').value||10000});}
+function tCfg(){send({c:'t_mode',mode:1,start:+document.getElementById('taStart').value||1000000,decay:+document.getElementById('taDecay').value||10000});}
+function tStartGame(){const id=+document.getElementById('taPlayer').value;if(id>0)send({c:'t_start',id});}
+function tStop(){send({c:'t_stop'});}
+function tFpga(on){send({c:'t_fpga',on:on?1:0});}
+function renderTfpga(){const cb=document.getElementById('tfpga'),st2=document.getElementById('tfpgaSt');
+  if(cb)cb.checked=!!st.tfpga; if(!st2)return;
+  const bus=st.tfpgaBus||st.bus==='diag'||st.demo;
+  st2.textContent=st.tfpga?'armé':(bus?'désarmé':'(mode diag requis)');
+  st2.classList.toggle('on',!!st.tfpga);}
+function fmtUp(s){s|=0;if(s<60)return s+'s';const m=(s/60)|0;if(m<60)return m+'m '+(s%60)+'s';const h=(m/60)|0;return h+'h '+(m%60)+'m';}
+function reqSys(){send({c:'sysinfo'});}
+function reboot(){if(confirm('Redémarrer l’ESP ? Son + diag coupés ~5 s.'))send({c:'reboot'});}
+function doOta(){const f=document.getElementById('otaFile').files[0],msg=document.getElementById('otaMsg');
+  if(!f){msg.textContent='choisis un fichier .bin';return;}
+  if(st.demo){msg.textContent='(démo — pas d’envoi réel)';return;}
+  msg.textContent='envoi '+f.name+'…';const fd=new FormData();fd.append('firmware',f,f.name);
+  fetch('/ota',{method:'POST',body:fd}).then(r=>r.text()).then(t=>{msg.textContent=t;}).catch(e=>{msg.textContent='erreur : '+e;});}
 function renderGate(){document.querySelectorAll('#lamp .grid,#lamp .row,#coil .coils,#snd .snds,#dispFields,#disp80b')
   .forEach(e=>e.classList.toggle('disabled',!gate()));}
 function renderNames(){
@@ -256,7 +491,9 @@ function setConn(s){const d=document.getElementById('dot'),c=document.getElement
   d.className='dot '+(s==='ok'?'ok':s==='demo'?'demo':'');
   c.textContent=s==='ok'?'connecté':s==='demo'?'DÉMO (hors-ligne)':'déconnecté…';}
 function connect(){
-  if(location.protocol==='file:'){startDemo();return;}
+  // demo (offline preview): file://, or a localhost dev server. The ESP serves on
+  // gottfa.local / its AP IP — never localhost — so the real device always uses the WS.
+  if(location.protocol==='file:'||location.hostname==='localhost'||location.hostname==='127.0.0.1'){startDemo();return;}
   try{st.ws=new WebSocket('ws://'+location.host+'/ws');
     st.ws.onopen=()=>{st.connected=true;st.demo=false;setConn('ok');send({c:'hello'});};
     st.ws.onmessage=e=>handle(JSON.parse(e.data));
@@ -267,10 +504,28 @@ function connect(){
 function handle(m){
   if(m.t==='info'){i_fw.textContent=m.fw;i_id.textContent=m.idcode;i_ip.textContent=(m.mode||'')+' '+(m.ip||'');
     const g=m.game||'—';i_game.textContent=g;document.getElementById('game').textContent='jeu : '+g+(m.gamenr?(' (#'+m.gamenr+')'):'');
-    if('is80B'in m){st.is80B=!!m.is80B;applySys();} if('bus'in m){st.bus=m.bus;st.lisy=m.lisy||'—';applyBus();} if('outputs'in m)setOutputs(!!m.outputs,true);}
+    if('is80B'in m){st.is80B=!!m.is80B;applySys();} if('bus'in m){st.bus=m.bus;st.lisy=m.lisy||'—';applyBus();} if('outputs'in m)setOutputs(!!m.outputs,true);
+    if('tfpga'in m){st.tfpga=m.tfpga?1:0;st.tfpgaBus=(m.bus==='diag')?1:0;renderTfpga();}}
   else if(m.t==='sw'){st.sw=m.d.slice(0,8);renderSw();}
   else if(m.t==='lamps'){for(let i=0;i<N_LAMP;i++)st.lamps[i]=(m.d[i>>3]>>(i&7))&1;renderLamps();}
   else if(m.t==='sound'){for(let i=0;i<N_SND;i++)st.snd[i]=(m.d[i>>3]>>(i&7))&1;renderSnd();}
+  else if(m.t==='sndinfo'){st.ps.ready=!!m.ready;st.ps.theme=m.theme||'';st.ps.mask=m.mask||0;st.ps.n=m.n||0;
+    st.ps.loop=m.loop||0;st.ps.voice=m.voice||0;if(Array.isArray(m.themes))st.ps.themes=m.themes;renderPs();}
+  else if(m.t==='gamelist'){st.games=m.g||[];renderGames();}
+  else if(m.t==='tourney'){st.tourney=m.players||[];
+    if('mode'in m){st.ta.mode=m.mode;st.ta.start=m.start||1000000;st.ta.decay=m.decay||10000;}
+    renderTourney();renderMode();}
+  else if(m.t==='tfpga'){st.tfpga=m.on?1:0;if('bus'in m)st.tfpgaBus=m.bus?1:0;renderTfpga();}
+  else if(m.t==='timer'){
+    if(m.id){const p=st.tourney.find(x=>x.id===m.id);st.ta.running=m.id;st.ta.t0=Date.now();st.ta.name=p?p.name:('#'+m.id);startTaTick();}
+    else{st.ta.running=0;stopTaTick();toast('Score enregistré : '+fmtScore(m.score||0));}
+    renderMode();}
+  else if(m.t==='sysinfo'){const h=Math.round((m.heap||0)/1024);
+    s_fw.textContent=m.fw||'—';s_id.textContent=m.idcode||'—';s_wifi.textContent=(m.mode||'')+' '+(m.ip||'');
+    s_heap.textContent=h+' KB';s_up.textContent=fmtUp(m.up||0);
+    s_sd.textContent=m.c3?'(C3 — pas de son)':(m.sd?('OK · '+(m.sets||0)+' sets'):'absente');
+    d_fw.textContent=m.fw||'—';}
+  else if(m.t==='toast'){toast(m.m||'');}
   else if(m.t==='dip'){for(let i=0;i<N_DIP;i++){st.dip[i]=(m.d[i>>3]>>(i&7))&1;const e=document.getElementById('dp'+i);if(e)e.checked=!!st.dip[i];}}
   else if(m.t==='names'){if(m.sw)st.names.sw=m.sw;if(m.lamp)st.names.lamp=m.lamp;if(m.coil)st.names.coil=m.coil;renderNames();}
   else if(m.t==='status'){setOutputs(!!m.outputs,true);i_wd.textContent=m.wd?'⚠ déclenché':'ok';}
@@ -288,12 +543,41 @@ function handle(m){
 }
 
 /* ---------- demo / mock ---------- */
+/* realistic per-game sound counts (from the PSOWAV batch) so the demo isn't misleading */
+const DEMO_N={alienstr:32,arena:26,badgirls:24,blckhole:30,bountyh:32,'747':24,eclipse:18,spirit:22};
+function demoSet(t){const n=DEMO_N[t]||22,mask=(n>=32?0xFFFFFFFF:(2**n-1));
+  return {mask,n,loop:mask&0xAAAAAAA8,voice:mask&0x0000000C};}   // demo: alt sounds loop, 2 voice
 function startDemo(){st.demo=true;st.connected=false;setConn('demo');
   i_fw.textContent='demo';i_id.textContent='0x020F10DD';i_ip.textContent='file://';
   i_game.textContent='—';i_wd.textContent='ok';applySys();
   st.bus='diag';st.lisy='0x80 (démo)';applyBus();
+  {const ds=demoSet('arena');handle({t:'sndinfo',ready:1,theme:'arena',mask:ds.mask,loop:ds.loop,voice:ds.voice,n:ds.n,themes:Object.keys(DEMO_N)});}
+  handle({t:'sysinfo',fw:'demo',idcode:'0x020F10DD',ip:'192.168.4.1',mode:'SoftAP',heap:212000,up:1234,sets:Object.keys(DEMO_N).length,sd:1,c3:0});
+  st.tourney=[{id:1,name:'Alice',total:2456780,best:1200000,games:3,last:980000},{id:2,name:'Bob',total:1890450,best:1100000,games:3,last:600000}];renderTourney();
   setInterval(()=>{if(!st.outputs)return;const s=Math.random()*8|0,r=Math.random()*8|0;st.sw[s]^=(1<<r);renderSw();},900);}
-function mock(o){if(o.c==='coil')console.log('demo pulse coil',o.i,o.ms+'ms');if(o.c==='sound')toast('son '+o.n);}
+function mock(o){if(o.c==='coil')console.log('demo pulse coil',o.i,o.ms+'ms');if(o.c==='sound')toast('son FPGA '+o.n);
+  if(o.c==='snd')toast('PSOWAV '+o.n);if(o.c==='sndstop')toast('stop');
+  if(o.c==='sndtheme'){const ds=demoSet(o.name);st.ps.theme=o.name;st.ps.mask=ds.mask;st.ps.n=ds.n;}
+  if(o.c==='sndinfo'){const ds=demoSet(st.ps.theme||'arena');handle({t:'sndinfo',ready:1,theme:st.ps.theme||'arena',
+    mask:st.ps.mask||ds.mask,loop:ds.loop,voice:ds.voice,n:st.ps.n||ds.n,themes:st.ps.themes.length?st.ps.themes:Object.keys(DEMO_N)});}
+  if(o.c==='gamelist')handle({t:'gamelist',g:[{n:0,rom:'panthera'},{n:1,rom:'spidermn'},{n:2,rom:'circus'},{n:5,rom:'jamesb'},
+    {n:14,rom:'blckhole'},{n:40,rom:'bountyh'},{n:51,rom:'arena'},{n:57,rom:'badgirls'},{n:60,rom:'bonebstr'}]});
+  if(o.c==='sysinfo')handle({t:'sysinfo',fw:'demo',idcode:'0x020F10DD',ip:'192.168.4.1',mode:'SoftAP',
+    heap:212000,up:(Date.now()/1000|0)%100000,sets:Object.keys(DEMO_N).length,sd:1,c3:0});
+  if(o.c==='reboot')toast('(démo) redémarrage');
+  if(o.c==='t_fpga'){st.tfpga=o.on?1:0;renderTfpga();toast('mode tournoi FPGA '+(o.on?'armé':'désarmé'));return;}
+  if(o.c==='tourney'||/^t_/.test(o.c))demoTourney(o);}
+function demoTourney(o){
+  if(o.c==='t_mode'){st.ta.mode=o.mode;st.ta.start=o.start;st.ta.decay=o.decay;renderMode();return;}
+  if(o.c==='t_start'){const p=st.tourney.find(x=>x.id===o.id);if(p){st.ta.running=o.id;st.ta.t0=Date.now();st.ta.name=p.name;startTaTick();renderMode();}return;}
+  if(o.c==='t_stop'){if(st.ta.running){const sc=Math.max(0,Math.round(st.ta.start-st.ta.decay*((Date.now()-st.ta.t0)/1000)));const p=st.tourney.find(x=>x.id===st.ta.running);if(p){p.total+=sc;p.games++;p.last=sc;if(sc>p.best)p.best=sc;}st.ta.running=0;stopTaTick();toast('Score : '+fmtScore(sc));}st.tourney.sort((a,b)=>b.total-a.total);renderTourney();renderMode();return;}
+  if(o.c==='t_add')st.tourney.push({id:(st._tid=(st._tid||9)+1),name:o.name,total:0,best:0,games:0,last:0});
+  else if(o.c==='t_del')st.tourney=st.tourney.filter(p=>p.id!==o.id);
+  else if(o.c==='t_score'){const p=st.tourney.find(x=>x.id===o.id);if(p){p.total+=o.v;p.games++;p.last=o.v;if(o.v>p.best)p.best=o.v;}}
+  else if(o.c==='t_undo'){const p=st.tourney.find(x=>x.id===o.id);if(p&&p.games>0){p.total-=p.last;p.games--;p.last=0;}}
+  else if(o.c==='t_reset')st.tourney.forEach(p=>{p.total=p.best=p.games=p.last=0;});
+  else if(o.c==='t_clear')st.tourney=[];
+  st.tourney.sort((a,b)=>b.total-a.total);renderTourney();}
 
 /* ---------- master / bus ---------- */
 function canControl(){return st.demo||st.bus==='diag';}
@@ -318,15 +602,16 @@ document.getElementById('mst').onchange=e=>{
   setOutputs(e.target.checked,false);};
 
 /* ---------- tabs + toast ---------- */
-document.getElementById('tabs').onclick=e=>{if(e.target.dataset.t){
+document.getElementById('tabs').onclick=e=>{const t=e.target.dataset.t;if(t){
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b===e.target));
-  document.querySelectorAll('section').forEach(s=>s.classList.toggle('active',s.id===e.target.dataset.t));}};
+  document.querySelectorAll('section').forEach(s=>s.classList.toggle('active',s.id===t));
+  if(t==='sys'||t==='deploy')reqSys();if(t==='deploy')reqGames();}};
 let tT;function toast(msg){const c=document.getElementById('conn'),o=c.textContent;c.textContent=msg;
   clearTimeout(tT);tT=setTimeout(()=>setConn(st.connected?'ok':st.demo?'demo':''),1400);}
 
 /* ---------- boot ---------- */
-buildMatrix();buildLamps();buildCoils();buildSnd();buildDisp();buildDips();
-applySys();applyBus();renderGate();setConn('');connect();
+buildMatrix();buildLamps();buildCoils();buildSnd();buildPsPad();buildDisp();buildDips();
+applySys();applyBus();renderGate();renderPs();renderTourney();renderMode();renderTfpga();setConn('');connect();
 </script>
 </body>
 </html>

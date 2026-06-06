@@ -1,11 +1,11 @@
-// wavmix.h — polyphonic STEREO 16-bit PCM mixer for the GottFA80+ sound engine.
+// wavmix.h — polyphonic STEREO 16-bit PCM mixer for PSOWAV, the GottFA80+ sound engine.
 //
-// Original implementation for the Pstore Pinball Platform — NOT derived from any other
-// player (we recode the GOSOWAV/pwavplayer concept from scratch for licensing freedom).
-// Platform-agnostic: no Arduino/ESP deps, so the mixing logic is host-unit-testable
-// (tools/host_wav_test.cpp).
+// PSOWAV (Pstore Sound On WAV) is our own engine for the Pstore Pinball Platform — NOT
+// derived from any other player (recoded from scratch for licensing freedom; the on-SD
+// set layout is kept pwavplayer-compatible for interchange only). Platform-agnostic: no
+// Arduino/ESP deps, so the mixing logic is host-unit-testable (tools/host_wav_test.cpp).
 //
-// Voices carry the pwavplayer-style attributes so the player can implement loop,
+// Voices carry the PSOWAV attributes so the player can implement loop,
 // break (stop same id), kill / soft-kill / quit groups, and a voice vs sound bus.
 // Looping is seamless: on source exhaustion the mixer calls the voice's rewind() and
 // keeps filling the same block.

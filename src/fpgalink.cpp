@@ -27,9 +27,8 @@ void poll() {
 #ifndef BOARD_C3
     else if ((b & 0xE0) == 0x80) {            // sound command 0x80..0x9F
       wavplayer::play(b & 0x1F);
-    } else if ((b & 0xC0) == 0x40) {          // game number 0x40..0x7F -> theme "<n>"
-      char t[8]; snprintf(t, sizeof(t), "%d", b & 0x3F);
-      wavplayer::setTheme(t);
+    } else if ((b & 0xC0) == 0x40) {          // game number 0x40..0x7F -> games.txt -> set
+      wavplayer::selectGame(b & 0x3F);        // No = GottFA80_PLuS gamelist index
     }
 #endif
   }

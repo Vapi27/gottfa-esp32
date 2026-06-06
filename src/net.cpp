@@ -2,9 +2,13 @@
 #include <LittleFS.h>
 #include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
+#include <Update.h>
 #include "board_config.h"
 #include "net.h"
 #include "diag.h"
+#ifndef BOARD_C3
+#include "wavplayer.h"
+#endif
 
 static AsyncWebServer server(80);
 static AsyncWebSocket ws("/ws");
@@ -54,6 +58,49 @@ void netBegin() {
 
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
+
+  // --- PSOWAV sound test (bring-up): play any sound / set theme from a browser, no FPGA ---
+  //   /snd?id=N      play PSOWAV sound N (0..31)      /snd?theme=arena   load a game set
+  //   /snd?stop=1    stop all voices                  /snd               usage + status
+  server.on("/snd", HTTP_GET, [](AsyncWebServerRequest *r) {
+#ifndef BOARD_C3
+    if (r->hasParam("id")) {
+      int id = r->getParam("id")->value().toInt();
+      bool ok = (id >= 0 && id <= 31) && wavplayer::play(id);
+      r->send(ok ? 200 : 400, "text/plain", ok ? ("play " + String(id)) : "bad id (0..31) or not ready");
+      return;
+    }
+    if (r->hasParam("theme")) {
+      wavplayer::setTheme(r->getParam("theme")->value().c_str());
+      r->send(200, "text/plain", "theme -> " + r->getParam("theme")->value());
+      return;
+    }
+    if (r->hasParam("stop")) { wavplayer::stopAll(); r->send(200, "text/plain", "stopped"); return; }
+    r->send(200, "text/plain", String("PSOWAV ") + (wavplayer::ready() ? "ready" : "NOT ready") +
+            "\nusage: /snd?id=N (0..31) | /snd?theme=NAME | /snd?stop=1");
+#else
+    r->send(501, "text/plain", "no sound tier on C3");
+#endif
+  });
+
+  // --- Déploiement: OTA firmware update (POST a firmware .bin). Fails gracefully if the
+  //     partition scheme has no OTA slot (Update.begin returns false) -> never bricks. To
+  //     enable real OTA: set board_build.partitions to an OTA scheme + one USB flash first.
+  server.on("/ota", HTTP_POST,
+    [](AsyncWebServerRequest *r){
+      bool ok = !Update.hasError();
+      AsyncWebServerResponse *res = r->beginResponse(200, "text/plain", ok ? "OK — redémarrage…" : "ÉCHEC OTA (partition ?)");
+      res->addHeader("Connection","close"); r->send(res);
+      if (ok) { delay(150); ESP.restart(); }
+    },
+    [](AsyncWebServerRequest *r, String fn, size_t idx, uint8_t *data, size_t len, bool done){
+      if (!idx) { Serial.printf("[ota] begin %s\n", fn.c_str());
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial); }
+      if (Update.write(data, len) != len) Update.printError(Serial);
+      if (done) { if (Update.end(true)) Serial.printf("[ota] ok %u bytes\n", (unsigned)(idx+len));
+                  else Update.printError(Serial); }
+    });
+
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
   server.onNotFound([](AsyncWebServerRequest *r){ r->send(404, "text/plain", "404"); });
   server.begin();
@@ -61,3 +108,5 @@ void netBegin() {
 }
 
 void netLoop() { ws.cleanupClients(); diag::tick(); }
+const char* netIp()   { return s_ip.c_str(); }
+const char* netMode() { return s_mode.c_str(); }

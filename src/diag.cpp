@@ -5,6 +5,7 @@
 #include "board_config.h"
 #include "wavplayer.h"
 #include "fpgalink.h"
+#include "tourney.h"
 
 // ===========================================================================
 //  LISYcontrol backend.  Browser <--WebSocket(JSON)--> here <--SPI--> lisyctrl.
@@ -19,6 +20,7 @@
 #define REG_ID       0x00   // reads 0x80 (slave-alive magic)
 #define REG_STATUS   0x02   // b0 active, b1 wd_tripped, b2 is80B
 #define REG_CTRL     0x03   // b0 outputs_en, b1 lamp_blink
+#define REG_CTRL2    0x04   // b0 tournament_mode (latched in lisyctrl -> persists into gameplay)
 #define REG_SW_ROW0  0x10   // 0x10..0x17  switch matrix (bit=return, 1=closed)
 #define REG_DIPSLAM  0x18
 #define REG_LAMP0    0x20   // 0x20..0x25  48 lamp bits
@@ -45,6 +47,7 @@ namespace {
   char game[24]="—"; uint16_t gamenr=0; bool is80B=false;
   char busmode[8]="normal";      // diag-bus state: "normal" | "diag" | "bus?"
   uint8_t lisyId=0;              // lisyctrl ID register (0x80 = slave answering)
+  bool    tourneyFpga=false;     // FPGA tournament mode (CTRL2 b0) — armed via diag, persists in game
 
   uint32_t lastTick=0;
 
@@ -74,6 +77,7 @@ namespace {
     d["game"]=game; d["gamenr"]=gamenr; d["is80B"]=is80B?1:0; d["outputs"]=outputs?1:0;
     char lid[8]; snprintf(lid,sizeof(lid),"0x%02X",lisyId);
     d["bus"]=busmode; d["lisy"]=lid;                        // diag-bus state + lisyctrl ID
+    d["tfpga"]=tourneyFpga?1:0;                             // FPGA tournament mode (CTRL2)
     String s; serializeJson(d,s); txt(c,s);
   }
   void sendStatus(){ JsonDocument d; d["t"]="status"; d["outputs"]=outputs?1:0; d["wd"]=wd_tripped?1:0;
@@ -81,6 +85,50 @@ namespace {
   void sendArr(const char*type, const uint8_t*a, int n, AsyncWebSocketClient*c){
     JsonDocument d; d["t"]=type; JsonArray j=d["d"].to<JsonArray>();
     for(int i=0;i<n;i++) j.add(a[i]); String s; serializeJson(d,s); txt(c,s);
+  }
+
+  uint32_t rebootAt=0;               // set by {c:'reboot'} -> tick() restarts the ESP
+
+  // ESP device status for the Système tab.
+  void sendSysInfo(AsyncWebSocketClient*c){
+    JsonDocument d; d["t"]="sysinfo";
+    d["fw"]=fw; d["idcode"]=idcode; d["ip"]=ip; d["mode"]=mode;
+    d["heap"]=(uint32_t)ESP.getFreeHeap(); d["up"]=(uint32_t)(millis()/1000);
+#ifndef BOARD_C3
+    d["sets"]=wavplayer::themeCount(); d["sd"]=wavplayer::ready()?1:0; d["c3"]=0;
+#else
+    d["sets"]=0; d["sd"]=0; d["c3"]=1;
+#endif
+    String s; serializeJson(d,s); txt(c,s);
+  }
+
+  void sendTourney(AsyncWebSocketClient*c){ txt(c, tourney::json()); }   // tournament leaderboard
+
+  // game-select reference (games.txt): FPGA No -> romname, for the Déploiement tab.
+  void sendGameList(AsyncWebSocketClient*c){
+#ifndef BOARD_C3
+    JsonDocument d; d["t"]="gamelist"; JsonArray g=d["g"].to<JsonArray>();
+    for(int i=0;i<64;i++){ const char* r=wavplayer::gameRom(i); if(r&&r[0]){
+      JsonObject o=g.add<JsonObject>(); o["n"]=i; o["rom"]=r; } }
+    String s; serializeJson(d,s); txt(c,s);
+#else
+    (void)c;
+#endif
+  }
+
+  // PSOWAV (ESP WAV engine) state for the web UI: ready, current game, which sounds exist, game list.
+  void sendSndInfo(AsyncWebSocketClient*c){
+#ifndef BOARD_C3
+    JsonDocument d; d["t"]="sndinfo";
+    d["ready"]=wavplayer::ready()?1:0; d["theme"]=wavplayer::curTheme();
+    d["mask"]=wavplayer::soundMask(); d["n"]=wavplayer::soundCount();
+    d["loop"]=wavplayer::loopMask(); d["voice"]=wavplayer::voiceMask();
+    JsonArray th=d["themes"].to<JsonArray>();
+    for(int i=0;i<wavplayer::themeCount();i++) th.add(wavplayer::themeName(i));
+    String s; serializeJson(d,s); txt(c,s);
+#else
+    (void)c;
+#endif
   }
 
   // ---- bus arbitration: follow the FPGA Debug handshake (= lisy_active) -----
@@ -100,6 +148,7 @@ namespace {
     lisyId = bridgeRead(REG_ID);                            // 0x80 if lisyctrl answers
     uint8_t st = bridgeRead(REG_STATUS);                    // b0 active,b1 wd,b2 is80B
     is80B = (st&0x04)!=0; wd_tripped=(st&0x02)!=0;
+    tourneyFpga = (bridgeRead(REG_CTRL2)&1)!=0;             // current latched tournament mode
     bridgeWrite(REG_CTRL,0x00);                             // outputs OFF (safe on entry)
     bridgeWrite(REG_COIL_FAULT,0x00); coilFault=0;          // clear any latched coil fault
     outputs=false; blink=false;
@@ -126,7 +175,7 @@ void diag::setInfo(const char*f,uint32_t id,const char*m,const char*i){
 
 void diag::onConnect(AsyncWebSocketClient*c){
   sendInfo(c); sendArr("lamps",lamps,6,c); sendArr("sw",sw,8,c);
-  sendArr("sound",snd,4,c); sendArr("dip",dipv,4,c);
+  sendArr("sound",snd,4,c); sendArr("dip",dipv,4,c); sendSndInfo(c); sendSysInfo(c); sendTourney(c);
   JsonDocument d; d["t"]="status"; d["outputs"]=outputs?1:0; d["wd"]=wd_tripped?1:0;
   String s; serializeJson(d,s); c->text(s);
 }
@@ -180,11 +229,53 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
       if(on){ snd[n>>3]|=(1<<(n&7)); bridgeWrite(REG_SOUND,(uint8_t)n); } }   // play via gosof80
     sendArr("sound",snd,4,nullptr);
   }
-  else if(!strcmp(cmd,"snd")) {        // ESP WAV player test (S3 sound tier): {c:'snd',n:5}
+  else if(!strcmp(cmd,"snd")) {        // PSOWAV play (S3 sound tier, no diag gate): {c:'snd',n:5}
 #ifndef BOARD_C3
     wavplayer::play(d["n"]|0);
 #endif
   }
+  else if(!strcmp(cmd,"sndinfo")) { sendSndInfo(c); }                 // PSOWAV state for the UI
+  else if(!strcmp(cmd,"gamelist")) { sendGameList(c); }               // games.txt No->rom reference
+  // --- tournament / score-keeping (any change broadcasts the new leaderboard) ---
+  else if(!strcmp(cmd,"tourney"))  { sendTourney(c); }
+  else if(!strcmp(cmd,"t_add"))    { tourney::addPlayer(d["name"]|""); sendTourney(nullptr); }
+  else if(!strcmp(cmd,"t_del"))    { tourney::removePlayer(d["id"]|0); sendTourney(nullptr); }
+  else if(!strcmp(cmd,"t_score"))  { tourney::recordScore(d["id"]|0, (uint32_t)(d["v"]|0)); sendTourney(nullptr); }
+  else if(!strcmp(cmd,"t_undo"))   { tourney::undo(d["id"]|0); sendTourney(nullptr); }
+  else if(!strcmp(cmd,"t_reset"))  { tourney::resetScores(); sendTourney(nullptr); }
+  else if(!strcmp(cmd,"t_clear"))  { tourney::clearAll(); sendTourney(nullptr); }
+  else if(!strcmp(cmd,"t_round"))  { int ids[4],n=0;                          // assign players to P1..Pn
+    for(JsonVariant v:d["ids"].as<JsonArray>()) if(n<4) ids[n++]=v|0;
+    tourney::setRound(ids,n); txt(c,tourney::roundJson()); }
+  else if(!strcmp(cmd,"t_apply"))  { uint32_t sc[4]; int n=0;                 // final game scores -> auto-record
+    for(JsonVariant v:d["scores"].as<JsonArray>()) if(n<4) sc[n++]=(uint32_t)(v|0);
+    tourney::applyScores(sc,n); sendTourney(nullptr); }
+  else if(!strcmp(cmd,"t_mode"))   { tourney::setMode((uint8_t)(d["mode"]|0),  // 0 score / 1 time-attack
+    (uint32_t)(d["start"]|0), (uint32_t)(d["decay"]|0)); sendTourney(nullptr); }
+  else if(!strcmp(cmd,"t_start"))  { tourney::startGame(d["id"]|0, millis());   // time-attack: start the clock
+    JsonDocument a; a["t"]="timer"; a["id"]=tourney::activePlayer(); String s; serializeJson(a,s); txt(nullptr,s); }
+  else if(!strcmp(cmd,"t_stop"))   { uint32_t sc=tourney::stopGame(millis());   // stop -> record time score
+    JsonDocument a; a["t"]="timer"; a["id"]=0; a["score"]=sc; String s; serializeJson(a,s); txt(nullptr,s);
+    sendTourney(nullptr); }
+  else if(!strcmp(cmd,"t_fpga"))   {                                 // arm FPGA tournament mode (lisyctrl CTRL2)
+    if(busOwned){ bool on=(int)(d["on"]|0)!=0; bridgeWrite(REG_CTRL2, on?0x01:0x00);
+      tourneyFpga=(bridgeRead(REG_CTRL2)&1)!=0; }                    // read back the latched value
+    JsonDocument a; a["t"]="tfpga"; a["on"]=tourneyFpga?1:0; a["bus"]=busOwned?1:0;
+    String s; serializeJson(a,s); txt(nullptr,s); }
+  else if(!strcmp(cmd,"sndtheme")) {                                  // load a game's PSOWAV set
+#ifndef BOARD_C3
+    const char* nm=d["name"]|""; if(nm[0]) wavplayer::setTheme(nm);
+#endif
+  }
+  else if(!strcmp(cmd,"sndstop")) {                                   // stop all PSOWAV voices
+#ifndef BOARD_C3
+    wavplayer::stopAll();
+#endif
+  }
+  else if(!strcmp(cmd,"sysinfo")) { sendSysInfo(c); }                 // Système tab readouts
+  else if(!strcmp(cmd,"reboot"))  { rebootAt = millis() + 500;        // reboot the ESP (deploy tab)
+    JsonDocument a; a["t"]="toast"; a["m"]="redémarrage de l'ESP…"; String s; serializeJson(a,s); txt(nullptr,s);
+    Serial.println("[sys] reboot requested via web"); }
   else if(!strcmp(cmd,"disp")) {
     if(!outputs) return; Serial.printf("[diag] disp %d='%s'\n",(int)(d["p"]|0),(const char*)(d["txt"]|""));
     // TODO: encode text -> SEG_A/B/C (lisyctrl 0x40..0x42)
@@ -197,6 +288,7 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
 }
 
 void diag::tick(){
+  if(rebootAt && (int32_t)(millis()-rebootAt) > 0){ Serial.println("[sys] restarting"); delay(50); ESP.restart(); }
   // bus arbitration: acquire/release following the FPGA diag-mode token on the link UART
   // (fpgalink), which replaces the old Debug level. diag and gameplay sound never overlap.
   bool dbg = fpgalink::diagActive();

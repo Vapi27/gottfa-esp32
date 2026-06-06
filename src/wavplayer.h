@@ -10,6 +10,7 @@
 // owned by one task and the ring is single-producer/single-consumer.
 // (C) 2026 Valere Pilpil / Pstore. Original implementation.
 #pragma once
+#include <stdint.h>
 #ifndef BOARD_C3
 namespace wavplayer {
   bool begin();                       // mount SD, init the MCP4921 DAC, start the tasks
@@ -17,5 +18,17 @@ namespace wavplayer {
   bool play(int soundId);             // play "<theme>/<id>.wav" on a free voice
   void stopAll();
   bool ready();
+  // --- status for the web UI (cached; safe to read from another task for display) ---
+  const char* curTheme();             // currently loaded game/theme folder
+  uint32_t    soundMask();            // bit i set => sound id i (0..31) exists in the loaded set
+  uint32_t    loopMask();             // bit i set => sound i loops (attr 'l')
+  uint32_t    voiceMask();            // bit i set => sound i is on the voice bus (attr 'v')
+  int         soundCount();           // number of sounds in the loaded set
+  int         themeCount();           // game folders found on the SD root (cached at begin)
+  const char* themeName(int idx);     // name of cached theme idx, or "" if out of range
+  // game-select: /games.txt maps the FPGA game number (GottFA80_PLuS gamelist No) -> romname/folder
+  void        selectGame(int gameNo); // load the set for FPGA game No (via games.txt)
+  const char* gameRom(int gameNo);    // romname mapped to a game No, or "" if unmapped
+  int         lastSound();            // last sound id played (-1 = none) — for the OLED/status
 }
 #endif

@@ -5,6 +5,8 @@
 #include "net.h"
 #include "wavplayer.h"
 #include "fpgalink.h"
+#include "tourney.h"
+#include "oled.h"
 
 // In NORMAL mode the FPGA is master of the shared SD/EEPROM SPI bus, so the ESP
 // must present Hi-Z on those lines until it is explicitly granted the bus.
@@ -25,6 +27,7 @@ void setup() {
 
   if (!LittleFS.begin(true))
     Serial.println("[fs] LittleFS mount failed (run: pio run -t uploadfs)");
+  tourney::begin();              // load saved tournament (players + scores) from LittleFS
 
   // --- Bring-up step 1: read the FPGA JTAG IDCODE on header P5 ---
   // Non-intrusive even on a running FPGA. Expect 0x020F10DD for the 10CL006.
@@ -38,11 +41,13 @@ void setup() {
   wavplayer::begin();          // SD + MCP4921 polyphonic WAV sound (S3 sound tier)
 #endif
   fpgalink::begin();           // UART from the FPGA Debug pin: diag-mode token (+ sound on S3)
+  oled::begin();               // optional SSD1306 status screen (skipped if absent)
   Serial.println("[boot] ready.");
 }
 
 void loop() {
   fpgalink::poll();            // refresh diag-mode (+ S3: play sounds) before diag::tick reads it
   netLoop();
+  oled::tick();                // refresh the status screen (~2 Hz)
   delay(2);
 }

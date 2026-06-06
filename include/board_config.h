@@ -54,8 +54,8 @@
 #define PIN_JTAG_TDO     7
 #define PIN_COIL_SENSE   1   // ADC1_CH0 — optional coil current-sense input
 // Sound tier (S3): MCP4921 12-bit SPI DAC (MONO) -> DAC_R (Audio1 socket pin 4) ->
-// on-board TDA7267 (+12 V mono amp) -> speaker. Mirrors Ralf's GOSOWAV. A dedicated
-// SD holds the WAV sets (the board SD is FPGA-owned). All 3.3 V.
+// on-board TDA7267 (+12 V mono amp) -> cabinet speaker. This is PSOWAV's audio output
+// (our WAV engine). A dedicated SD holds the PSOWAV sets (the board SD is FPGA-owned). All 3.3 V.
 // MCP4921: /LDAC tied to GND on the board (output updates on /CS rising edge).
 #define AUDIO_RATE     44100
 #define PIN_DAC_SCK      16   // MCP4921 SCK
@@ -66,6 +66,12 @@
 #define PIN_SD_MOSI      40
 #define PIN_SD_CS        41
 #define PIN_FPGA_LINK     8   // UART RX from FPGA Debug pin (K2): diag-mode token + sound#/game#
+// Optional status OLED (SSD1306 128x32 I2C) — free S3 GPIOs; skipped gracefully if absent.
+#define PIN_OLED_SDA     47
+#define PIN_OLED_SCL     48
+#define OLED_W          128
+#define OLED_H           32
+#define OLED_ADDR      0x3C
 #endif
 
 // ---- Coil current sense (OPTIONAL — needs a shunt; default OFF) -------------

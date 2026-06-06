@@ -1,8 +1,11 @@
-// wavset.h — parses a sound set's SD layout (the pwavplayer file convention, adopted
-// for interchange) into an index the player resolves at play time. PURE (no Arduino):
-// only the directory listing is platform; every parser here is host-unit-testable.
+// wavset.h — parses a PSOWAV set's SD layout into an index the player resolves at play
+// time. PSOWAV (Pstore Sound On WAV) = our own WAV sound engine; the on-SD layout is kept
+// compatible with the pwavplayer file format for interchange, but this is a clean-room
+// parser (we read the data format only, not pwavplayer's CC-NC code) and our own generator
+// (psowavgen) produces the sets. PURE (no Arduino): only the directory listing is platform;
+// every parser here is host-unit-testable.
 //
-// File convention (clean-room — we read the data format, not pwavplayer's CC-NC code):
+// PSOWAV set convention (NNNN=id, AAAA=attrs, VVV=volume):
 //   sounds : "NNNN-AAAA-VVV-description.wav"  NNNN=id, AAAA=attrs, VVV=volume 0..100
 //            (short forms "NNNN-VVV.wav" and bare "NNNN.wav" also accepted)
 //   groups : "NNNN-A-M1-M2-...-description.grp"  A = m (random) | r (sequential)
