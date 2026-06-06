@@ -13,6 +13,7 @@
 #include "wavsrc.h"
 #include "wavfile.h"
 #include "wavset.h"
+#include "sndroute.h"
 #include "board_config.h"
 #include <Arduino.h>
 #include <SPI.h>
@@ -49,6 +50,8 @@ namespace {
   volatile int   nThemes = 0;
   char           gameMap[64][24] = {{0}};          // /games.txt: FPGA game No -> romname/folder
   volatile int   g_lastSound = -1;                 // last sound id played (OLED/status)
+  volatile int   curGameNo = -1;                   // FPGA game No of the loaded set (for hybrid routing)
+  bool           g_hybrid = false;                 // config.txt sndmode=hybrid -> GOSOF80 does part of the sound
 
   struct Slot {
     File f; wavsrc::Source src;
@@ -229,7 +232,14 @@ namespace {
     if (!f) return;
     char txt[512]; size_t n = f.read((uint8_t*)txt, sizeof(txt) - 1); txt[n] = 0; f.close();
     wavset::parseConfig(txt, cfg);
-    log_i("[snd] config: mix=%d volv=%d vols=%d stheme=%s", cfg.mix, cfg.volv, cfg.vols, cfg.stheme);
+    // sndmode=hybrid => the FPGA's GOSOF80 synthesises part of the sound; the ESP plays only what
+    // GOSOF80 can't (speech + complex 80B), per sndroute. Default (absent) = full = ESP plays all.
+    g_hybrid = false;
+    char* p = strstr(txt, "sndmode");
+    if (p) { char* nl = strchr(p, '\n'); char sv = nl ? *nl : 0; if (nl) *nl = 0;
+             g_hybrid = strstr(p, "hybrid") != nullptr; if (nl) *nl = sv; }
+    log_i("[snd] config: mix=%d volv=%d vols=%d stheme=%s sndmode=%s",
+          cfg.mix, cfg.volv, cfg.vols, cfg.stheme, g_hybrid ? "hybrid" : "full");
   }
 
   // /games.txt at SD root: lines "<No> <romname>" (# = comment). FPGA game-select No -> folder.
@@ -328,8 +338,17 @@ const char* gameRom(int no)   { return (no >= 0 && no < 64) ? gameMap[no] : ""; 
 int         lastSound()       { return g_lastSound; }
 void selectGame(int no) {                         // FPGA game No -> load that game's set
   if (no < 0 || no >= 64 || !gameMap[no][0]) { log_w("[snd] game No %d not in games.txt", no); return; }
+  curGameNo = no;                                 // remember for hybrid routing (playLive)
   setTheme(gameMap[no]);
 }
+
+// FPGA live sound path: in hybrid mode, skip the commands GOSOF80 already synthesises (per sndroute);
+// in full mode, play everything. play() stays unconditional so the web/diag sound test can play any id.
+bool playLive(int soundId) {
+  if (g_hybrid && !sndroute::espPlays(curGameNo, soundId)) return false;  // GOSOF80 handles it
+  return play(soundId);
+}
+bool soundHybrid() { return g_hybrid; }
 
 } // namespace wavplayer
 #endif // !BOARD_C3

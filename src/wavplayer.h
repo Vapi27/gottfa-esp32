@@ -15,7 +15,9 @@
 namespace wavplayer {
   bool begin();                       // mount SD, init the MCP4921 DAC, start the tasks
   void setTheme(const char* theme);   // per-game folder under the SD root (e.g. "747")
-  bool play(int soundId);             // play "<theme>/<id>.wav" on a free voice
+  bool play(int soundId);             // play "<theme>/<id>.wav" on a free voice (unconditional — web/diag test)
+  bool playLive(int soundId);         // FPGA live path: applies hybrid routing (skips GOSOF80-handled cmds)
+  bool soundHybrid();                 // true if sndmode=hybrid (config.txt) — GOSOF80 does part of the sound
   void stopAll();
   bool ready();
   // --- status for the web UI (cached; safe to read from another task for display) ---

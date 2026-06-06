@@ -30,7 +30,7 @@ void poll() {
     }
 #ifndef BOARD_C3
     else if ((b & 0xE0) == 0x80) {            // sound command 0x80..0x9F
-      wavplayer::play(b & 0x1F);
+      wavplayer::playLive(b & 0x1F);          // hybrid-aware: skips cmds GOSOF80 synthesises
     } else if ((b & 0xC0) == 0x40) {          // game number 0x40..0x7F -> games.txt -> set
       wavplayer::selectGame(b & 0x3F);        // No = GottFA80_PLuS gamelist index
     }
