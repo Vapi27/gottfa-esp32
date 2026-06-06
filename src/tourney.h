@@ -24,6 +24,8 @@ namespace tourney {
   String roundJson();                           // {round:[ids], names:[...]} for the UI
   // --- scoring mode: 0 = pinball score (manual/auto), 1 = TIME ATTACK (start high, decay/sec) ---
   void   setMode(uint8_t mode, uint32_t startPts, uint32_t decayPerSec);
+  uint32_t taStart();                           // current time-attack start points (for FPGA sync)
+  uint32_t taDecay();                           // current time-attack decay/sec   (for FPGA sync)
   void   startGame(int id, uint32_t nowMs);     // time-attack: begin timing a player's game
   uint32_t stopGame(uint32_t nowMs);            // time-attack: end -> max(0,start-decay*s), record, return
   bool   gameActive();                          // a time-attack game is being timed

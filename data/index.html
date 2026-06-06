@@ -278,8 +278,8 @@
       <div class="note">Décompte sur l'afficheur de la machine + anti free-game. À armer en <b>mode diag</b> ; persiste en jeu.</div>
       <div id="taCfg" style="display:none">
         <div class="row" style="margin-top:.7rem;align-items:flex-end">
-          <label class="fld" style="flex:1;margin:0">Départ (pts)<input type="number" id="taStart" value="1000000"></label>
-          <label class="fld" style="flex:1;margin:0">Perte / sec<input type="number" id="taDecay" value="10000"></label>
+          <label class="fld" style="flex:1;margin:0">Départ (pts)<input type="number" id="taStart" value="1000000" min="1" max="9999999" step="1000"></label>
+          <label class="fld" style="flex:1;margin:0">Perte / sec<input type="number" id="taDecay" value="10000" min="1" max="9999999" step="1000"></label>
           <button class="btn" onclick="tCfg()">OK</button>
         </div>
         <div class="taLive" id="taLive" style="display:none">

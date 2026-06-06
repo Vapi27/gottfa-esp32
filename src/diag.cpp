@@ -21,6 +21,8 @@
 #define REG_STATUS   0x02   // b0 active, b1 wd_tripped, b2 is80B
 #define REG_CTRL     0x03   // b0 outputs_en, b1 lamp_blink
 #define REG_CTRL2    0x04   // b0 tournament_mode (latched in lisyctrl -> persists into gameplay)
+#define REG_TA_START 0x05   // 0x05..0x07 time-attack start points (24-bit LMH), persists into gameplay
+#define REG_TA_DECAY 0x08   // 0x08..0x0A time-attack decay/sec   (24-bit LMH), persists into gameplay
 #define REG_SW_ROW0  0x10   // 0x10..0x17  switch matrix (bit=return, 1=closed)
 #define REG_DIPSLAM  0x18
 #define REG_LAMP0    0x20   // 0x20..0x25  48 lamp bits
@@ -68,6 +70,17 @@ namespace {
     delayMicroseconds(3);
     SPI.beginTransaction(SPI_CFG); SPI.transfer(b,2); SPI.endTransaction();
     return b[1];
+  }
+  // Push the time-attack start/decay to the FPGA (24-bit each, low-mid-high) so the on-display
+  // countdown matches the ESP's tourney config. Persists in lisyctrl past diag exit into gameplay.
+  inline void pushTaConfig(uint32_t start, uint32_t decay) {
+    if(!busOwned) return;
+    bridgeWrite(REG_TA_START+0,  start        & 0xFF);
+    bridgeWrite(REG_TA_START+1, (start >>  8) & 0xFF);
+    bridgeWrite(REG_TA_START+2, (start >> 16) & 0xFF);
+    bridgeWrite(REG_TA_DECAY+0,  decay        & 0xFF);
+    bridgeWrite(REG_TA_DECAY+1, (decay >>  8) & 0xFF);
+    bridgeWrite(REG_TA_DECAY+2, (decay >> 16) & 0xFF);
   }
 
   void txt(AsyncWebSocketClient*c, const String&s){ if(c) c->text(s); else if(g_ws) g_ws->textAll(s); }
@@ -149,6 +162,7 @@ namespace {
     uint8_t st = bridgeRead(REG_STATUS);                    // b0 active,b1 wd,b2 is80B
     is80B = (st&0x04)!=0; wd_tripped=(st&0x02)!=0;
     tourneyFpga = (bridgeRead(REG_CTRL2)&1)!=0;             // current latched tournament mode
+    pushTaConfig(tourney::taStart(), tourney::taDecay());   // sync the FPGA countdown to our TA config
     bridgeWrite(REG_CTRL,0x00);                             // outputs OFF (safe on entry)
     bridgeWrite(REG_COIL_FAULT,0x00); coilFault=0;          // clear any latched coil fault
     outputs=false; blink=false;
@@ -251,7 +265,9 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
     for(JsonVariant v:d["scores"].as<JsonArray>()) if(n<4) sc[n++]=(uint32_t)(v|0);
     tourney::applyScores(sc,n); sendTourney(nullptr); }
   else if(!strcmp(cmd,"t_mode"))   { tourney::setMode((uint8_t)(d["mode"]|0),  // 0 score / 1 time-attack
-    (uint32_t)(d["start"]|0), (uint32_t)(d["decay"]|0)); sendTourney(nullptr); }
+    (uint32_t)(d["start"]|0), (uint32_t)(d["decay"]|0));
+    pushTaConfig(tourney::taStart(), tourney::taDecay());                      // sync FPGA on-display countdown
+    sendTourney(nullptr); }
   else if(!strcmp(cmd,"t_start"))  { tourney::startGame(d["id"]|0, millis());   // time-attack: start the clock
     JsonDocument a; a["t"]="timer"; a["id"]=tourney::activePlayer(); String s; serializeJson(a,s); txt(nullptr,s); }
   else if(!strcmp(cmd,"t_stop"))   { uint32_t sc=tourney::stopGame(millis());   // stop -> record time score

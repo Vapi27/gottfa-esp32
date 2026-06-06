@@ -80,7 +80,16 @@ String roundJson(){
 }
 
 // --- scoring mode + time-attack timer ---
-void setMode(uint8_t m, uint32_t sp, uint32_t dp){ mode = m ? 1 : 0; if (sp) startPts = sp; if (dp) decayPS = dp; save(); }
+// clamp to 7 decimal digits: the pinball display is 7 chars AND the lisyctrl TA register is 24-bit
+// (<= 16,777,215), so 9,999,999 keeps the ESP-computed score and the FPGA on-display countdown identical.
+void setMode(uint8_t m, uint32_t sp, uint32_t dp){
+  mode = m ? 1 : 0;
+  if (sp) startPts = (sp > 9999999u) ? 9999999u : sp;
+  if (dp) decayPS  = (dp > 9999999u) ? 9999999u : dp;
+  save();
+}
+uint32_t taStart(){ return startPts; }
+uint32_t taDecay(){ return decayPS; }
 void startGame(int id, uint32_t nowMs){ if (find(id)) { activeId = id; startMs = nowMs; } }
 uint32_t stopGame(uint32_t nowMs){
   if (!activeId) return 0;
