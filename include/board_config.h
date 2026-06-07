@@ -53,14 +53,16 @@
 #define PIN_JTAG_TDI     6
 #define PIN_JTAG_TDO     7
 #define PIN_COIL_SENSE   1   // ADC1_CH0 — optional coil current-sense input
-// Sound tier (S3): MCP4921 12-bit SPI DAC (MONO) -> DAC_R (Audio1 socket pin 4) ->
-// on-board TDA7267 (+12 V mono amp) -> cabinet speaker. This is PSOWAV's audio output
-// (our WAV engine). A dedicated SD holds the PSOWAV sets (the board SD is FPGA-owned). All 3.3 V.
-// MCP4921: /LDAC tied to GND on the board (output updates on /CS rising edge).
+// Sound tier (S3): PCM5102A I2S DAC (line-level) -> on-board TDA7267 (+12 V mono amp) ->
+// cabinet speaker. This is PSOWAV's audio output (our WAV engine), driven by the S3's I2S
+// peripheral via DMA (= ~0 CPU; frees the core the old MCP4921 busy-loop burned). A dedicated
+// SD holds the PSOWAV sets (the board SD is FPGA-owned). All 3.3 V. Line-level so it still sums
+// with GOSOF80's PWM into the shared TDA7267 in a hybrid build.
+// PCM5102A module: SCK->GND (internal PLL, no MCLK needed); FLT/DEMP/XSMT/FMT per module defaults.
 #define AUDIO_RATE     44100
-#define PIN_DAC_SCK      16   // MCP4921 SCK
-#define PIN_DAC_SDI      17   // MCP4921 SDI  (ESP MOSI)
-#define PIN_DAC_CS       18   // MCP4921 /CS  (hardware-framed per sample)
+#define PIN_I2S_BCK      16   // PCM5102A BCK  (bit clock)
+#define PIN_I2S_LRCK     17   // PCM5102A LRCK (word / L-R select)
+#define PIN_I2S_DOUT     18   // PCM5102A DIN  (data)
 #define PIN_SD_SCK       38
 #define PIN_SD_MISO      39
 #define PIN_SD_MOSI      40

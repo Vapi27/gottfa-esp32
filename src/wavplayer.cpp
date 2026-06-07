@@ -22,24 +22,16 @@
 #include <atomic>
 #include "esp_task_wdt.h"
 #include "esp_random.h"
+#include "driver/i2s.h"   // legacy I2S (Arduino-ESP32 2.0.17 / IDF 4.4) — PCM5102A output
 
 namespace {
   constexpr int RATE   = AUDIO_RATE;
-  constexpr int FRAMES = 256;                  // stereo frames mixed per block
-
-  constexpr uint16_t DAC_CFG = 0x3000;         // MCP4921: DAC-A, unbuffered, 1x, active
-  constexpr uint16_t DAC_MID = 0x0800;         // mid-scale = silence
-
-  constexpr uint32_t RING = 4096;              // mono 12-bit samples (~93 ms @ 44.1k)
-  uint16_t              ringBuf[RING];
-  std::atomic<uint32_t> rHead{0};              // producer: mix task
-  std::atomic<uint32_t> rTail{0};              // consumer: dac task
+  constexpr int FRAMES = 256;                  // stereo frames mixed per I2S block
 
   wavmix::Mixer  mixer;                         // mix task only
   wavset::Set    sndset;                        // mix task only (theme index)
   wavset::Config cfg;                           // global config.txt (loaded once)
-  SPIClass       sdspi(HSPI);
-  SPIClass       dacspi(FSPI);
+  SPIClass       sdspi(HSPI);                   // SD only (the DAC is now I2S/DMA, no SPI)
   char           theme[24] = "orgsnd";          // mix task only
   volatile bool  g_ready = false;
   // cached status for the web UI (written by mix task, read for display elsewhere)
@@ -187,42 +179,27 @@ namespace {
     else   log_w("[snd] no sound %d in theme '%s'", r.sound, theme);
   }
 
-  // --- core 1: mixer + SD + set owner; fills the ring in whole blocks ---------
+  // --- core 1: mixer + SD + set owner; writes mixed audio straight to I2S (DMA paces it) -------
+  // No more SPSC ring + cycle-paced DAC task: the I2S peripheral clocks the DMA buffer out by
+  // itself, so i2s_write() blocks only when the DMA queue is full -> natural pacing, ~0 CPU, and
+  // core 0 is now free.
   void mixTask(void*) {
-    static int16_t buf[FRAMES * 2];
+    static int16_t buf[FRAMES * 2];   // mixer output (stereo int16)
+    static int16_t out[FRAMES * 2];   // mono down-mix duplicated to L/R for the I2S frame
     esp_task_wdt_add(nullptr);
     Req req;
     for (;;) {
-      if (xQueueReceive(reqQ, &req, 0) == pdTRUE) handleReq(req);   // at most one set/play op per pass
-      uint32_t h = rHead.load(std::memory_order_relaxed);
-      uint32_t t = rTail.load(std::memory_order_acquire);
-      if (RING - 1 - (h - t) >= (uint32_t)FRAMES) {
-        mixer.mix(buf, FRAMES);
-        for (int i = 0; i < FRAMES; i++) {
-          int32_t mono = ((int32_t)buf[2 * i] + buf[2 * i + 1]) >> 1;
-          ringBuf[(h + i) & (RING - 1)] = (uint16_t)((mono + 32768) >> 4);
-        }
-        rHead.store(h + FRAMES, std::memory_order_release);
-      } else {
-        vTaskDelay(1);
+      if (xQueueReceive(reqQ, &req, 0) == pdTRUE) handleReq(req);   // one set/play op per pass
+      mixer.mix(buf, FRAMES);
+      for (int i = 0; i < FRAMES; i++) {                            // down-mix to mono (clip), duplicate L/R
+        int32_t m = ((int32_t)buf[2 * i] + buf[2 * i + 1]) >> 1;
+        if (m > 32767) m = 32767; else if (m < -32768) m = -32768;
+        out[2 * i] = (int16_t)m; out[2 * i + 1] = (int16_t)m;
       }
+      size_t wrote;
+      i2s_write(I2S_NUM_0, out, sizeof(out), &wrote, portMAX_DELAY); // blocks only when DMA full -> paces to RATE
       reapSlots();
       esp_task_wdt_reset();
-    }
-  }
-
-  // --- core 0: cycle-paced DAC clock; one framed SPI word per sample ----------
-  void dacTask(void*) {
-    const uint32_t cyc = getCpuFrequencyMhz() * 1000000UL / RATE;
-    uint32_t next = ESP.getCycleCount();
-    for (;;) {
-      next += cyc;
-      while ((int32_t)(ESP.getCycleCount() - next) < 0) { }
-      uint32_t t = rTail.load(std::memory_order_relaxed);
-      uint32_t h = rHead.load(std::memory_order_acquire);
-      uint16_t s = DAC_MID;
-      if (h != t) { s = ringBuf[t & (RING - 1)]; rTail.store(t + 1, std::memory_order_release); }
-      dacspi.transfer16(DAC_CFG | (s & 0x0FFF));
     }
   }
 
@@ -269,12 +246,28 @@ bool begin() {
   sdspi.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
   if (!SD.begin(PIN_SD_CS, sdspi, 20000000)) { log_e("[snd] SD mount failed"); return false; }
 
-  dacspi.begin(PIN_DAC_SCK, -1, PIN_DAC_SDI, PIN_DAC_CS);
-  dacspi.setHwCs(true);
-  dacspi.beginTransaction(SPISettings(20000000, MSBFIRST, SPI_MODE0));
+  // I2S TX -> PCM5102A (16-bit, DMA). Mono is sent on both L/R. SCK->GND on the module (no MCLK).
+  i2s_config_t i2scfg = {};
+  i2scfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
+  i2scfg.sample_rate = RATE;
+  i2scfg.bits_per_sample = I2S_BITS_PER_SAMPLE_16BIT;
+  i2scfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
+  i2scfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
+  i2scfg.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
+  i2scfg.dma_buf_count = 8;
+  i2scfg.dma_buf_len = 256;
+  i2scfg.use_apll = true;            // cleaner audio clock
+  i2scfg.tx_desc_auto_clear = true;  // output silence on underrun (no click/repeat)
+  if (i2s_driver_install(I2S_NUM_0, &i2scfg, 0, nullptr) != ESP_OK) { log_e("[snd] I2S install failed"); return false; }
+  i2s_pin_config_t i2spin = {};
+  i2spin.mck_io_num   = I2S_PIN_NO_CHANGE;
+  i2spin.bck_io_num   = PIN_I2S_BCK;
+  i2spin.ws_io_num    = PIN_I2S_LRCK;
+  i2spin.data_out_num = PIN_I2S_DOUT;
+  i2spin.data_in_num  = I2S_PIN_NO_CHANGE;
+  i2s_set_pin(I2S_NUM_0, &i2spin);
 
   mixer.reset();
-  rHead.store(0); rTail.store(0);
 
   // cache the game folders on the SD root for the web UI (now, before the tasks touch SD)
   nThemes = 0;
@@ -291,12 +284,11 @@ bool begin() {
   loadGames();                                    // /games.txt FPGA game-select map
   loadTheme(cfg.stheme);                          // index + autoplay init sounds
 
-  disableCore0WDT();                              // core 0 is the DAC busy-loop
-  xTaskCreatePinnedToCore(dacTask, "dac", 2048, nullptr, configMAX_PRIORITIES - 1, nullptr, 0);
+  // I2S DMA clocks the output -> no core-0 busy-loop. One mix task (core 1); core 0 is free.
   xTaskCreatePinnedToCore(mixTask, "mix", 8192, nullptr, 3, nullptr, 1);
 
   g_ready = true;
-  log_i("[snd] wavplayer ready (MCP4921, %d Hz mono)", RATE);
+  log_i("[snd] wavplayer ready (PCM5102A I2S, %d Hz, mono->L/R)", RATE);
   return true;
 }
 
