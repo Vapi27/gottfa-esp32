@@ -177,6 +177,17 @@ int main() {
     CHECK(p1 == 10 && p2 == 3 && p3 == 10, "Set sequential group 10,3,10");
     CHECK(st.pick(3, 0) == 3, "Set non-group id passthrough"); }
 
+  // 25) stopActiveLoops: a new loop replaces the current loop; oneshots & voice survive
+  { Mixer ml; ml.reset();
+    int16_t cv = 100;
+    VoiceCfg lv; lv.fill = fill_const; lv.ctx = &cv; lv.loop = true;   int idL = ml.trigger(lv);
+    VoiceCfg ov; ov.fill = fill_const; ov.ctx = &cv;                   int idO = ml.trigger(ov);
+    VoiceCfg vv; vv.fill = fill_const; vv.ctx = &cv; vv.voice = true;  int idV = ml.trigger(vv);
+    CHECK(ml.activeCount() == 3, "3 voices before stopActiveLoops");
+    ml.stopActiveLoops();
+    CHECK(!ml.active(idL), "stopActiveLoops stops the looping voice");
+    CHECK(ml.active(idO) && ml.active(idV), "stopActiveLoops keeps oneshot + voice"); }
+
   printf(fails ? "\n=== %d FAIL ===\n" : "\n===== WAVMIX + WAVSET TESTS PASSED =====\n", fails);
   return fails ? 1 : 0;
 }

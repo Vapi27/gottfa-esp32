@@ -47,6 +47,7 @@ public:
   void stopAll();
   void stopTag(int tag);               // break: stop voices playing this sound id
   void stopExcept(bool keepBg, bool keepLoop, bool keepVoice);   // kill/soft-kill/quit
+  void stopActiveLoops();              // mono music: stop active looping (non-voice) voices
   bool active(int id) const;
   int  activeCount() const;
   void setMix(uint8_t mode) { mix_ = mode; }

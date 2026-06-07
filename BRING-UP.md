@@ -9,7 +9,7 @@ Order matters: get the FPGA (MPU replacement) booting first, then the ESP (sound
 - **Two SD cards:** the **FPGA's** SD (128 MB image + game ROMs — bontango's format) and the
   **ESP's** own SD (PSOWAV sound sets). The board SD is FPGA-owned; the ESP has its own.
 - Gottlieb game ROM images (not distributable).
-- `MCP4921` DAC + the on-board `TDA7267` amp path to a speaker.
+- `PCM5102A` DAC + the on-board `TDA7267` amp path to a speaker.
 
 ## SKUs
 - **FULL** (`lisy_enable=true, esp_sound=true`): ESP does diag + all sound + protection.
@@ -45,7 +45,7 @@ copy the result to the **ESP SD root**:
 For a single-game machine, `stheme=<game>` in config.txt is enough.
 
 ## Step 4 — wiring (see include/board_config.h)
-- **Sound:** `MCP4921` SCK=16 / SDI=17 / CS=18 → DAC_R (Audio1 pin 4) → on-board `TDA7267`
+- **Sound:** `PCM5102A` I2S BCK=16 / LRCK=17 / DIN=18 (SCK→GND, internal PLL) → line-out → on-board `TDA7267`
   +12 V amp → cabinet speaker.
 - **FPGA→ESP link:** the FPGA `Debug` pin (K2) → `PIN_FPGA_LINK` (S3 = GPIO8). Carries the
   diag-mode token + sound# (`0x80|s`) + game# (`0x40|No`).
@@ -55,7 +55,7 @@ For a single-game machine, `stheme=<game>` in config.txt is enough.
 ## Step 5 — power on + test
 1. Browse to **http://gottfa.local/** (or the AP IP). The web UI loads (10 tabs).
 2. **Son tab:** the game's set should be loaded (or pick it). Tap a sound → it plays via the
-   MCP4921 → amp → speaker. Or `curl http://gottfa.local/snd?id=6`. No FPGA needed for this test.
+   PCM5102A → amp → speaker. Or `curl http://gottfa.local/snd?id=6`. No FPGA needed for this test.
 3. **Start a game** on the machine → the FPGA sends sound commands on the link → the ESP plays
    the matching WAVs (PSOWAV). Confirm the sounds match the game.
 4. **Diag:** long-press the door TEST switch → diag mode (the UI's "mode contrôle" arms) →

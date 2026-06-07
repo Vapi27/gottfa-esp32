@@ -21,6 +21,9 @@ int Mixer::trigger(const VoiceCfg& c) {
 void Mixer::stop(int id)  { if (id >= 0 && id < MAX_VOICES) v_[id].active = false; }
 void Mixer::stopAll()     { for (auto& vo : v_) vo.active = false; }
 void Mixer::stopTag(int tag) { for (auto& vo : v_) if (vo.active && vo.tag == tag) vo.active = false; }
+// mono background music: a new loop should replace the current one, not stack. Stops active
+// looping voices that are NOT on the voice bus (speech). Oneshots (loop=false) are untouched.
+void Mixer::stopActiveLoops() { for (auto& vo : v_) if (vo.active && vo.loop && !vo.voice) vo.active = false; }
 
 void Mixer::stopExcept(bool keepBg, bool keepLoop, bool keepVoice) {
   for (auto& vo : v_) {

@@ -8,6 +8,11 @@
 #include "diag.h"
 #ifndef BOARD_C3
 #include "wavplayer.h"
+#include "romstore.h"
+#include "romcrypt.h"
+#include <string.h>
+// scratch buffer for a /romup POST body (auto-freed by AsyncWebServerRequest::_tempObject)
+struct RomUp { uint32_t cap; uint32_t got; uint8_t data[1]; };
 #endif
 
 static AsyncWebServer server(80);
@@ -66,8 +71,8 @@ void netBegin() {
 #ifndef BOARD_C3
     if (r->hasParam("id")) {
       int id = r->getParam("id")->value().toInt();
-      bool ok = (id >= 0 && id <= 31) && wavplayer::play(id);
-      r->send(ok ? 200 : 400, "text/plain", ok ? ("play " + String(id)) : "bad id (0..31) or not ready");
+      bool ok = (id >= 0 && id <= 95) && wavplayer::play(id);
+      r->send(ok ? 200 : 400, "text/plain", ok ? ("play " + String(id)) : "bad id (0..95) or not ready");
       return;
     }
     if (r->hasParam("theme")) {
@@ -77,11 +82,78 @@ void netBegin() {
     }
     if (r->hasParam("stop")) { wavplayer::stopAll(); r->send(200, "text/plain", "stopped"); return; }
     r->send(200, "text/plain", String("PSOWAV ") + (wavplayer::ready() ? "ready" : "NOT ready") +
-            "\nusage: /snd?id=N (0..31) | /snd?theme=NAME | /snd?stop=1");
+            "\nusage: /snd?id=N (0..95) | /snd?theme=NAME | /snd?stop=1");
 #else
     r->send(501, "text/plain", "no sound tier on C3");
 #endif
   });
+
+  // --- ROM store: list per-game variants + device key fingerprint + global Free-Play setting ---
+  //   GET /roms -> {"key":"<hex>","fp":0|1,"games":[{"n":N,"s":stock,"se":stockEnc,"f":fp,"fe":fpEnc}]}
+  server.on("/roms", HTTP_GET, [](AsyncWebServerRequest *r) {
+#ifndef BOARD_C3
+    String j = "{\"key\":\"" + String(romcrypt::keyId(), HEX) + "\",\"fp\":" +
+               (romstore::freePlay() ? "1" : "0") + ",\"games\":[";
+    bool first = true;
+    for (int i = 0; i < romstore::MAX_GAME; i++) {
+      bool s = romstore::has(i, false), f = romstore::has(i, true);
+      if (!s && !f) continue;
+      if (!first) j += ',';
+      first = false;
+      j += "{\"n\":" + String(i) +
+           ",\"s\":"  + (s ? "1" : "0") + ",\"se\":" + (romstore::encrypted(i, false) ? "1" : "0") +
+           ",\"f\":"  + (f ? "1" : "0") + ",\"fe\":" + (romstore::encrypted(i, true)  ? "1" : "0") + "}";
+    }
+    j += "]}";
+    r->send(200, "application/json", j);
+#else
+    r->send(501, "text/plain", "no store on C3");
+#endif
+  });
+
+  // --- Free-Play device setting: which ROM variant is served to the FPGA ---
+  //   GET /fp -> {"fp":0|1}   ;   GET /fp?set=0|1 -> set then return the new state
+  server.on("/fp", HTTP_GET, [](AsyncWebServerRequest *r) {
+#ifndef BOARD_C3
+    if (r->hasParam("set")) romstore::setFreePlay(r->getParam("set")->value().toInt() != 0);
+    r->send(200, "application/json", String("{\"fp\":") + (romstore::freePlay() ? "1" : "0") + "}");
+#else
+    r->send(501, "text/plain", "no store on C3");
+#endif
+  });
+
+  // --- ROM upload: POST a raw 16384-byte GottFA game image -> ENCRYPTED into /roms/<NN>.img ---
+  //   POST /romup?id=N[&fp=1]   body = exactly 16384 bytes (the user supplies their own ROM).
+  //   Encryption is device-bound (romcrypt) anti-extraction; it does NOT change legality.
+  server.on("/romup", HTTP_POST,
+    [](AsyncWebServerRequest *r) {
+#ifndef BOARD_C3
+      RomUp *u = (RomUp *)r->_tempObject;
+      if (!u || u->got != u->cap) { r->send(400, "text/plain", "need exactly 16384 bytes"); return; }
+      if (!r->hasParam("id")) { r->send(400, "text/plain", "missing ?id=N"); return; }
+      int id = r->getParam("id")->value().toInt();
+      bool fp = (r->hasParam("fp") && r->getParam("fp")->value().toInt() != 0);
+      bool ok = romstore::store(id, fp, u->data);
+      r->send(ok ? 200 : 500, "text/plain",
+              ok ? ("stored game " + String(id) + (fp ? " (Free Play)" : " (stock)")) : "store failed (key? SD?)");
+#else
+      r->send(501, "text/plain", "no store on C3");
+#endif
+    },
+    NULL,
+    [](AsyncWebServerRequest *r, uint8_t *data, size_t len, size_t index, size_t total) {
+#ifndef BOARD_C3
+      if (index == 0) {
+        if (total != (size_t)romstore::IMG_SIZE) return;     // wrong size -> reject in completion
+        RomUp *u = (RomUp *)malloc(sizeof(RomUp) - 1 + total);
+        if (!u) return;
+        u->cap = (uint32_t)total; u->got = 0;
+        r->_tempObject = u;
+      }
+      RomUp *u = (RomUp *)r->_tempObject;
+      if (u && index + len <= u->cap) { memcpy(u->data + index, data, len); u->got += len; }
+#endif
+    });
 
   // --- Déploiement: OTA firmware update (POST a firmware .bin). Fails gracefully if the
   //     partition scheme has no OTA slot (Update.begin returns false) -> never bricks. To

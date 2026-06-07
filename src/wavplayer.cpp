@@ -44,6 +44,7 @@ namespace {
   volatile int   g_lastSound = -1;                 // last sound id played (OLED/status)
   volatile int   curGameNo = -1;                   // FPGA game No of the loaded set (for hybrid routing)
   bool           g_hybrid = false;                 // config.txt sndmode=hybrid -> GOSOF80 does part of the sound
+  bool           g_hasBanks = false;               // loaded set has banked sounds (id>=32) -> 80B bank/stop semantics
 
   struct Slot {
     File f; wavsrc::Source src;
@@ -104,6 +105,12 @@ namespace {
     else if (e->attr & wavset::A_SKILL) mixer.stopExcept(true, false, false);
     else if (e->attr & wavset::A_QUIT)  mixer.stopExcept(true, true, true);
     if (e->attr & wavset::A_BREAK)      mixer.stopTag(e->id);
+    // Mono background music: a new looping (non-voice) sound REPLACES the current loop instead
+    // of stacking. Verified against the board (SEQ test on excaliba: a sustained sound is taken
+    // over by the next command) and prevents loop pile-up that would exhaust the 8 voices.
+    // Oneshot effects still layer + self-terminate; speech (voice bus) is untouched.
+    if ((e->attr & wavset::A_LOOP) && !(e->attr & wavset::A_VOICE))
+      mixer.stopActiveLoops();
     reapSlots();
     if (e->attr & wavset::A_PLACE) return;       // x = placeholder, no audio
 
@@ -159,8 +166,9 @@ namespace {
     }
     if (dir) dir.close();
     mixer.setMix(cfg.mix);
+    g_hasBanks = false;
     { uint32_t m = 0, lm = 0, vm = 0; for (int i = 0; i < sndset.nEntry; i++) {
-        const wavset::Entry& e = sndset.entry[i]; if (e.id < 0 || e.id >= 32) continue;
+        const wavset::Entry& e = sndset.entry[i]; if (e.id >= 32) g_hasBanks = true; if (e.id < 0 || e.id >= 32) continue;
         m |= (1u << e.id);
         if (e.attr & wavset::A_LOOP)  lm |= (1u << e.id);
         if (e.attr & wavset::A_VOICE) vm |= (1u << e.id); }            // cache set status for web UI
@@ -321,6 +329,18 @@ bool ready()   { return g_ready; }
 // --- cached status for the web UI (benign cross-task reads, display only) ---
 const char* curTheme()        { return theme; }
 uint32_t    soundMask()       { return sndMask; }
+int soundList(uint16_t* out, int max) {           // present sounds (incl. banked 32..95) for the web UI
+  int n = 0;
+  for (int i = 0; i < sndset.nEntry && n < max; i++) {
+    const wavset::Entry& e = sndset.entry[i];
+    if (e.id < 0 || e.id > 95) continue;
+    uint8_t f = 0;
+    if (e.attr & wavset::A_LOOP)  f |= 1;
+    if (e.attr & wavset::A_VOICE) f |= 2;
+    out[n++] = (uint16_t)((e.id << 2) | f);
+  }
+  return n;
+}
 uint32_t    loopMask()        { return loopM; }
 uint32_t    voiceMask()       { return voiceM; }
 int         soundCount()      { return nSnd; }
@@ -337,6 +357,18 @@ void selectGame(int no) {                         // FPGA game No -> load that g
 // FPGA live sound path: in hybrid mode, skip the commands GOSOF80 already synthesises (per sndroute);
 // in full mode, play everything. play() stays unconditional so the web/diag sound test can play any id.
 bool playLive(int soundId) {
+  // Gottlieb System 80B command semantics (verified by ROM 6502 disasm + PinMAME renders),
+  // auto-enabled ONLY when the loaded set has banked sounds (id>=32) so 80/80A & non-banking
+  // sets are unaffected. The 5-bit cmd space is extended by PREFIX commands: cmd 30 arms
+  // bank 1 (next cmd plays id N+32), cmd 29 arms bank 2 (N+64); cmd 31 (0x1F) = native STOP.
+  // 29/30 are silent prefixes on the real board, so they trigger nothing themselves.
+  if (g_hasBanks) {
+    static uint8_t pendBank = 0;
+    if (soundId == 31) { pendBank = 0; stopAll(); return true; }   // 0x1F native stop
+    if (soundId == 30) { pendBank = 32; return true; }             // bank 1 prefix
+    if (soundId == 29) { pendBank = 64; return true; }             // bank 2 prefix
+    soundId += pendBank; pendBank = 0;                             // apply armed bank to this cmd
+  }
   if (g_hybrid && !sndroute::espPlays(curGameNo, soundId)) return false;  // GOSOF80 handles it
   return play(soundId);
 }

@@ -68,7 +68,10 @@
   .coil .n{font-size:1.05rem;font-weight:700}.coil .t{font-size:.62rem;color:var(--muted)}.coil.fire .t{color:#04243a}
   .coil.cshort{background:#3a0d12;border-color:var(--bad);color:var(--bad)}
   .coil.copen{background:#3a2a0d;border-color:var(--warn);color:var(--warn)}
-  .snds{display:grid;grid-template-columns:repeat(6,1fr);gap:6px}
+  .snds{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:6px}
+  .psbank{grid-column:1/-1;font-size:.72rem;color:var(--accent);font-weight:700;margin:.55rem 0 .15rem;letter-spacing:.02em}
+  .psbank span{color:var(--muted);font-weight:400}
+  .psnote{grid-column:1/-1;color:var(--muted);font-size:.82rem;padding:.5rem 0}
   .snd{aspect-ratio:1.4;border-radius:8px;background:var(--panel2);border:1px solid var(--line);
     color:var(--txt);font-size:.7rem;display:flex;align-items:center;justify-content:center;cursor:pointer;text-align:center;padding:2px;line-height:1}
   .snd.on{background:var(--accent);border-color:var(--accent);color:#04243a;font-weight:700}
@@ -253,9 +256,34 @@
         OTA nécessite une partition OTA ; sinon flash USB <code>pio run -t upload</code>.</div>
     </div>
     <div class="panel">
-      <h2>FPGA / ROM jeu — flash 1 clic <span class="pill">à venir</span></h2>
-      <div class="note">Prévu : l'ESP programme le <b>bitstream</b> (EPCS16 via JTAG SFL) + la <b>ROM jeu</b>
-        (NOR/SD), en une action. En développement.</div>
+      <h2>ROMs jeu — store ESP <span class="pill" id="rom_enc">🔒 chiffré</span></h2>
+      <div class="kv"><span class="k">Clé appareil</span><span id="rom_key">—</span></div>
+      <div class="kv"><span class="k">Jeux stockés</span><span id="rom_count">—</span></div>
+      <div class="kv"><span class="k">Le device sert</span>
+        <span style="display:flex;gap:.5rem;align-items:center">
+          <span id="rom_fpst" class="pill">Stock</span>
+          <label class="switch"><input type="checkbox" id="rom_fpdev" onchange="fpToggle(this.checked)"><span class="slide"></span></label>
+        </span></div>
+      <label class="fld">Jeu (n° = DIP S1)</label>
+      <select id="rom_game"></select>
+      <label class="fld">Fichier ROM (.img 16 Ko — fourni par toi)</label>
+      <input type="file" id="rom_file" accept=".img,.bin">
+      <div class="row" style="margin-top:.6rem;align-items:center">
+        <div class="dip" style="flex:none"><span>Version Free Play</span>
+          <label class="switch"><input type="checkbox" id="rom_fp"><span class="slide"></span></label></div>
+        <span class="grow"></span>
+        <button class="btn accent" onclick="romUpload()">⇪ Chiffrer + envoyer</button>
+      </div>
+      <div id="rom_msg" class="note"></div>
+      <div class="note">Par jeu : 2 variantes — <b>stock</b> (<code>NN.img</code>) et <b>Free Play</b> (<code>NNfp.img</code>),
+        audio partagé. Le toggle « le device sert » choisit la variante envoyée au FPGA (secteur 660+N×32, format d'origine).
+        ✓=stock · ⓕ=FP · 🔒=chiffré.</div>
+      <div class="note warn">⚠ Utilise uniquement des ROMs de machines que <b>tu possèdes</b>. Le chiffrement
+        (clé propre à cet ESP) empêche la copie depuis la carte — il ne <b>rend rien légal</b>.</div>
+    </div>
+    <div class="panel">
+      <h2>FPGA bitstream — flash 1 clic <span class="pill">à venir</span></h2>
+      <div class="note">Prévu : l'ESP programme le <b>bitstream</b> (IS25LP016D via JTAG SFL) en une action. En développement.</div>
     </div>
   </section>
 
@@ -331,9 +359,9 @@
 const N_LAMP=48, N_COIL=9, N_SND=32, N_DIP=32;
 const st={ws:null,connected:false,demo:false,outputs:false,is80B:false,blink:false,bus:'normal',lisy:'—',
   sw:Array(8).fill(0), lamps:Array(N_LAMP).fill(0), snd:Array(N_SND).fill(0), dip:Array(N_DIP).fill(0),
-  ps:{ready:false,theme:'',mask:0,loop:0,voice:0,n:0,themes:[]}, games:[], tourney:[],
+  ps:{ready:false,theme:'',mask:0,loop:0,voice:0,n:0,themes:[],snds:[]}, games:[], tourney:[],
   ta:{mode:0,start:1000000,decay:10000,running:0,t0:0,name:''}, tfpga:0, tfpgaBus:0, armed:0,
-  names:{sw:{},lamp:{},coil:{},snd:{}}};
+  names:{sw:{},lamp:{},coil:{},snd:{}}, romHas:{}};
 
 /* ---------- build ---------- */
 function el(cls,html){const d=document.createElement('div');d.className=cls;if(html!=null)d.innerHTML=html;return d;}
@@ -357,8 +385,7 @@ function buildCoils(){const g=document.getElementById('coils');g.innerHTML='';
   for(let i=1;i<=N_COIL;i++){const d=el('coil','<div class="n">'+i+'</div><div class="t" id="kn'+i+'">'+COIL_DEF[i]+'</div>');d.id='k'+i;d.onclick=()=>coil(i);g.appendChild(d);}}
 function buildSnd(){const g=document.getElementById('sndPad');g.innerHTML='';
   for(let i=0;i<N_SND;i++){const b=el('snd','<div>'+i+'</div>');b.id='s'+i;b.onclick=()=>sound(i);g.appendChild(b);}}
-function buildPsPad(){const g=document.getElementById('psPad');g.innerHTML='';
-  for(let i=0;i<N_SND;i++){const b=el('snd absent','<div>'+i+'</div>');b.id='ps'+i;b.onclick=()=>psPlay(i);g.appendChild(b);}}
+function buildPsPad(){const g=document.getElementById('psPad');g.innerHTML='';g.dataset.sig='';}  // built dynamically in renderPs from the loaded ROM's real sound list
 function buildDisp(){const f=document.getElementById('dispFields');f.innerHTML='';
   ['Crédit / Bille (D0)','Joueur 1','Joueur 2','Joueur 3','Joueur 4'].forEach((p,i)=>{
     f.insertAdjacentHTML('beforeend','<label class="fld">'+p+'</label><input type="text" id="d'+i+'" maxlength="7" placeholder="·······">');});}
@@ -378,11 +405,11 @@ function coil(i){if(!gate())return need();const ms=+pw.value,e=document.getEleme
   e.classList.add('fire');setTimeout(()=>e.classList.remove('fire'),Math.max(120,ms));send({c:'coil',i,ms});}
 function sound(i){if(!gate())return need();st.snd[i]^=1;if(st.snd[i])st.snd.forEach((v,j)=>{if(j!=i)st.snd[j]=0});renderSnd();send({c:'sound',n:i});}
 /* ---- PSOWAV (ESP WAV engine — independent of diag mode) ---- */
-function psPlay(i){if(!(st.ps.mask&(1<<i)))return;const e=document.getElementById('ps'+i);
-  e.classList.add('play');setTimeout(()=>e.classList.remove('play'),350);send({c:'snd',n:i});}
+function psPlay(i,e){if(e){e.classList.add('play');setTimeout(()=>e.classList.remove('play'),350);}send({c:'snd',n:i});}
 function psStop(){send({c:'sndstop'});}
 function psTheme(name){if(!name)return;send({c:'sndtheme',name});toast('chargement '+name+'…');
   setTimeout(()=>send({c:'sndinfo'}),500);}   // refresh once the mix task has loaded the set
+function maskToSnds(mask,loop,voice){const a=[];for(let i=0;i<32;i++)if(mask&(1<<i))a.push({i:i,l:(loop>>i)&1,v:(voice>>i)&1});return a;}  // legacy 0-31 fallback
 function swClick(s,r){if(st.demo){st.sw[s]^=(1<<r);renderSw();}}
 function dip(i,v){st.dip[i]=v?1:0;send({c:'dip',i,v:v?1:0});}
 function sendDisp(){if(!gate())return need();
@@ -394,9 +421,15 @@ function renderSw(){for(let s=0;s<8;s++)for(let r=0;r<8;r++)document.getElementB
 function renderLamps(){for(let i=0;i<N_LAMP;i++)document.getElementById('l'+i).classList.toggle('on',!!st.lamps[i]);}
 function renderSnd(){for(let i=0;i<N_SND;i++)document.getElementById('s'+i).classList.toggle('on',!!st.snd[i]);}
 function renderPs(){const p=st.ps;
-  for(let i=0;i<N_SND;i++){const e=document.getElementById('ps'+i);if(!e)continue;
-    const has=!!(p.mask&(1<<i)),v=!!(p.voice&(1<<i)),l=!!(p.loop&(1<<i));
-    e.classList.toggle('absent',!has);e.classList.toggle('voice',has&&v);e.classList.toggle('loop',has&&l&&!v);}
+  const g=document.getElementById('psPad'),sn=p.snds||[];          // ROM-driven responsive pad (base + banks)
+  const sig=p.theme+'|'+sn.map(s=>s.i+(s.l?'l':'')+(s.v?'v':'')).join(',');
+  if(g.dataset.sig!==sig){g.dataset.sig=sig;g.innerHTML='';
+    if(!sn.length)g.innerHTML='<div class="psnote">— '+(p.ready?'aucun son (charge un jeu)':'moteur hors-ligne')+' —</div>';
+    else [['Base',0,31],['Banque 1',32,63],['Banque 2',64,95]].forEach(([lab,lo,hi])=>{
+      const grp=sn.filter(s=>s.i>=lo&&s.i<=hi);if(!grp.length)return;
+      if(lo>0)g.insertAdjacentHTML('beforeend','<div class="psbank">'+lab+' <span>('+grp.length+')</span></div>');
+      grp.forEach(s=>{const b=el('snd'+(s.v?' voice':(s.l?' loop':'')),'<div>'+s.i+'</div>');b.onclick=()=>psPlay(s.i,b);g.appendChild(b);});
+    });}
   const pill=document.getElementById('ps_ready');
   pill.textContent='moteur : '+(p.ready?'prêt':'hors-ligne')+(p.theme?(' · '+p.theme+' ('+p.n+')'):'');
   pill.classList.toggle('on',p.ready);
@@ -478,6 +511,43 @@ function doOta(){const f=document.getElementById('otaFile').files[0],msg=documen
   if(st.demo){msg.textContent='(démo — pas d’envoi réel)';return;}
   msg.textContent='envoi '+f.name+'…';const fd=new FormData();fd.append('firmware',f,f.name);
   fetch('/ota',{method:'POST',body:fd}).then(r=>r.text()).then(t=>{msg.textContent=t;}).catch(e=>{msg.textContent='erreur : '+e;});}
+/* ---- ROM store (encrypted /roms) — GottFA80_PLuS gamelist (Appendix A, No 0..62 = DIP S1) ---- */
+const GAMELIST=["Panthera","Spiderman","Circus","Counterforce","Star Race","James Bond (Timed)",
+  "James Bond (3/5-Ball)","Time Line","Force II","Pink Panther","Mars (Speech)","Mars (Soundonly)",
+  "Volcano (Speech)","Volcano (Soundonly)","Black Hole","Black Hole (Soundonly)","Haunted House",
+  "Eclipse","Devil's Dare (Speech)","Devil's Dare (Soundonly)","Rocky","Spirit","Punk!","Striker",
+  "Krull","Q*Bert's Quest","Super Orbit","Royal Flush Deluxe","Goin' Nuts","Amazon Hunt","Rack 'Em Up",
+  "Ready...Aim...Fire!","Jacks To Open","Touchdown","Alien Star","The Games","El Dorado","Ice Fever",
+  "Caveman","Caveman (flip)","Bounty Hunter","Chicago Cubs Triple Play","Tag Team","Rock","Raven",
+  "Rock Encore","Hollywood Heat","Genesis","Gold Wings","Monte Carlo","Spring Break","Arena","Victory",
+  "Diamond Lady","TX Sector","Robo War","Excalibur","Bad Girls","Big House","Hot Shots","Bone Busters Inc.",
+  "Night Moves","Amazon Hunt II"];
+function buildRomGames(){const s=document.getElementById('rom_game');if(!s||s.options.length)return;
+  GAMELIST.forEach((nm,i)=>{const o=document.createElement('option');o.value=i;o.textContent=pad(i)+' — '+nm;s.appendChild(o);});}
+function renderRomGames(){const s=document.getElementById('rom_game');if(!s)return;
+  [...s.options].forEach(o=>{const n=+o.value,h=st.romHas[n];let tag='';
+    if(h)tag=' '+(h.s?('✓'+(h.se?'🔒':'')):'')+(h.f?(' ⓕ'+(h.fe?'🔒':'')):'');
+    o.textContent=pad(n)+' — '+GAMELIST[n]+tag;});}
+function setFpPill(fp){const pl=document.getElementById('rom_fpst');if(pl){pl.textContent=fp?'Free Play':'Stock';pl.classList.toggle('on',!!fp);}
+  const cb=document.getElementById('rom_fpdev');if(cb)cb.checked=!!fp;}
+function romFetchList(){if(st.demo){document.getElementById('rom_count').textContent='(démo)';return;}
+  fetch('/roms').then(r=>r.json()).then(d=>{
+    document.getElementById('rom_key').textContent=d.key?('id '+d.key):'—';
+    const a=d.games||[];
+    document.getElementById('rom_count').textContent=a.length?(a.length+' / 63'):'aucun';
+    st.romHas={};a.forEach(g=>st.romHas[g.n]={s:!!g.s,se:!!g.se,f:!!g.f,fe:!!g.fe});renderRomGames();
+    setFpPill(!!d.fp);
+  }).catch(()=>{document.getElementById('rom_count').textContent='(hors-ligne)';});}
+function fpToggle(on){if(st.demo){setFpPill(on);return;}
+  fetch('/fp?set='+(on?1:0)).then(r=>r.json()).then(d=>{setFpPill(!!d.fp);toast('device sert : '+(d.fp?'Free Play':'Stock'));}).catch(()=>{});}
+function romUpload(){const f=document.getElementById('rom_file').files[0],msg=document.getElementById('rom_msg');
+  if(!f){msg.textContent='choisis un fichier .img (16384 octets)';return;}
+  if(st.demo){msg.textContent='(démo — pas d’envoi réel)';return;}
+  if(f.size!==16384){msg.textContent='⚠ taille '+f.size+' octets ≠ 16384 (une image GottFA = 16 Ko)';return;}
+  const id=+document.getElementById('rom_game').value,fp=document.getElementById('rom_fp').checked?1:0;
+  msg.textContent='chiffrement + envoi ('+(fp?'Free Play':'stock')+')…';
+  fetch('/romup?id='+id+'&fp='+fp,{method:'POST',body:f}).then(r=>r.text()).then(t=>{msg.textContent=t;romFetchList();})
+    .catch(e=>{msg.textContent='erreur : '+e;});}
 function renderGate(){document.querySelectorAll('#lamp .grid,#lamp .row,#coil .coils,#snd .snds,#dispFields,#disp80b')
   .forEach(e=>e.classList.toggle('disabled',!gate()));}
 function renderNames(){
@@ -513,7 +583,8 @@ function handle(m){
   else if(m.t==='lamps'){for(let i=0;i<N_LAMP;i++)st.lamps[i]=(m.d[i>>3]>>(i&7))&1;renderLamps();}
   else if(m.t==='sound'){for(let i=0;i<N_SND;i++)st.snd[i]=(m.d[i>>3]>>(i&7))&1;renderSnd();}
   else if(m.t==='sndinfo'){st.ps.ready=!!m.ready;st.ps.theme=m.theme||'';st.ps.mask=m.mask||0;st.ps.n=m.n||0;
-    st.ps.loop=m.loop||0;st.ps.voice=m.voice||0;if(Array.isArray(m.themes))st.ps.themes=m.themes;renderPs();}
+    st.ps.loop=m.loop||0;st.ps.voice=m.voice||0;if(Array.isArray(m.themes))st.ps.themes=m.themes;
+    st.ps.snds=Array.isArray(m.snds)?m.snds.map(v=>({i:v>>2,l:v&1,v:(v>>1)&1})):maskToSnds(m.mask,m.loop,m.voice);renderPs();}
   else if(m.t==='gamelist'){st.games=m.g||[];renderGames();}
   else if(m.t==='tourney'){st.tourney=m.players||[];
     if('mode'in m){st.ta.mode=m.mode;st.ta.start=m.start||1000000;st.ta.decay=m.decay||10000;}
@@ -610,12 +681,12 @@ document.getElementById('mst').onchange=e=>{
 document.getElementById('tabs').onclick=e=>{const t=e.target.dataset.t;if(t){
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b===e.target));
   document.querySelectorAll('section').forEach(s=>s.classList.toggle('active',s.id===t));
-  if(t==='sys'||t==='deploy')reqSys();if(t==='deploy')reqGames();}};
+  if(t==='sys'||t==='deploy')reqSys();if(t==='deploy'){reqGames();romFetchList();}}};
 let tT;function toast(msg){const c=document.getElementById('conn'),o=c.textContent;c.textContent=msg;
   clearTimeout(tT);tT=setTimeout(()=>setConn(st.connected?'ok':st.demo?'demo':''),1400);}
 
 /* ---------- boot ---------- */
-buildMatrix();buildLamps();buildCoils();buildSnd();buildPsPad();buildDisp();buildDips();
+buildMatrix();buildLamps();buildCoils();buildSnd();buildPsPad();buildDisp();buildDips();buildRomGames();
 applySys();applyBus();renderGate();renderPs();renderTourney();renderMode();renderTfpga();setConn('');connect();
 </script>
 </body>

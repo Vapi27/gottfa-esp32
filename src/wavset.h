@@ -39,7 +39,7 @@ bool parseGroup(const char* fname, Group& g);    // returns false if not a valid
 void parseConfig(const char* text, Config& c);   // whole /config.txt content
 void defaultConfig(Config& c);                   // volv=vols=100, mix=div2, stheme="orgsnd"
 
-constexpr int MAX_ENTRIES = 64;
+constexpr int MAX_ENTRIES = 96;   // base 0-31 + bank1 32-63 + bank2 64-95 (80B PSOROM/bank sounds)
 constexpr int MAX_GROUPS  = 16;
 
 struct Set {

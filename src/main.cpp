@@ -4,6 +4,7 @@
 #include "jtag.h"
 #include "net.h"
 #include "wavplayer.h"
+#include "romstore.h"
 #include "fpgalink.h"
 #include "tourney.h"
 #include "dispinject.h"
@@ -39,7 +40,8 @@ void setup() {
 
   netBegin();
 #ifndef BOARD_C3
-  wavplayer::begin();          // SD + MCP4921 polyphonic WAV sound (S3 sound tier)
+  wavplayer::begin();          // SD + PCM5102A I2S polyphonic WAV sound (S3 sound tier)
+  romstore::begin();           // game-ROM image store on the SD (/roms/<NN>.img) — one-card foundation
 #endif
   fpgalink::begin();           // UART from the FPGA Debug pin: diag-mode token (+ sound on S3)
   dispinject::begin();         // UART TX to FPGA Audio_RX: time-attack display digits (S3; no-op C3)

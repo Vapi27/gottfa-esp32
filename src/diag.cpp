@@ -139,6 +139,8 @@ namespace {
     d["loop"]=wavplayer::loopMask(); d["voice"]=wavplayer::voiceMask();
     JsonArray th=d["themes"].to<JsonArray>();
     for(int i=0;i<wavplayer::themeCount();i++) th.add(wavplayer::themeName(i));
+    { uint16_t lst[96]; int sn=wavplayer::soundList(lst,96);   // real per-ROM sound list (ids 0..95, incl. banks)
+      JsonArray a=d["snds"].to<JsonArray>(); for(int i=0;i<sn;i++) a.add(lst[i]); }
     String s; serializeJson(d,s); txt(c,s);
 #else
     (void)c;
@@ -323,6 +325,13 @@ void diag::tick(){
   // clears when we stop sending (game over). The FPGA injects whatever digits we send (7-seg/16-seg).
   { static uint32_t lastDisp=0; uint32_t nd=millis();
     if(tourney::gameActive() && nd-lastDisp>=250){ lastDisp=nd; dispinject::send(tourney::liveScore(nd)); } }
+#ifndef BOARD_C3
+  // responsive-to-ROM: when the FPGA selects a different game (theme changes), push the new
+  // per-ROM sound list to the web UI so the sound pad rebuilds live (no manual refresh).
+  { static uint32_t lastChk=0; static String lastSnd;
+    if(millis()-lastChk>200){ lastChk=millis(); String t=wavplayer::curTheme();
+      if(t!=lastSnd){ lastSnd=t; sendSndInfo(nullptr); } } }
+#endif
   // bus arbitration: acquire/release following the FPGA diag-mode token on the link UART
   // (fpgalink), which replaces the old Debug level. diag and gameplay sound never overlap.
   bool dbg = fpgalink::diagActive();

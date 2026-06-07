@@ -26,6 +26,7 @@ namespace wavplayer {
   uint32_t    loopMask();             // bit i set => sound i loops (attr 'l')
   uint32_t    voiceMask();            // bit i set => sound i is on the voice bus (attr 'v')
   int         soundCount();           // number of sounds in the loaded set
+  int         soundList(uint16_t* out, int max);  // present sounds: out[i]=(id<<2)|loop|voice<<1; count (ids 0..95)
   int         themeCount();           // game folders found on the SD root (cached at begin)
   const char* themeName(int idx);     // name of cached theme idx, or "" if out of range
   // game-select: /games.txt maps the FPGA game number (GottFA80_PLuS gamelist No) -> romname/folder
