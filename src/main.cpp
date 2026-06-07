@@ -6,6 +6,7 @@
 #include "wavplayer.h"
 #include "fpgalink.h"
 #include "tourney.h"
+#include "dispinject.h"
 #include "oled.h"
 
 // In NORMAL mode the FPGA is master of the shared SD/EEPROM SPI bus, so the ESP
@@ -41,6 +42,7 @@ void setup() {
   wavplayer::begin();          // SD + MCP4921 polyphonic WAV sound (S3 sound tier)
 #endif
   fpgalink::begin();           // UART from the FPGA Debug pin: diag-mode token (+ sound on S3)
+  dispinject::begin();         // UART TX to FPGA Audio_RX: time-attack display digits (S3; no-op C3)
   oled::begin();               // optional SSD1306 status screen (skipped if absent)
   Serial.println("[boot] ready.");
 }

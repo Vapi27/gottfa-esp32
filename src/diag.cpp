@@ -6,6 +6,7 @@
 #include "wavplayer.h"
 #include "fpgalink.h"
 #include "tourney.h"
+#include "dispinject.h"
 
 // ===========================================================================
 //  LISYcontrol backend.  Browser <--WebSocket(JSON)--> here <--SPI--> lisyctrl.
@@ -317,6 +318,11 @@ void diag::tick(){
         else  { uint32_t sc=tourney::stopGame(millis());
           JsonDocument a; a["t"]="timer"; a["id"]=0; a["score"]=sc; String s; serializeJson(a,s); txt(nullptr,s);
           sendTourney(nullptr); } } } }
+  // option B: stream the live time-attack countdown to the FPGA (separate UART pin) so it shows on
+  // the machine display during gameplay — works while the ESP is OFF the SPI bus. FPGA arm self-
+  // clears when we stop sending (game over). The FPGA injects whatever digits we send (7-seg/16-seg).
+  { static uint32_t lastDisp=0; uint32_t nd=millis();
+    if(tourney::gameActive() && nd-lastDisp>=250){ lastDisp=nd; dispinject::send(tourney::liveScore(nd)); } }
   // bus arbitration: acquire/release following the FPGA diag-mode token on the link UART
   // (fpgalink), which replaces the old Debug level. diag and gameplay sound never overlap.
   bool dbg = fpgalink::diagActive();

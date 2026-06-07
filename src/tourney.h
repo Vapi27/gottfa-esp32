@@ -29,6 +29,7 @@ namespace tourney {
   void   startGame(int id, uint32_t nowMs);     // time-attack: begin timing a player's game
   uint32_t stopGame(uint32_t nowMs);            // time-attack: end -> max(0,start-decay*s), record, return
   bool   gameActive();                          // a time-attack game is being timed
+  uint32_t liveScore(uint32_t nowMs);           // current countdown value (0 if none) — for the on-display inject
   int    activePlayer();                         // the player currently timed (0 = none)
   void   arm(int id);                           // arm a player to auto-time at the next FPGA game-start
   int    armed();                               // armed player id (0 = none)

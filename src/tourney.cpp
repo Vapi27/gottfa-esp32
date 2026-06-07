@@ -99,6 +99,11 @@ uint32_t stopGame(uint32_t nowMs){
   recordScore(activeId, sc); activeId = 0; return sc;
 }
 bool gameActive(){ return activeId != 0; }
+uint32_t liveScore(uint32_t nowMs){               // current countdown (= what the display shows), 0 if idle
+  if (!activeId) return 0;
+  uint32_t loss = ((nowMs - startMs) / 1000) * decayPS;
+  return (loss >= startPts) ? 0 : (startPts - loss);
+}
 int  activePlayer(){ return activeId; }
 void arm(int id){ armedId = find(id) ? id : 0; }
 int  armed(){ return armedId; }

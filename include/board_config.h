@@ -66,6 +66,7 @@
 #define PIN_SD_MOSI      40
 #define PIN_SD_CS        41
 #define PIN_FPGA_LINK     8   // UART RX from FPGA Debug pin (K2): diag-mode token + sound#/game#
+#define PIN_FPGA_DISP_TX  9   // UART TX to FPGA Audio_RX/PIN_2 (hybrid): time-attack display digits (option B)
 // Optional status OLED (SSD1306 128x32 I2C) — free S3 GPIOs; skipped gracefully if absent.
 #define PIN_OLED_SDA     47
 #define PIN_OLED_SCL     48
