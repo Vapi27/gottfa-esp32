@@ -6,6 +6,7 @@
 #include "psorom.h"
 #include "fake6502.h"
 #include "emu2149.h"      // AY-3-8910/8913 (MIT, M. Okazaki) pour Gen1/Gen2
+#include "sp0250.h"       // voix SP0250 (BSD-3, O. Galibert / MAME) pour Gen1
 #include <string.h>
 #include <stdlib.h>
 
@@ -73,13 +74,14 @@ static inline void dacFromVolData(){ g_dacHeld=(int16_t)((int)dac_vol*(int)dac_d
 // ---- AY-3-8910/8913 via emu2149 (MIT). Gen1 = 2 puces (bit3 selectionne), Gen2 = 1. Horloge AY = 2 MHz. ----
 static const uint32_t AY_CLK=2000000, AY_FS=32000;
 static PSG*    g_psg[2] = {nullptr,nullptr};
-static uint8_t ayLatch=0, ayAddr[2]={0,0}, ayCtlLast=0;
-static void ayControl(uint8_t d){          // partie AY de s80bs1_sound_control_w (Gen1 0x4000 / Gen2 0xa000)
-  if((ayCtlLast & 0x04) && !(d & 0x04)){    // BDIR front descendant
+static uint8_t ayLatch=0, ayAddr[2]={0,0}, ayCtlLast=0, spLatch=0;
+static void ayControl(uint8_t d){          // s80bs1_sound_control_w : AY (Gen1 0x4000 / Gen2 0xa000) + SP0250 (Gen1)
+  if((ayCtlLast & 0x04) && !(d & 0x04)){    // bit2 = BDIR, front descendant
     int chip = (d & 0x08) ? 0 : 1;          // bit3 : Gen1 a 2 puces, Gen2 = chip0
-    if(d & 0x10) ayAddr[chip] = ayLatch & 0x0f;                          // BC1=1 -> latch adresse registre
+    if(d & 0x10) ayAddr[chip] = ayLatch & 0x0f;                          // bit4 = BC1=1 -> latch adresse registre
     else if(g_psg[chip]) PSG_writeReg(g_psg[chip], ayAddr[chip], ayLatch); // BC1=0 -> ecrit la data
   }
+  if(g_gen==1 && (ayCtlLast & 0x40) && !(d & 0x40)) sp0250::feed(spLatch);  // bit6 front desc -> SP0250 data present
   ayCtlLast = d;
 }
 static uint8_t y_read(uint16_t a){ if(a<0x0800)return yRam[a];
@@ -90,7 +92,7 @@ static uint8_t y_read(uint16_t a){ if(a<0x0800)return yRam[a];
   if(g_gen==2 && a==0x4000) return 0;                  // Gen2 sound_input (dips/test) -> 0
   if(a>=0x8000)return yRom[a]; return 0; }
 static void y_write(uint16_t a,uint8_t d){ if(a<0x0800){yRam[a]=d;return;}
-  if(g_gen==1){ if(a==0x2000){ymW++;return;}                       // Gen1: SP0250 speech latch (a venir)
+  if(g_gen==1){ if(a==0x2000){spLatch=d; ymW++; return;}           // Gen1: latch octet pour le SP0250
                 if(a==0x4000){nmi_enable=d&1; ayControl(d); return;} // sound_control: nmi_en + strobe AY (+SP0250)
                 if(a==0x8000){ayLatch=d; ymW++; return;}           // latch AY (data sur le bus)
                 if(a==0xa000){nmi_rate=d;return;}
@@ -156,8 +158,9 @@ void reset() {
   if (g_board==GTS80S) { memset(&rt,0,sizeof(rt)); rt.divider=1024; rt.in_b=0x20; reset6502(); }
   else {
     soundlatch=0; nmi_rate=0; nmi_enable=0; dac_vol=0; dac_data=0; ymW=0; firstCmd=0;
-    ayLatch=0; ayAddr[0]=ayAddr[1]=0; ayCtlLast=0; g_dacHeld=0;
+    ayLatch=0; ayAddr[0]=ayAddr[1]=0; ayCtlLast=0; spLatch=0; g_dacHeld=0;
     for(int i=0;i<2;i++) if(g_psg[i]) PSG_reset(g_psg[i]);
+    if(g_gen==1) sp0250::reset();
     wallclk=0; nextYnmi=0xffffffff; yIrq=dIrq=yNmi=dNmi=false;
     g_cpu=0; reset6502(); saveCpu(cY);
     g_cpu=1; reset6502(); saveCpu(cD);
@@ -218,13 +221,16 @@ int ayFs(){ return (int)AY_FS; }
 // Mixeur a cadence fixe AY_FS : fait avancer l'emulateur (~1MHz wallclk) et produit n echantillons
 // = DAC maintenu (sample&hold) + AY. Appele a la cadence AY_FS par la boucle -> temps-reel + mix.
 int renderMix(int16_t* out, int n){
-  static double cyc=0; const double per = 1000000.0/(double)AY_FS;   // ~31.25 wallclk-units/echantillon
+  static double cyc=0, spAcc=0; static int16_t spHeld=0;
+  const double per = 1000000.0/(double)AY_FS;        // ~31.25 wallclk-units/echantillon
+  const double spPer = 10000.0/(double)AY_FS;        // SP0250 : trame ~10 kHz -> sur-echantillonne a AY_FS
   for(int i=0;i<n;i++){
     cyc += per;
-    while(cyc >= 64.0){ run(1); cyc -= 64.0; }                       // run(1) = 1 quantum -> wallclk += 64
+    while(cyc >= 64.0){ run(1); cyc -= 64.0; }       // run(1) = 1 quantum -> wallclk += 64
     int32_t s = g_dacHeld;
     if(g_psg[0]) s += PSG_calc(g_psg[0]);
     if(g_psg[1]) s += PSG_calc(g_psg[1]);
+    if(g_gen==1){ spAcc += spPer; if(spAcc>=1.0){ spAcc-=1.0; spHeld=(int16_t)(sp0250::next()<<8); } s += spHeld; }
     if(s>32767)s=32767; else if(s<-32768)s=-32768; out[i]=(int16_t)s;
   }
   return n;
