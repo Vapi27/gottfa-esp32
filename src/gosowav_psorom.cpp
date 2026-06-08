@@ -28,6 +28,7 @@
 #include "driver/sdmmc_host.h"   // montage SD via l'IDF (comme Ralf), avec SDMMC_SLOT_FLAG_INTERNAL_PULLUP
 #include "sdmmc_cmd.h"
 #include "esp_vfs_fat.h"
+#include "esp_timer.h"           // esp_timer_get_time() : horloge us pour le cadencement temps-reel
 #include "psorom.h"
 
 // MCP4921 sur la WROVER GOSOWAV (fait matériel de la carte) : SCK=18, SDI/MOSI=23, CS=5.
@@ -245,6 +246,7 @@ void setup() {
 }
 
 void loop() {
+  static int64_t s_t0 = 0, s_emu = 0;                              // base temps-reel (us) + ticks combines emules
   if (g_pendingLoad >= 0) {                                        // (re)chargement de jeu demandé
     int i = g_pendingLoad; g_pendingLoad = -1;
     g_ready = false;
@@ -258,6 +260,7 @@ void loop() {
         g_thrM = cyc / 1e6f;
         Serial.printf("THROUGHPUT: %.2f M 6502-cycles/sec   (80B temps-reel ~2.0 M)\n", g_thrM);
       }
+      s_t0 = esp_timer_get_time(); s_emu = 0;                      // (re)cale le temps-reel sur ce jeu
       g_ready = true;
     }
     return;
@@ -265,9 +268,20 @@ void loop() {
   if (!g_ready) { vTaskDelay(5 / portTICK_PERIOD_MS); return; }    // pas de jeu chargé : le web reste vivant
   int pc = g_pendingCmd;                                           // commande web/série (handoff lock-free)
   if (pc >= 0) { g_pendingCmd = -1; psorom::command((uint8_t)pc); }
-  psorom::run(800);
-  int16_t buf[128]; int n = psorom::dacDrain(buf, 128);
-  for (int i = 0; i < n; i++) dacOut(buf[i]);
+
+  // --- CADENCEMENT TEMPS-REEL : l'horloge combinee (2x 6502 @1MHz) doit avancer a 2 ticks/us. On
+  // avance l'emulateur par petits pas pour coller au mur, et on sort les echantillons DAC au fil de
+  // l'eau (le DAC est un sample&hold -> pitch correct). La marge ~26% est rendue en delay.
+  int64_t now = esp_timer_get_time();
+  int64_t target = (now - s_t0) * 2;                               // 2.0 MHz combine = temps-reel
+  if (target - s_emu > 4000000) { s_t0 = now; s_emu = 0; }         // >2s de retard -> recale (anti-emballement)
+  else if (s_emu < target) {
+    s_emu += psorom::run(48);                                      // 1 quantum (~128 ticks ~64us de temps-reel)
+    int16_t buf[64]; int n = psorom::dacDrain(buf, 64);
+    for (int i = 0; i < n; i++) dacOut(buf[i]);
+  } else {
+    delayMicroseconds(40);                                         // en avance -> on rend la main (marge de debit)
+  }
   if (Serial.available()) { int c = Serial.parseInt(); if (c >= 0 && c <= 95) { g_pendingCmd = c; Serial.printf("-> cmd %d\n", c); } }
 }
 #endif // GOSOWAV_BENCH
