@@ -27,5 +27,8 @@ uint16_t pcNow();                                   // debug
 uint32_t dacCount();                                // total DAC writes since reset
 uint32_t insCount();                                // total instructions (both CPUs for 80B)
 uint32_t ymWrites();                                // 80B: YM2151 register writes (chip stubbed)
+int      ayRender(int16_t* out, int n);             // Gen1/Gen2: rend n echantillons AY (emu2149) @ ayFs()
+int      ayFs();                                    // frequence d'echantillonnage AY (Hz)
+int      renderMix(int16_t* out, int n);            // 80B: avance l'emu + rend n ech. mixes (DAC + AY) @ ayFs()
 
 } // namespace psorom

@@ -5,6 +5,7 @@
 // (C) 2026 Valere Pilpil / Pstore. Original implementation (CPU core = PD Fake6502).
 #include "psorom.h"
 #include "fake6502.h"
+#include "emu2149.h"      // AY-3-8910/8913 (MIT, M. Okazaki) pour Gen1/Gen2
 #include <string.h>
 #include <stdlib.h>
 
@@ -66,7 +67,21 @@ static void saveCpu(Cpu&c){ c.pc=pc;c.sp=sp;c.a=a;c.x=x;c.y=y;c.st=status; }
 static void loadCpu(Cpu&c){ pc=c.pc;sp=c.sp;a=c.a;x=c.x;y=c.y;status=c.st; }
 
 static int g_gen=3;                                    // 1=AY+SP0250 (Gen1), 2=AY (Gen2), 3=YM2151 (Gen3)
-static inline void dacFromVolData(){ dacPush((int16_t)((int)dac_vol*(int)dac_data - 0x4000)); } // sample = vol*data
+static int16_t g_dacHeld=0;                            // dernier echantillon DAC (sample&hold) pour le mixeur
+static inline void dacFromVolData(){ g_dacHeld=(int16_t)((int)dac_vol*(int)dac_data - 0x4000); dacPush(g_dacHeld); }
+
+// ---- AY-3-8910/8913 via emu2149 (MIT). Gen1 = 2 puces (bit3 selectionne), Gen2 = 1. Horloge AY = 2 MHz. ----
+static const uint32_t AY_CLK=2000000, AY_FS=32000;
+static PSG*    g_psg[2] = {nullptr,nullptr};
+static uint8_t ayLatch=0, ayAddr[2]={0,0}, ayCtlLast=0;
+static void ayControl(uint8_t d){          // partie AY de s80bs1_sound_control_w (Gen1 0x4000 / Gen2 0xa000)
+  if((ayCtlLast & 0x04) && !(d & 0x04)){    // BDIR front descendant
+    int chip = (d & 0x08) ? 0 : 1;          // bit3 : Gen1 a 2 puces, Gen2 = chip0
+    if(d & 0x10) ayAddr[chip] = ayLatch & 0x0f;                          // BC1=1 -> latch adresse registre
+    else if(g_psg[chip]) PSG_writeReg(g_psg[chip], ayAddr[chip], ayLatch); // BC1=0 -> ecrit la data
+  }
+  ayCtlLast = d;
+}
 static uint8_t y_read(uint16_t a){ if(a<0x0800)return yRam[a];
   if(g_gen==1){ if(a==0xa800)return soundlatch; if(a==0xb000){dNmi=true;return 0;}   // GTS80BS1
                 if(a==0x6000)return 0; if(a>=0xc000)return yRom[a]; return 0; }
@@ -75,16 +90,16 @@ static uint8_t y_read(uint16_t a){ if(a<0x0800)return yRam[a];
   if(g_gen==2 && a==0x4000) return 0;                  // Gen2 sound_input (dips/test) -> 0
   if(a>=0x8000)return yRom[a]; return 0; }
 static void y_write(uint16_t a,uint8_t d){ if(a<0x0800){yRam[a]=d;return;}
-  if(g_gen==1){ if(a==0x2000){ymW++;return;}           // Gen1: SP0250 speech latch (chip write)
-                if(a==0x4000){nmi_enable=d&1;return;}  // sound_control (AY/SP0250 strobe stubbed; bit0=nmi_en)
-                if(a==0x8000){ymW++;return;}           // AY-3-8910 latch (chip write)
+  if(g_gen==1){ if(a==0x2000){ymW++;return;}                       // Gen1: SP0250 speech latch (a venir)
+                if(a==0x4000){nmi_enable=d&1; ayControl(d); return;} // sound_control: nmi_en + strobe AY (+SP0250)
+                if(a==0x8000){ayLatch=d; ymW++; return;}           // latch AY (data sur le bus)
                 if(a==0xa000){nmi_rate=d;return;}
                 if(a==0xb000){dNmi=true;return;} return; }
   if(g_gen==3 && a==0x4000){ ymW++; return; }          // Gen3 YM2151 (stubbed -> PSOWAV trigger)
-  if(g_gen==2 && a==0x8000){ ymW++; return; }          // Gen2 AY latch  (stubbed -> PSOWAV trigger)
+  if(g_gen==2 && a==0x8000){ ayLatch=d; ymW++; return; }           // Gen2 AY latch (data sur le bus)
   if(a==0x6000){ nmi_rate=d; return; }
   if(a==0x7000){ dNmi=true; return; }
-  if(a==0xa000){ nmi_enable=d&1; ym_port=(d&0x80)?1:0; return; }  // sound_control
+  if(a==0xa000){ nmi_enable=d&1; ym_port=(d&0x80)?1:0; if(g_gen==2) ayControl(d); return; }  // sound_control
 }
 static uint8_t d_read(uint16_t a){ if(a<0x0800)return dRam[a];
   if(g_gen==1){ if(a==0x8000)return soundlatch; if(a>=0xe000)return dRom[a]; return 0; }   // GTS80BS1
@@ -118,6 +133,12 @@ bool begin(Board b, const uint8_t* rom1, size_t len1, const uint8_t* rom2, size_
     for(int i=0;i<0x100;i++) sRam1[i]=sRom[0x0700+i];
   } else {
     g_gen = (b==GTS80B_GEN1) ? 1 : (b==GTS80B_GEN2) ? 2 : 3;
+    int nay = (g_gen==1)?2:(g_gen==2)?1:0;             // Gen1=2 AY, Gen2=1 AY, Gen3=0 (YM2151)
+    for(int i=0;i<2;i++){
+      if(i<nay){ if(!g_psg[i]) g_psg[i]=PSG_new(AY_CLK, AY_FS);
+                 PSG_setVolumeMode(g_psg[i],2); PSG_setQuality(g_psg[i],1); PSG_reset(g_psg[i]); }
+      else if(g_psg[i]){ PSG_delete(g_psg[i]); g_psg[i]=nullptr; }
+    }
     if(!rom1||!rom2||!len1||!len2) return false;
     if(!yRom) yRom=(uint8_t*)malloc(0x10000); if(!dRom) dRom=(uint8_t*)malloc(0x10000);
     if(!yRom||!dRom) return false;
@@ -135,6 +156,8 @@ void reset() {
   if (g_board==GTS80S) { memset(&rt,0,sizeof(rt)); rt.divider=1024; rt.in_b=0x20; reset6502(); }
   else {
     soundlatch=0; nmi_rate=0; nmi_enable=0; dac_vol=0; dac_data=0; ymW=0; firstCmd=0;
+    ayLatch=0; ayAddr[0]=ayAddr[1]=0; ayCtlLast=0; g_dacHeld=0;
+    for(int i=0;i<2;i++) if(g_psg[i]) PSG_reset(g_psg[i]);
     wallclk=0; nextYnmi=0xffffffff; yIrq=dIrq=yNmi=dNmi=false;
     g_cpu=0; reset6502(); saveCpu(cY);
     g_cpu=1; reset6502(); saveCpu(cD);
@@ -182,5 +205,29 @@ uint16_t pcNow(){ return pc; }
 uint32_t dacCount(){ return dacWrites; }
 uint32_t insCount(){ return instructions; }
 uint32_t ymWrites(){ return ymW; }
+// Rend n echantillons @ AY_FS = melange des AY actifs (etat courant). Pour validation host + futur mixeur.
+int ayRender(int16_t* out, int n){
+  for(int i=0;i<n;i++){ int32_t s=0;
+    if(g_psg[0]) s+=PSG_calc(g_psg[0]);
+    if(g_psg[1]) s+=PSG_calc(g_psg[1]);
+    if(s>32767)s=32767; else if(s<-32768)s=-32768; out[i]=(int16_t)s; }
+  return n;
+}
+int ayFs(){ return (int)AY_FS; }
+
+// Mixeur a cadence fixe AY_FS : fait avancer l'emulateur (~1MHz wallclk) et produit n echantillons
+// = DAC maintenu (sample&hold) + AY. Appele a la cadence AY_FS par la boucle -> temps-reel + mix.
+int renderMix(int16_t* out, int n){
+  static double cyc=0; const double per = 1000000.0/(double)AY_FS;   // ~31.25 wallclk-units/echantillon
+  for(int i=0;i<n;i++){
+    cyc += per;
+    while(cyc >= 64.0){ run(1); cyc -= 64.0; }                       // run(1) = 1 quantum -> wallclk += 64
+    int32_t s = g_dacHeld;
+    if(g_psg[0]) s += PSG_calc(g_psg[0]);
+    if(g_psg[1]) s += PSG_calc(g_psg[1]);
+    if(s>32767)s=32767; else if(s<-32768)s=-32768; out[i]=(int16_t)s;
+  }
+  return n;
+}
 
 } // namespace psorom

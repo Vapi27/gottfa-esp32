@@ -278,18 +278,19 @@ void loop() {
   int pc = g_pendingCmd;                                           // commande web/série (handoff lock-free)
   if (pc >= 0) { g_pendingCmd = -1; psorom::command((uint8_t)pc); }
 
-  // --- CADENCEMENT TEMPS-REEL : l'horloge combinee (2x 6502 @1MHz) doit avancer a 2 ticks/us. On
-  // avance l'emulateur par petits pas pour coller au mur, et on sort les echantillons DAC au fil de
-  // l'eau (le DAC est un sample&hold -> pitch correct). La marge ~26% est rendue en delay.
+  // --- MIXEUR A CADENCE FIXE (Fs) : on sort des echantillons mixes (DAC maintenu + AY) a la frequence
+  // Fs ; renderMix() fait avancer l'emulateur a ~1 MHz (temps-reel) en interne. On cale la sortie sur
+  // Fs via esp_timer -> pitch correct + AY mixe. (DAC seul si Gen3 sans AY, identique a avant.)
+  const int FS = psorom::ayFs();
   int64_t now = esp_timer_get_time();
-  int64_t target = (now - s_t0) * 2;                               // 2.0 MHz combine = temps-reel
-  if (target - s_emu > 4000000) { s_t0 = now; s_emu = 0; }         // >2s de retard -> recale (anti-emballement)
+  int64_t target = (now - s_t0) * FS / 1000000;                    // nb d'echantillons dus a l'instant
+  if (target - s_emu > (int64_t)FS * 2) { s_t0 = now; s_emu = 0; } // >2s de retard -> recale
   else if (s_emu < target) {
-    s_emu += psorom::run(48);                                      // 1 quantum (~128 ticks ~64us de temps-reel)
-    int16_t buf[64]; int n = psorom::dacDrain(buf, 64);
+    int16_t buf[32]; int n = psorom::renderMix(buf, 32);           // DAC + AY, 32 ech.
     for (int i = 0; i < n; i++) dacOut(buf[i]);
+    s_emu += n;
   } else {
-    delayMicroseconds(40);                                         // en avance -> on rend la main (marge de debit)
+    delayMicroseconds(150);                                        // en avance -> on rend la main
   }
   if (Serial.available()) { int c = Serial.parseInt(); if (c >= 0 && c <= 95) { g_pendingCmd = c; Serial.printf("-> cmd %d\n", c); } }
 }
