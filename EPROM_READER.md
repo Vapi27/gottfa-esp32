@@ -85,12 +85,27 @@ and the data path are identical.
 | — | 2×0.1 µF decoupling, 1–2 jumpers, header | <1 |
 Protoboard or a tiny 2-layer PCB. Powered from the board's existing 5 V + 3.3 V.
 
-## 7. Limits (honest — true for *any* reader, USB or on-board)
-- ✅ **80B + all socketed EPROMs** (2716/2732/2764, DROM/YROM sound) → dumped fine.
-- ❌ **80/80A system U2/U3** = 4Kx8 **mask-ROM** with quirky Gottlieb chip-select polarity → need a
-  **2332 read adapter** (different wiring U2 vs U3 + a 7404). ❌ **80/80A sound 6530 RIOT** = internal
-  factory mask-ROM → **unreadable** by anything. → use the verified **PinMAME dumps** for those
-  (what GottFA assumes anyway).
+## 7. U2/U3 mask ROMs (80/80A system) — solved in firmware, NO extra hardware
+The 80/80A system ROMs **U2/U3** are **2332** mask ROMs (4Kx8), not EPROMs — different pinout and
+**mask-defined chip-select polarity** (the thing that needs a "2332 adapter + 7404" on a normal
+programmer). On THIS board it's **firmware-only**: a 2332 inserted **bottom-justified** in the
+2764-wired ZIF lands its three quirky pins on our controllable 595 outputs —
+| 2332 signal | chip pin | → socket | → 595 |
+|---|---|---|---|
+| A11 | 18 | 20 | **Q13** (the /CE line) |
+| CS1 | 20 | 22 | **Q14** (the /OE line) |
+| CS2 | 21 | 23 | **Q11** (the A11 line) |
+
+— so we drive each independently (no 7404 needed). `epromdump` modes **`T2332_U2` / `T2332_U3`**
+put A11 on Q13 and drive the selects at the Gottlieb polarity: **U2 = CS1(pin20) HIGH + CS2(pin21)
+LOW**, **U3 = both HIGH**. Endpoint: `GET /dump?type=u2` / `?type=u3`. Same insertion as a 24-pin
+part (JP1 = 24-pin Vcc); a 2332 has **no Vpp**. *(Polarity presets are from the verified study;
+confirm on the first real chip — if a dump is all 0xFF/0x00, the CS2 level is flipped.)*
+
+## 7b. Remaining limit (true for *any* reader)
+- ✅ **80B + all socketed EPROMs** (2716/2732/2764, DROM/YROM sound) **and now 80/80A U2/U3** → dumped.
+- ❌ **80/80A sound 6530 RIOT** = ROM **internal to the RIOT chip**, factory-masked → **unreadable**
+  by anything. → use the verified **PinMAME** sound dump (it's a sound ROM anyway → PSOWAV covers it).
 - A dumped chip is a **raw 2/4/8 KB image**. Assembling chips into the GottFA **16 KB game image**
   (pad + concat game + system) is a separate step — and the exact layout differs across GottFA
   manual versions (HW20 v1.01 = 4 KB game | 4 KB soundcard | 8 KB system; a v4.00 doc = 8 KB game |

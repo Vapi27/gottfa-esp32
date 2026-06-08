@@ -10,8 +10,15 @@
 
 namespace epromdump {
 
-enum Type { T2716 = 0, T2732, T2764 };          // 2 KB / 4 KB / 8 KB (A0..A10 / A11 / A12)
-inline size_t sizeOf(Type t) { return t == T2716 ? 2048u : t == T2732 ? 4096u : 8192u; }
+// Standard EPROMs (A0..A12 + /CE + /OE), plus the Gottlieb 80/80A system mask ROMs U2/U3 (2332
+// type, 4Kx8). A 2332 sits bottom-justified in the 2764-wired ZIF, which lands its three quirky
+// pins on controllable 595 outputs (A11->Q13, CS1->Q14, CS2->Q11), so U2/U3 are read by FIRMWARE
+// alone — no adapter, no 7404. CS polarity: U2 = pin20 HIGH + pin21 LOW ; U3 = both HIGH.
+enum Type { T2716 = 0, T2732, T2764, T2332_U2, T2332_U3 };
+inline size_t sizeOf(Type t) {                   // 2716=2K, 2764=8K, 2732 + both 2332 = 4K
+  return (t == T2716) ? 2048u : (t == T2764) ? 8192u : 4096u;
+}
+inline bool is2332(Type t) { return t == T2332_U2 || t == T2332_U3; }
 
 void   begin();                                  // claim the 5 GPIOs (no-op unless enabled)
 bool   available();                              // reader enabled + ready

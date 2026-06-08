@@ -110,7 +110,8 @@ void netBegin() {
     if (!epromdump::available()) { r->send(503, "text/plain", "EPROM reader disabled (set EPROM_READER_ENABLE=1 + fit the board)"); return; }
     epromdump::Type t = epromdump::T2764;
     if (r->hasParam("type")) { String s = r->getParam("type")->value();
-      t = (s == "2716") ? epromdump::T2716 : (s == "2732") ? epromdump::T2732 : epromdump::T2764; }
+      t = (s == "2716") ? epromdump::T2716 : (s == "2732") ? epromdump::T2732 :
+          (s == "u2")   ? epromdump::T2332_U2 : (s == "u3") ? epromdump::T2332_U3 : epromdump::T2764; }
     String name = r->hasParam("name") ? r->getParam("name")->value() : String("dump");
     String path = "/dumps/" + name + ".bin";
     bool ok = epromdump::dumpToSD(t, path.c_str());

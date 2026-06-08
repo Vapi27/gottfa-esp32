@@ -31,6 +31,19 @@ static uint16_t busWord(uint32_t addr, bool ceAssert, bool oeAssert) {
   return w;
 }
 
+// 2332 mask ROM (Gottlieb U2/U3): bottom-justified in the 2764-wired ZIF, the three quirky pins
+// remap onto controllable 595 outputs -> A11=Q13 (socket20), CS1=Q14 (socket22), CS2=Q11 (socket23).
+// So reading is firmware-only (no adapter / no 7404): drive A0..A11 + the two chip-selects at the
+// Gottlieb mask polarity. csA/csB = the LEVEL to drive on CS1(pin20)/CS2(pin21) to enable the read.
+static uint16_t busWord2332(uint32_t addr, bool csA, bool csB) {
+  uint16_t w = (uint16_t)(addr & 0x07FF);             // A0..A10 -> Q0..Q10
+  if ((addr >> 11) & 1) w |= (1u << 13);              // A11 -> Q13 (socket pin 20)
+  if (csA)              w |= (1u << 14);              // CS1 -> Q14 (socket pin 22)
+  if (csB)              w |= (1u << 11);              // CS2 -> Q11 (socket pin 23)
+  w |= (1u << 15);                                    // spare held high
+  return w;
+}
+
 // Parallel-load the 165 then shift the byte in. Wiring: EPROM D0->165 A ... D7->165 H, so QH=D7
 // first; reading MSB-first reconstructs the byte.
 static uint8_t readData() {
@@ -61,12 +74,16 @@ size_t readChip(Type t, uint8_t* buf, size_t bufLen) {
   if (!g_ready || !buf) return 0;
   size_t n = sizeOf(t);
   if (bufLen < n) return 0;
+  const bool m2332 = is2332(t);
+  const bool csA = true;                              // CS1 (pin20) = HIGH to read (U2 and U3)
+  const bool csB = (t == T2332_U3);                   // CS2 (pin21): U3 = HIGH, U2 = LOW
   for (size_t a = 0; a < n; a++) {
-    setBus(busWord(a, true, true));                   // address + /CE=0 + /OE=0
-    delayMicroseconds(2);                             // EPROM access time + settle
+    if (m2332) setBus(busWord2332(a, csA, csB));
+    else       setBus(busWord(a, true, true));        // EPROM: address + /CE=0 + /OE=0
+    delayMicroseconds(2);                             // access time + settle
     buf[a] = readData();
   }
-  setBus(busWord(0, false, false));                   // deselect
+  setBus(m2332 ? busWord2332(0, false, false) : busWord(0, false, false));   // deselect
   return n;
 }
 
