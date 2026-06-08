@@ -58,6 +58,14 @@ which `psorom.cpp` provides = the sound-board memory map.
   real-time cost — but per characterization the YM is minor/mono on the tested 80B games).
 
 ## Status
-Stage 1 + **Stage 2 (GTS80S) DONE**: the original 6530 sound program runs on the vendored 6502 and
-produces real, distinct per-command DAC audio (host + ESP builds). Remaining: PinMAME sample-diff to
-prove fidelity, the **80B dual-6502 + YM2151/AY** target, and Stage 3 (ESP audio-task + bench).
+- **GTS80S DONE**: 6530 program runs → distinct per-command DAC audio.
+- **80B Gen3 (GTS80BS3) dual-6502 DONE (host + ESP builds)**: both 6502s run time-sliced (the global
+  PD core is context-switched), the command→soundlatch+IRQ + Y-NMI-timer + cross-NMI chain works, and
+  **the per-command chip behaviour matches our PinMAME characterization exactly** — badgirls: cmd 22 →
+  13 315 DAC writes + 1338 YM (DAC music), cmd 26 → 12 584 DAC (music), cmd 3 → 0 DAC + 3066 YM (pure
+  YM effect). So the D-CPU streams the DAC **directly** (the bulk of 80B sound) and the Y-CPU's YM2151
+  register writes are **captured** (→ map to PSOWAV sample triggers next). The PSOROM thesis is proven
+  on the real target.
+- **Remaining:** map captured YM/AY writes → PSOWAV triggers (or light YM synth); sample-exact DAC
+  diff vs PinMAME (scaling/timing fidelity); Gen1/Gen2 (AY) maps (trivial vs Gen3); **Stage 3** = ESP
+  RTOS audio-task feeding PCM5102A + FPGA command link → `psorom::command()` + real-time bench.

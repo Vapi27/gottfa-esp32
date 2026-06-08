@@ -1,12 +1,9 @@
-// psorom.h — PSOROM: run the ORIGINAL Gottlieb sound-board 6502 + sound ROM (exact-by-construction
-// sound). The 6502 (vendored PD Fake6502) executes the real ROM; chip writes are intercepted —
-// the DAC port becomes audio samples directly (the bulk of 80B sound is DAC), control chips
-// (YM2151/AY) become PSOWAV sample triggers. So orchestration (start/stop/replace/game-over) is
-// exact because it IS the original program running.
-//
-// STAGE 1 (this file): the single-6502 board (GTS80S = 6530 RIOT + DAC) — which is also the 80B
-// D-CPU (DAC) core. STAGE 2: 80B dual-6502 + YM2151/AY (Y-CPU) + cycle-accurate 6530 timer +
-// diff vs PinMAME. STAGE 3: ESP audio-task integration + real-time bench. See PSOROM.md.
+// psorom.h — PSOROM: run the ORIGINAL Gottlieb sound-board 6502(s) + sound ROM on the ESP for
+// exact-by-construction sound. DAC writes become audio directly; control chips (YM2151/AY) become
+// PSOWAV triggers (logged for now). See PSOROM.md.
+//   GTS80S       : 1×6502 + 6530 RIOT + DAC (also the 80B D-CPU core).
+//   GTS80B_GEN3  : 2×6502 (Y = YM2151, D = DAC) + cross-NMI — the 80B target.
+// CPU core = vendored PUBLIC-DOMAIN Fake6502 (global state; the dual-CPU board context-switches it).
 // (C) 2026 Valere Pilpil / Pstore. Original implementation (CPU core = PD Fake6502).
 #pragma once
 #include <stdint.h>
@@ -14,16 +11,19 @@
 
 namespace psorom {
 
-// code = the 6530 system ROM (6530sy80.bin, program + vectors, mapped at the top); data = the
-// per-game sound ROM (.snd = 4-bit DAC nibble data at 0x0400, may be NULL). Inits RIOT + resets.
-bool     begin(const uint8_t* code, size_t codeLen, const uint8_t* data, size_t dataLen);
-void     reset();
-void     command(uint8_t cmd);                      // inject a sound command (RIOT port B + IRQ)
-uint32_t run(uint32_t cycles);                      // execute ~cycles 6502 ticks; returns ticks run
-int      dacDrain(int16_t* out, int maxN);          // drain captured DAC samples; returns count
+enum Board { GTS80S = 0, GTS80B_GEN3 = 1 };
 
-uint16_t pcNow();                                   // current 6502 PC (debug)
-uint32_t dacCount();                                // total DAC writes since reset (debug)
-uint32_t insCount();                                // total instructions executed (debug)
+// GTS80S:      rom1 = 6530 system code (6530sy80.bin), rom2 = per-game .snd (4-bit DAC data).
+// GTS80B_GEN3: rom1 = Y-CPU ROM (yrom1.snd),           rom2 = D-CPU ROM (drom1.snd).
+bool     begin(Board b, const uint8_t* rom1, size_t len1, const uint8_t* rom2, size_t len2);
+void     reset();
+void     command(uint8_t cmd);                      // inject a sound command (MPU-style, inverted for 80B)
+uint32_t run(uint32_t cycles);                      // run ~cycles (per CPU for 80B); returns ticks
+int      dacDrain(int16_t* out, int maxN);          // drain captured DAC samples
+
+uint16_t pcNow();                                   // debug
+uint32_t dacCount();                                // total DAC writes since reset
+uint32_t insCount();                                // total instructions (both CPUs for 80B)
+uint32_t ymWrites();                                // 80B: YM2151 register writes (chip stubbed)
 
 } // namespace psorom
