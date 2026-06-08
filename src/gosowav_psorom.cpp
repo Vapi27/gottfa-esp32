@@ -29,11 +29,11 @@
 #include "sdmmc_cmd.h"
 #include "esp_vfs_fat.h"
 #include "esp_timer.h"           // esp_timer_get_time() : horloge us pour le cadencement temps-reel
+#include "soc/gpio_struct.h"     // GPIO.out_w1ts/w1tc : bit-bang du MCP4921 en ISR (comme Ralf)
 #include "psorom.h"
 
 // MCP4921 sur la WROVER GOSOWAV (fait matériel de la carte) : SCK=18, SDI/MOSI=23, CS=5.
 static const int DAC_SCK = 18, DAC_SDI = 23, DAC_CS = 5;
-static SPIClass dacspi(HSPI);
 
 static WebServer server(80);
 
@@ -52,16 +52,34 @@ static volatile bool g_ready = false;    // un jeu est chargé + émulateur tour
 static char         g_status[96] = "booting...";
 static volatile int g_vol = 100;         // volume maitre % (0..200, 100 = normal) applique au DAC
 
-static inline void dacOut(int16_t s) {
-  int32_t x = ((int32_t)s * g_vol) / 100;                          // volume maitre (autour de 0 = silence)
-  if (x > 32767) x = 32767; else if (x < -32768) x = -32768;       // clamp anti-wrap si boost > 100%
-  uint16_t v = (uint16_t)((x + 32768) >> 4) & 0x0FFF;              // 16-bit signé -> 12-bit non signé
-  dacspi.beginTransaction(SPISettings(20000000, MSBFIRST, SPI_MODE0));
-  digitalWrite(DAC_CS, LOW);
-  dacspi.transfer16(0x3000 | v);                                   // 0x3000 = cfg MCP4921 (DAC-A,1x,actif)
-  digitalWrite(DAC_CS, HIGH);
-  dacspi.endTransaction();
+// --- Sortie audio cadencee par TIMER MATERIEL (comme Ralf) : un ring SPSC rempli par loop(), vide
+// --- par une ISR a Fs exact qui bit-bang le MCP4921. Fini les rafales SPI -> flux DAC regulier = son
+// --- propre. (producteur = loop core1, consommateur = ISR core1 -> meme coeur, pas de race.)
+#define ARING 2048
+static volatile int16_t  s_ring[ARING];
+static volatile uint32_t s_rHead = 0, s_rTail = 0;   // head = producteur (loop), tail = conso (ISR)
+static hw_timer_t*       s_dacTimer = nullptr;
+
+static inline void IRAM_ATTR dacBitbang(uint16_t word) {           // MCP4921, MSB first, SCK18/MOSI23/CS5
+  GPIO.out_w1tc = (1u << DAC_CS);                                  // CS bas
+  for (int b = 15; b >= 0; b--) {
+    if (word & (1u << b)) GPIO.out_w1ts = (1u << DAC_SDI); else GPIO.out_w1tc = (1u << DAC_SDI);
+    GPIO.out_w1ts = (1u << DAC_SCK); GPIO.out_w1tc = (1u << DAC_SCK);  // front montant SCK
+  }
+  GPIO.out_w1ts = (1u << DAC_CS);                                  // CS haut -> latch
 }
+
+static void IRAM_ATTR onDacTimer() {                              // tire 1 echantillon du ring a chaque tick Fs
+  uint32_t t = s_rTail;
+  static int16_t held = 0;
+  if (t != s_rHead) { held = s_ring[t]; s_rTail = (t + 1) & (ARING - 1); }  // sinon : maintient (sample&hold)
+  int32_t x = ((int32_t)held * g_vol) / 100;                      // volume maitre
+  if (x > 32767) x = 32767; else if (x < -32768) x = -32768;
+  dacBitbang(0x3000 | (uint16_t)(((x + 32768) >> 4) & 0x0FFF));
+}
+
+static inline bool ringFull()  { return ((s_rHead + 1) & (ARING - 1)) == s_rTail; }
+static inline void ringPush(int16_t s) { uint32_t h = s_rHead; s_ring[h] = s; s_rHead = (h + 1) & (ARING - 1); }
 
 static const char* MP = "/sdcard";          // point de montage VFS
 static sdmmc_card_t* s_card = nullptr;
@@ -246,16 +264,19 @@ static void sdInitTask(void*) {
 void setup() {
   Serial.begin(115200); delay(500);
   Serial.println("\n=== GOSOWAV PSOROM multi-jeux (notre 6502 emu sur hardware reel) ===");
-  pinMode(DAC_CS, OUTPUT); digitalWrite(DAC_CS, HIGH);
-  dacspi.begin(DAC_SCK, -1, DAC_SDI, DAC_CS);
-  dacOut(0);                                                       // mi-échelle = silence
+  pinMode(DAC_SCK, OUTPUT); pinMode(DAC_SDI, OUTPUT); pinMode(DAC_CS, OUTPUT);
+  GPIO.out_w1ts = (1u << DAC_CS); GPIO.out_w1tc = (1u << DAC_SCK); // CS haut, SCK bas
+  dacBitbang(0x3000 | 2048);                                       // mi-échelle = silence
+  s_dacTimer = timerBegin(0, 4, true);                             // 80MHz/4 = 20 MHz
+  timerAttachInterrupt(s_dacTimer, &onDacTimer, true);
+  timerAlarmWrite(s_dacTimer, 20000000 / psorom::ayFs(), true);    // 20MHz/32000 = 625 -> 32 kHz pile
+  timerAlarmEnable(s_dacTimer);                                    // -> flux DAC regulier des maintenant
   startWeb();                                                      // AP + tâche web EN PREMIER
   xTaskCreatePinnedToCore(sdInitTask, "sdinit", 8192, nullptr, 1, nullptr, 1);
   Serial.println("web up (core 0); SD/manifeste dans sa tache. Choix du jeu sur la page.");
 }
 
 void loop() {
-  static int64_t s_t0 = 0, s_emu = 0;                              // base temps-reel (us) + ticks combines emules
   if (g_pendingLoad >= 0) {                                        // (re)chargement de jeu demandé
     int i = g_pendingLoad; g_pendingLoad = -1;
     g_ready = false;
@@ -269,7 +290,6 @@ void loop() {
         g_thrM = cyc / 1e6f;
         Serial.printf("THROUGHPUT: %.2f M 6502-cycles/sec   (80B temps-reel ~2.0 M)\n", g_thrM);
       }
-      s_t0 = esp_timer_get_time(); s_emu = 0;                      // (re)cale le temps-reel sur ce jeu
       g_ready = true;
     }
     return;
@@ -278,20 +298,14 @@ void loop() {
   int pc = g_pendingCmd;                                           // commande web/série (handoff lock-free)
   if (pc >= 0) { g_pendingCmd = -1; psorom::command((uint8_t)pc); }
 
-  // --- MIXEUR A CADENCE FIXE (Fs) : on sort des echantillons mixes (DAC maintenu + AY) a la frequence
-  // Fs ; renderMix() fait avancer l'emulateur a ~1 MHz (temps-reel) en interne. On cale la sortie sur
-  // Fs via esp_timer -> pitch correct + AY mixe. (DAC seul si Gen3 sans AY, identique a avant.)
-  const int FS = psorom::ayFs();
-  int64_t now = esp_timer_get_time();
-  int64_t target = (now - s_t0) * FS / 1000000;                    // nb d'echantillons dus a l'instant
-  if (target - s_emu > (int64_t)FS * 2) { s_t0 = now; s_emu = 0; } // >2s de retard -> recale
-  else if (s_emu < target) {
-    int16_t buf[32]; int n = psorom::renderMix(buf, 32);           // DAC + AY, 32 ech.
-    for (int i = 0; i < n; i++) dacOut(buf[i]);
-    s_emu += n;
-  } else {
-    delayMicroseconds(150);                                        // en avance -> on rend la main
+  // --- On GARDE LE RING PLEIN : le timer ISR le vide a Fs exact -> flux DAC regulier. renderMix()
+  // fait avancer l'emulateur+puces et fixe le pitch ; le ring (back-pressure) cale le temps-reel.
+  int guard = 0;
+  while (!ringFull() && guard++ < 96) {
+    int16_t buf[32]; int n = psorom::renderMix(buf, 32);          // DAC + AY + voix mixes
+    for (int i = 0; i < n && !ringFull(); i++) ringPush(buf[i]);
   }
+  delayMicroseconds(300);                                          // ring plein -> petite pause (l'ISR vide)
   if (Serial.available()) { int c = Serial.parseInt(); if (c >= 0 && c <= 95) { g_pendingCmd = c; Serial.printf("-> cmd %d\n", c); } }
 }
 #endif // GOSOWAV_BENCH
