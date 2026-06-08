@@ -14,7 +14,9 @@
 
 namespace psorom {
 
-bool     begin(const uint8_t* rom, size_t romLen);  // map ROM at top of 64K, init RIOT, reset
+// code = the 6530 system ROM (6530sy80.bin, program + vectors, mapped at the top); data = the
+// per-game sound ROM (.snd = 4-bit DAC nibble data at 0x0400, may be NULL). Inits RIOT + resets.
+bool     begin(const uint8_t* code, size_t codeLen, const uint8_t* data, size_t dataLen);
 void     reset();
 void     command(uint8_t cmd);                      // inject a sound command (RIOT port B + IRQ)
 uint32_t run(uint32_t cycles);                      // execute ~cycles 6502 ticks; returns ticks run

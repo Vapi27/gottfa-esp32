@@ -31,16 +31,21 @@ which `psorom.cpp` provides = the sound-board memory map.
   *executes the real ROM* (652.snd: reset vector resolved, ~14 k instructions retire) on host + the
   module builds on esp32s3 + esp32c3. **Limitation:** the Stage-1 6530 is *loose* (timer always
   "expired", minimal port logic) → the real ROM derails into a wait loop and produces no DAC yet.
-- **Stage 2 — make it actually play (host, diff vs PinMAME):** implement a **cycle-accurate 6530/6532
-  RIOT** (down-counter + prescaler + IRQ) and the exact per-board ROM offsets; run a real ROM and
-  **diff the DAC/chip-write trace against PinMAME** (the rig has PinMAME = ground truth) until it
-  matches. Then the **80B dual-6502 + YM2151/AY** (time-slice the two CPUs, hook the chip writes →
-  DAC-direct + YM/AY→PSOWAV triggers).
+- **Stage 2 — make it actually play — GTS80S DONE (host):** implemented the **cycle-accurate 6530
+  RIOT** (down-counter + /1·/8·/64·/1024 prescaler + timer-IRQ, ports, registers per 6530riot.c) and
+  the exact memory map (6530 code ROM `6530sy80.bin` at 0x0C00-0x0FFF + mirror at 0xFC00 for the
+  vectors; per-game `.snd` = 4-bit DAC nibbles at 0x0400-0x0BFF; 64 B RAM mirrored over 0x0000-01FF).
+  **Result: the real 6530 sound program runs and emits distinct per-command DAC audio** (panthera:
+  cmd1 = square, cmd5 = ramp, cmd8/10 = varied tones; ~25-44 k DAC writes/command). Builds host +
+  esp32s3 + esp32c3. **Remaining Stage 2:** sample-exact **diff vs PinMAME** (psowavgen render =
+  ground truth) to confirm fidelity; then the **80B dual-6502 + YM2151/AY** (time-slice the two CPUs,
+  hook chip writes → DAC-direct + YM/AY→PSOWAV triggers).
 - **Stage 3 — ESP integration + bench:** run the 6502 on a dedicated RTOS task feeding the existing
   PCM5102A I2S DMA path; wire the FPGA command link → `psorom::command()`; measure real-time CPU
   headroom + WiFi-dropout robustness on the real N16R8 (the only unmeasured PSOROM risk = YM2151
   real-time cost — but per characterization the YM is minor/mono on the tested 80B games).
 
 ## Status
-Stage 1 committed + build-validated. Stages 2–3 are the multi-step body of work (CPU-accuracy +
-PinMAME diffing + dual-CPU/YM + audio-task), best done iteratively on the rig against PinMAME.
+Stage 1 + **Stage 2 (GTS80S) DONE**: the original 6530 sound program runs on the vendored 6502 and
+produces real, distinct per-command DAC audio (host + ESP builds). Remaining: PinMAME sample-diff to
+prove fidelity, the **80B dual-6502 + YM2151/AY** target, and Stage 3 (ESP audio-task + bench).
