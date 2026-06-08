@@ -11,6 +11,7 @@
 #include "romstore.h"
 #include "romcrypt.h"
 #include "epromdump.h"
+#include "romdb.h"
 #include <string.h>
 // scratch buffer for a /romup POST body (auto-freed by AsyncWebServerRequest::_tempObject)
 struct RomUp { uint32_t cap; uint32_t got; uint8_t data[1]; };
@@ -115,7 +116,30 @@ void netBegin() {
     String name = r->hasParam("name") ? r->getParam("name")->value() : String("dump");
     String path = "/dumps/" + name + ".bin";
     bool ok = epromdump::dumpToSD(t, path.c_str());
-    r->send(ok ? 200 : 500, "text/plain", ok ? ("dumped -> " + path) : "dump failed");
+    if (!ok) { r->send(500, "text/plain", "dump failed"); return; }
+    romdb::Match m; romdb::identifyFile(path.c_str(), &m);    // verify against known-good (PinMAME)
+    char buf[160];
+    if (m.found) snprintf(buf, sizeof(buf), "dumped -> %s\nOK %08x = %s (%s) [known-good]",
+                          path.c_str(), (unsigned)m.crc, m.title, m.game);
+    else snprintf(buf, sizeof(buf), "dumped -> %s\ncrc %08x NOT in DB -> corrupted chip or unlisted revision",
+                  path.c_str(), (unsigned)m.crc);
+    r->send(200, "text/plain", buf);
+#else
+    r->send(501, "text/plain", "no SD on C3");
+#endif
+  });
+
+  // --- verify a stored file against the known-good ROM DB (PinMAME CRCs) ---
+  //   GET /verify?path=/dumps/foo.bin   -> {"crc":"...","known":0|1,"game":"...","title":"..."}
+  server.on("/verify", HTTP_GET, [](AsyncWebServerRequest *r) {
+#ifndef BOARD_C3
+    if (!r->hasParam("path")) { r->send(400, "text/plain", "usage: /verify?path=/dumps/foo.bin"); return; }
+    romdb::Match m;
+    bool ok = romdb::identifyFile(r->getParam("path")->value().c_str(), &m);
+    if (!m.crc && !ok) { r->send(404, "text/plain", "file not found"); return; }
+    String j = "{\"crc\":\"" + String(m.crc, HEX) + "\",\"known\":" + (m.found ? "1" : "0") +
+               ",\"game\":\"" + String(m.game) + "\",\"title\":\"" + String(m.title) + "\"}";
+    r->send(200, "application/json", j);
 #else
     r->send(501, "text/plain", "no SD on C3");
 #endif

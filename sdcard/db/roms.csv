@@ -1,0 +1,390 @@
+crc,name,game,title
+674ddc58,653-1.cpu,spidermn,Amazing Spider-Man  The
+ff1ddfd7,653-2.cpu,spidermn,Amazing Spider-Man  The
+f5650c46,653.snd,spidermn,Amazing Spider-Man  The
+c8ba951d,6530sy80.bin,spidermn,Amazing Spider-Man  The
+5386e5fb,652.cpu,panthera,Panthera
+4d0cf2c0,652.snd,panthera,Panthera
+0eeb2731,654-1.cpu,circus,Circus
+01e23569,654-2.cpu,circus,Circus
+75c3ad67,654.snd,circus,Circus
+42baf51d,656-1.cpu,cntforce,Counterforce
+0e185c30,656-2.cpu,cntforce,Counterforce
+0be2cbe9,656.snd,cntforce,Counterforce
+27081372,657-1.cpu,starrace,Star Race
+c56e31c8,657-2.cpu,starrace,Star Race
+3a1d3995,657.snd,starrace,Star Race
+b841ad7a,658-1.cpu,jamesb,James Bond (Timed Play)
+962c03df,658.snd,jamesb,James Bond (Timed Play)
+e7e0febf,658-x.cpu,jamesb2,James Bond (3/5-Ball)
+d6950e3b,659.cpu,timeline,Time Line
+28185568,659.snd,timeline,Time Line
+a4fa42a4,661-2.cpu,forceii,Force II
+650158a7,661.snd,forceii,Force II
+a0d3e69a,664-1.cpu,pnkpnthr,Pink Panther
+18f4abfd,664.snd,pnkpnthr,Pink Panther
+48aeb325,664_flipprojets.snd,pnkpntrs,Pink Panther (sound correction fix)
+bb7d476a,666-1.cpu,mars,Mars - God of War
+d33dc8a5,666-s1.snd,mars,Mars - God of War
+e5616f3e,666-s2.snd,mars,Mars - God of War
+029e0bcf,666s-1.cpu,marsp,Mars - God of War (Prototype)
+f9f782c5,f666-s1.snd,marsf,Mars - God of War (French Speech)
+7bd64d94,f666-s2.snd,marsf,Mars - God of War (French Speech)
+6fb6d10b,666-2.cpu,mars_2,Mars - God of War (rev. 2 unofficial MOD)
+1f51c351,667-a-x.cpu,vlcno_ax,Volcano
+ba9d40b7,667-s1.snd,vlcno_ax,Volcano
+b54bd123,667-s2.snd,vlcno_ax,Volcano
+a422d862,667-1b.cpu,vlcno_1b,Volcano (Sound Only)
+894b4e2e,667-a-s.snd,vlcno_1b,Volcano (Sound Only)
+5931c6f7,667-1a.cpu,vlcno_1a,Volcano (Sound Only  alternate version)
+e364202d,667-1c.cpu,vlcno_1c,Volcano (Sound Only  alternate version 2)
+01b53045,668-4.cpu,blckhole,Black Hole (rev. 4)
+23d5045d,668-s1.snd,blckhole,Black Hole (rev. 4)
+d63da498,668-s2.snd,blckhole,Black Hole (rev. 4)
+df03ffea,668-2.cpu,blkhole2,Black Hole (rev. 2)
+df56f896,668-a2.cpu,blkholea,Black Hole (Sound Only)
+5175f307,668-a-s.snd,blkholea,Black Hole (Sound Only)
+f3085f77,669-2.cpu,hh,Haunted House (rev. 2)
+52ec7335,669-s1.snd,hh,Haunted House (rev. 2)
+a3317b4b,669-s2.snd,hh,Haunted House (rev. 2)
+cf178411,669-3.cpu,hh_3,Haunted House (rev. 3 unofficial MOD)
+effe6851,669-3a.cpu,hh_3a,Haunted House (rev. 3 unofficial MOD  LED)
+2bfceb85,669-3b.cpu,hh_3b,Haunted House (rev. 3 unofficial MOD  LED+Secret Tunnel)
+8724cdf8,669-4.cpu,hh_4,Haunted House (rev. 4 unofficial Votrax speech MOD)
+7b906d4b,669-4a.cpu,hh_4a,Haunted House (rev. 4 unofficial Votrax speech MOD  LED)
+71025a8a,669-4b.cpu,hh_4b,Haunted House (rev. 4 unofficial Votrax speech MOD  LED+Secret Tunnel)
+96e72b93,669-1.cpu,hh_1,Haunted House (rev. 1)
+efad7312,671-a.cpu,eclipse,Eclipse
+a0f9e56b,80tst.cpu,s80tst,System 80 Test Fixture
+b9dbdd21,80tst-s1.snd,s80tst,System 80 Test Fixture
+1a4b1e9d,80tst-s2.snd,s80tst,System 80 Test Fixture
+6318bce2,670-1.cpu,dvlsdre,Devil's Dare
+506bc22a,670-s1.snd,dvlsdre,Devil's Dare
+f662ee4b,670-s2.snd,dvlsdre,Devil's Dare
+353b2e18,670-a.cpu,dvlsdre2,Devil's Dare (Sound Only)
+f141d535,670-a-s.snd,dvlsdre2,Devil's Dare (Sound Only)
+dd8d516c,pv810-1.cpu,caveman,Caveman (Pinball/Video Combo)
+a491664d,pv810-s1.snd,caveman,Caveman (Pinball/Video Combo)
+d8654e6e,pv810-s2.snd,caveman,Caveman (Pinball/Video Combo)
+514aa152,v810-u8.bin,caveman,Caveman (Pinball/Video Combo)
+74c6533e,v810-u7.bin,caveman,Caveman (Pinball/Video Combo)
+2fd0ee95,v810-u6.bin,caveman,Caveman (Pinball/Video Combo)
+2fb15da3,v810-u5.bin,caveman,Caveman (Pinball/Video Combo)
+2dfe8492,v810-u4.bin,caveman,Caveman (Pinball/Video Combo)
+740e9ec3,v810-u3.bin,caveman,Caveman (Pinball/Video Combo)
+b793baf9,v810-u2.bin,caveman,Caveman (Pinball/Video Combo)
+0a283b15,v810-u1.bin,caveman,Caveman (Pinball/Video Combo)
+3437c697,v810-u4a.bin,cavemana,Caveman (Pinball/Video Combo) (set 2)
+729819f6,v810-u3a.bin,cavemana,Caveman (Pinball/Video Combo) (set 2)
+ab6193c2,v810-u2a.bin,cavemana,Caveman (Pinball/Video Combo) (set 2)
+7c6410fb,v810-u1a.bin,cavemana,Caveman (Pinball/Video Combo) (set 2)
+341697b9,pv810-2.cpu,cavemane,Caveman (Pinball/Video Combo) (Evolution  unofficial MOD)
+8e2f0d39,672-2x.cpu,rocky,Rocky
+10ba523c,672-s1.snd,rocky,Rocky
+5e77117a,672-s2.snd,rocky,Rocky
+57a0ce22,f672-s1.snd,rockyf,Rocky (French Speech)
+87a0474f,f672-s2.snd,rockyf,Rocky (French Speech)
+a7dc2207,673-2.cpu,spirit,Spirit (rev. 2)
+fd3062ae,673-s1.snd,spirit,Spirit (rev. 2)
+7cf923f1,673-s2.snd,spirit,Spirit (rev. 2)
+c54c717a,673.bin,spirit0,Spirit
+20aff323,673-3.bin,spirit3,Spirit (rev. 3 MOD)
+06b66ce8,675.cpu,striker,Striker
+cc11c487,675-s1.snd,striker,Striker
+ec30a3d9,675-s2.snd,striker,Striker
+9d2acc31,675-s2ge.snd,strikerg,Striker (German Speech)
+70cccc57,674.cpu,punk,Punk!
+b75f79d5,674-s1.snd,punk,Punk!
+005d123a,674-s2.snd,punk,Punk!
+71507430,676-3.cpu,krull,Krull
+b1989d8f,676-s1.snd,krull,Krull
+05fade11,676-s2.snd,krull,Krull
+fd885874,677.cpu,qbquest,Q*Bert's Quest
+af7bc8b7,677-s1.snd,qbquest,Q*Bert's Quest
+820aa26f,677-s2.snd,qbquest,Q*Bert's Quest
+decf84e6,680.cpu,sorbit,Super Orbit
+fccbbbdd,680-s1.snd,sorbit,Super Orbit
+d883d63d,680-s2.snd,sorbit,Super Orbit
+0b048658,681-2.cpu,rflshdlx,Royal Flush Deluxe (rev. 2)
+33455bbd,681-s1.snd,rflshdlx,Royal Flush Deluxe (rev. 2)
+639c93f9,681-s2.snd,rflshdlx,Royal Flush Deluxe (rev. 2)
+2d6b3729,681-1.BIN,rflshdlx1,Royal Flush Deluxe (rev. 1)
+51c7c6de,682.cpu,goinnuts,Goin' Nuts
+f00dabf3,682-s1.snd,goinnuts,Goin' Nuts
+3be8ac5f,682-s2.snd,goinnuts,Goin' Nuts
+b0d0c4af,684-2.cpu,amazonh,Amazon Hunt
+86d239df,684-s1.snd,amazonh,Amazon Hunt
+4d8ea26c,684-s2.snd,amazonh,Amazon Hunt
+7fac5132,684-1.cpu,amazonha,Amazon Hunt (alternate set)
+4754d68d,685.cpu,rackemup,Rack 'Em Up
+d4219987,685-s.snd,rackemup,Rack 'Em Up
+d1e7a0de,686.cpu,raimfire,Ready...Aim...Fire!
+09740682,686-s.snd,raimfire,Ready...Aim...Fire!
+0080565e,687.cpu,jack2opn,Jacks to Open
+f9d10b7a,687-s.snd,jack2opn,Jacks to Open
+4262006b,689a.cpu,alienstr,Alien Star
+e1e7a610,689-s.snd,alienstr,Alien Star
+50f620ea,691.cpu,thegames,Games  The
+d7011a31,691-s.snd,thegames,Games  The
+b80042c0,691A_PROM1.bin,thegamsb,Games  The (rev. 1)
+b271ea10,691B_PROM1.bin,thegamsc,Games  The (rev. 2 MOD)
+e531ab3f,688.cpu,touchdn,Touchdown
+5e9988a6,688-s.snd,touchdn,Touchdown
+4ee6d09b,692-2.cpu,eldorado,El Dorado City of Gold
+9bfbf400,692-s.snd,eldorado,El Dorado City of Gold
+2f6e9caf,695.cpu,icefever,Ice Fever
+daededc2,695-s.snd,icefever,Ice Fever
+42b29b01,prom1.cpu,triplay,Chicago Cubs Triple Play
+deedea61,696-s.snd,triplay,Chicago Cubs Triple Play
+fc2145cb,prom1a.cpu,triplaya,Chicago Cubs Triple Play (rev. 1)
+521946d4,prom1_fp.cpu,triplyfp,Chicago Cubs Triple Play (Free Play)
+4b58be44,prom1_f1.cpu,triplyf1,Chicago Cubs Triple Play (rev. 1 Free Play)
+5e2bf7a9,prom1g.cpu,triplayg,Chicago Cubs Triple Play (German)
+7b6e6819,prom1g_fp.cpu,triplgfp,Chicago Cubs Triple Play (German Free Play)
+e8190df7,prom1.cpu,bountyh,Bounty Hunter
+a0383e41,694-s.snd,bountyh,Bounty Hunter
+9e68b714,prom1_fp.cpu,bounthfp,Bounty Hunter (Free Play)
+ea4b7e2d,prom1g.cpu,bountyhg,Bounty Hunter (German)
+07b9333f,prom1g_fp.cpu,bountgfp,Bounty Hunter (German Free Play)
+fd1615ce,prom2.cpu,tagteam,Tag-Team Pinball
+65931038,prom1.cpu,tagteam,Tag-Team Pinball
+9c8191b7,698-s.snd,tagteam,Tag-Team Pinball
+6d56b636,prom2a.cpu,tagteam2,Tag-Team Pinball (rev. 2)
+92766607,prom1a.cpu,tagteam2,Tag-Team Pinball (rev. 2)
+3f052c44,prom1_fp.cpu,tagtemfp,Tag-Team Pinball (Free Play)
+5e6d2da7,prom2g.cpu,tagteamg,Tag-Team Pinball (German)
+e206c519,prom1g.cpu,tagteamg,Tag-Team Pinball (German)
+ae1ed7a2,prom1g_fp.cpu,tagtmgfp,Tag-Team Pinball (German Free Play)
+9c2c0058,prom1_2f.cpu,tagtem2f,Tag-Team Pinball (rev. 2 Free Play)
+1146c1d3,prom1.cpu,rock,Rock
+03830e81,drom1.snd,rock,Rock
+effba2ad,yrom1.snd,rock,Rock
+77736ac3,prom1_fp.cpu,rockfp,Rock (Free Play)
+2de3f1e5,prom1g.cpu,rockg,Rock (German)
+792b4be4,prom1g_fp.cpu,rockgfp,Rock (German Free Play)
+481f3fb8,prom2.cpu,raven,Raven
+edc88561,prom1.cpu,raven,Raven
+a04bf7d0,drom1.snd,raven,Raven
+ee5f868b,yrom1.snd,raven,Raven
+a693785e,prom2a.cpu,ravena,Raven (rev. 1)
+d6e5120b,prom1_fp.cpu,ravenfp,Raven (Free Play)
+4ca540a5,prom2g.cpu,raveng,Raven (German)
+3441aeda,prom1g.cpu,raveng,Raven (German)
+ab3bbef5,prom1g_fp.cpu,ravengfp,Raven (German Free Play)
+51629598,prom1r.cpu,rambo,Rambo (Raven unofficial MOD)
+b8aa8912,drom1a.snd,rock_enc,Rock Encore
+a62e3b94,yrom1a.snd,rock_enc,Rock Encore
+66645a3f,yrom2a.snd,rock_enc,Rock Encore
+410d02f6,prom1c.cpu,clash,Clash  The (Rock Encore unofficial MOD)
+a465e5f3,prom2.cpu,hlywoodh,Hollywood Heat
+0493e27a,prom1.cpu,hlywoodh,Hollywood Heat
+a698ec33,drom1.snd,hlywoodh,Hollywood Heat
+9232591e,yrom1.snd,hlywoodh,Hollywood Heat
+51709c2f,yrom2.snd,hlywoodh,Hollywood Heat
+63bc8395,prom1_fp.cpu,hlywdhfp,Hollywood Heat (Free Play)
+bf60b631,prom2g.cpu,hlywodhg,Hollywood Heat (German)
+0f212d15,prom1g.cpu,hlywodhg,Hollywood Heat (German)
+11fa2432,prom1g_fp.cpu,hlywhgfp,Hollywood Heat (German Free Play)
+969ca81f,prom2f.cpu,hlywodhf,Hollywood Heat (French)
+ddc45d2d,prom1f.cpu,hlywodhf,Hollywood Heat (French)
+9b7df518,prom1f_fp.cpu,hlywhffp,Hollywood Heat (French Free Play)
+6556d711,prom1_b.cpu,bubba,Bubba the Redneck Werewolf (Hollywood Heat unofficial MOD)
+a035eb2d,prom1_bb.cpu,beachbms,Beach Bums (Hollywood Heat unofficial MOD)
+45164b17,prom1_tj.cpu,tomjerry,Tom & Jerry (Hollywood Heat unofficial MOD)
+ac9f3a0f,prom2.cpu,genesis,Genesis
+4a2f185c,prom1.cpu,genesis,Genesis
+758e1743,drom1.snd,genesis,Genesis
+4869b0ec,yrom1.snd,genesis,Genesis
+0528c024,yrom2.snd,genesis,Genesis
+662722b1,prom1_fp.cpu,genesifp,Genesis (Free Play)
+e8fc30af,prom2g.cpu,genesisg,Genesis (German)
+68a27ec1,prom1g.cpu,genesisg,Genesis (German)
+24af8cef,prom1g_fp.cpu,genesgfp,Genesis (German Free Play)
+ea7f824f,prom2f.cpu,genesisf,Genesis (French)
+e7ef875b,prom1f.cpu,genesisf,Genesis (French)
+4d94f012,prom1f_fp.cpu,genesffp,Genesis (French Free Play)
+a5318c20,prom2.cpu,goldwing,Gold Wings
+bf242185,prom1.cpu,goldwing,Gold Wings
+892dbb21,drom1.snd,goldwing,Gold Wings
+e17e9b1f,yrom1.snd,goldwing,Gold Wings
+4e482023,yrom2.snd,goldwing,Gold Wings
+58f19602,prom1_fp.cpu,goldwgfp,Gold Wings (Free Play)
+f69c963c,prom2g.cpu,gldwingg,Gold Wings (German)
+a9349b2f,prom1g.cpu,gldwingg,Gold Wings (German)
+912c5086,prom1g_fp.cpu,gldwggfp,Gold Wings (German Free Play)
+50337adf,prom2f.cpu,gldwingf,Gold Wings (French)
+ec046fc0,prom1f.cpu,gldwingf,Gold Wings (French)
+90dd07b7,prom1f_fp.cpu,gldwgffp,Gold Wings (French Free Play)
+6860e315,prom2.cpu,mntecrlo,Monte Carlo
+0fbf15a3,prom1.cpu,mntecrlo,Monte Carlo
+1a53ac15,drom1.snd,mntecrlo,Monte Carlo
+6e234c49,yrom1.snd,mntecrlo,Monte Carlo
+a95d1a6b,yrom2.snd,mntecrlo,Monte Carlo
+5b703cf8,prom1_fp.cpu,mntecrfp,Monte Carlo (Free Play)
+2a5e0c4f,prom2g.cpu,mntecrlg,Monte Carlo (German)
+25e015f1,prom1g.cpu,mntecrlg,Monte Carlo (German)
+bcf93933,prom1g_fp.cpu,mntcrgfp,Monte Carlo (German Free Play)
+4c01707e,prom2g_mfp.cpu,mntcrgmfp,Monte Carlo (German Millions option  Free Play)
+14ed10c7,prom1g_mfp.cpu,mntcrgmfp,Monte Carlo (German Millions option  Free Play)
+f6842631,prom2f.cpu,mntecrlf,Monte Carlo (French)
+33a8dbc9,prom1f.cpu,mntecrlf,Monte Carlo (French)
+dbe0f749,prom1f_fp.cpu,mntcrffp,Monte Carlo (French Free Play)
+05ce337f,prom2f_mfp.cpu,mntcrfmfp,Monte Carlo (French Millions option  Free Play)
+73f4debd,prom1f_mfp.cpu,mntcrfmfp,Monte Carlo (French Millions option  Free Play)
+5dd75c06,prom2a.cpu,mntecrla,Monte Carlo (rev. 1)
+de980755,prom1a.cpu,mntecrla,Monte Carlo (rev. 1)
+25787b75,prom1a_fp.cpu,mntcrafp,Monte Carlo (rev. 1 Free Play)
+8e72a68f,prom2_2.cpu,mntecrl2,Monte Carlo (rev. 2)
+9bd6a010,prom1_2.cpu,mntecrl2,Monte Carlo (rev. 2)
+d47c24ae,prom1_2_fp.cpu,mntcr2fp,Monte Carlo (rev. 2 Free Play)
+5a9a824f,prom2_2_mfp.cpu,mntcrmfp,Monte Carlo (rev. 2 Millions option  Free Play)
+a9652127,prom1_2_mfp.cpu,mntcrmfp,Monte Carlo (rev. 2 Millions option  Free Play)
+47171062,prom2.cpu,sprbreak,Spring Break
+53ed608b,prom1.cpu,sprbreak,Spring Break
+97d3f9ba,drom1.snd,sprbreak,Spring Break
+5ea89df9,yrom1.snd,sprbreak,Spring Break
+0fb0128e,yrom2.snd,sprbreak,Spring Break
+2424a214,prom1_fp.cpu,sprbrkfp,Spring Break (Free Play)
+fa4b750d,prom2g.cpu,sprbrkg,Spring Break (German)
+2d9c4640,prom1g.cpu,sprbrkg,Spring Break (German)
+11ae0ad4,prom1g_fp.cpu,sprbrgfp,Spring Break (German Free Play)
+c0ee0555,prom2f.cpu,sprbrkf,Spring Break (French)
+608cf4d5,prom1f.cpu,sprbrkf,Spring Break (French)
+8866bddf,prom1f_fp.cpu,sprbrffp,Spring Break (French Free Play)
+d9d841b4,prom2a.cpu,sprbrka,Spring Break (rev. 1)
+93db71e9,prom1a.cpu,sprbrka,Spring Break (rev. 1)
+3638cb30,prom1a_fp.cpu,sprbrafp,Spring Break (rev. 1 Free Play)
+911cd14f,prom2.rv2,sprbrks,Spring Break (Single ball game)
+d67d9d2f,prom1.rv2,sprbrks,Spring Break (Single ball game)
+dc956db7,prom1_fp.rv2,sprbrsfp,Spring Break (Single ball game  Free Play)
+0b5040c3,684c-cpu.rom,amazonh2,Amazon Hunt II (French)
+182d64e1,684c-snd.rom,amazonh2,Amazon Hunt II (French)
+fe08af7d,684c-cpu_fp.rom,amazn2fp,Amazon Hunt II (French Free Play)
+4783b689,prom2.cpu,arena,Arena
+8c9f8ee9,prom1.cpu,arena,Arena
+78e6cbf1,drom1.snd,arena,Arena
+f7a951c2,yrom1.snd,arena,Arena
+cc2aef4e,yrom2.snd,arena,Arena
+33ade406,prom1_fp.cpu,arena_fp,Arena (Free Play)
+e170d1cd,prom2g.cpu,arenag,Arena (German)
+71fd6e48,prom1g.cpu,arenag,Arena (German)
+d41ce2b1,prom1g_fp.cpu,arenagfp,Arena (German Free Play)
+49b127d8,prom2f.cpu,arenaf,Arena (French)
+391fb7de,prom1f.cpu,arenaf,Arena (French)
+7389f4dc,prom1f_fp.cpu,arenaffp,Arena (French Free Play)
+13c8813b,prom2a.cpu,arenaa,Arena (rev. 1)
+253eceb1,prom1a.cpu,arenaa,Arena (rev. 1)
+21f500cb,prom1a_fp.cpu,arenaafp,Arena (rev. 1 Free Play)
+6a42eaf4,prom2.cpu,victory,Victory
+e724db90,prom1.cpu,victory,Victory
+4ab6dab7,drom1.snd,victory,Victory
+921a100e,yrom1.snd,victory,Victory
+3eba52ec,prom1_fp.cpu,victryfp,Victory (Free Play)
+b191a87a,prom2g.cpu,victoryg,Victory (German)
+097b9062,prom1g.cpu,victoryg,Victory (German)
+6daebe71,prom1g_fp.cpu,victrgfp,Victory (German Free Play)
+dffcfa77,prom2f.cpu,victoryf,Victory (French)
+d3a9df20,prom1f.cpu,victoryf,Victory (French)
+a626da77,prom1f_fp.cpu,victrffp,Victory (French Free Play)
+862951dc,prom2.cpu,diamond,Diamond Lady
+7a011757,prom1.cpu,diamond,Diamond Lady
+c216d1e4,drom1.snd,diamond,Diamond Lady
+0a18d626,yrom1.snd,diamond,Diamond Lady
+eef4da86,prom1_fp.cpu,diamonfp,Diamond Lady (Free Play)
+f0ef69f6,prom2g.cpu,diamondg,Diamond Lady (German)
+961cfdf9,prom1g.cpu,diamondg,Diamond Lady (German)
+4a070002,prom1g_fp.cpu,diamngfp,Diamond Lady (German Free Play)
+943019a8,prom2f.cpu,diamondf,Diamond Lady (French)
+479b0267,prom1f.cpu,diamondf,Diamond Lady (French)
+1d7feafd,prom1f_fp.cpu,diamnffp,Diamond Lady (French Free Play)
+f12514e6,prom2.cpu,txsector,TX-Sector
+e51d39da,prom1.cpu,txsector,TX-Sector
+61d66ca1,drom1.snd,txsector,TX-Sector
+469ef444,yrom1.snd,txsector,TX-Sector
+13283b01,prom1_fp.cpu,txsectfp,TX-Sector (Free Play)
+2b17261f,prom2g.cpu,txsectrg,TX-Sector (German)
+83ea2f11,prom1g.cpu,txsectrg,TX-Sector (German)
+0c374395,prom1g_fp.cpu,txsecgfp,TX-Sector (German Free Play)
+1bd08247,prom2f.cpu,txsectrf,TX-Sector (French)
+8df27155,prom1f.cpu,txsectrf,TX-Sector (French)
+45e47931,prom1f_fp.cpu,txsecffp,TX-Sector (French Free Play)
+893177ed,prom2.cpu,robowars,Robo-War
+cd1587d8,prom1.cpu,robowars,Robo-War
+ea59b6a1,drom1.snd,robowars,Robo-War
+7ecd8b67,yrom1.snd,robowars,Robo-War
+96da77eb,prom1_fp.cpu,robowrfp,Robo-War (Free Play)
+1afa0e69,prom2f.cpu,robowarf,Robo-War (French)
+263cb8f9,prom1f.cpu,robowarf,Robo-War (French)
+51cd5108,prom1f_fp.cpu,robowffp,Robo-War (French Free Play)
+082d64ab,prom2.cpu,excaliba,Excalibur
+e8902c16,prom1.cpu,excaliba,Excalibur
+a4368cd0,drom1.snd,excaliba,Excalibur
+9f194744,yrom1.snd,excaliba,Excalibur
+86cf464b,prom1_fp.cpu,excalbfp,Excalibur (Free Play)
+49079396,prom2g.cpu,excalibg,Excalibur (German)
+504fad7a,prom1g.cpu,excalibg,Excalibur (German)
+76d20188,prom1g_fp.cpu,excalgfp,Excalibur (German Free Play)
+499e2e41,prom2f.cpu,excalibr,Excalibur (French)
+ed1083d7,prom1f.cpu,excalibr,Excalibur (French)
+65601620,prom1f_fp.cpu,excalffp,Excalibur (French Free Play)
+583933ec,prom2.cpu,badgirls,Bad Girls
+956aeae0,prom1.cpu,badgirls,Bad Girls
+452dec20,drom1.snd,badgirls,Bad Girls
+ab3b8e2d,yrom1.snd,badgirls,Bad Girls
+53e05ca7,prom2a.cpu,badgirl2,Bad Girls (alternate set)
+07082568,prom1a.cpu,badgirl2,Bad Girls (alternate set)
+05e8259b,prom1_fp.cpu,badgrlfp,Bad Girls (Free Play)
+55aa30ac,prom2g.cpu,badgirlg,Bad Girls (German)
+f2923255,prom1g.cpu,badgirlg,Bad Girls (German)
+34a93b4b,prom1g_fp.cpu,badgrgfp,Bad Girls (German Free Play)
+58c35099,prom2f.cpu,badgirlf,Bad Girls (French)
+9861147a,prom1f.cpu,badgirlf,Bad Girls (French)
+32f42091,prom1f_fp.cpu,badgrffp,Bad Girls (French Free Play)
+047c8ef5,prom2.cpu,bighouse,Big House
+0ecef900,prom1.cpu,bighouse,Big House
+f330fd04,drom1.snd,bighouse,Big House
+0b1ba1cb,yrom1.snd,bighouse,Big House
+8a8510a2,prom1_fp.cpu,bighosfp,Big House (Free Play)
+214f0afb,prom2g.cpu,bighousg,Big House (German)
+374f3593,prom1g.cpu,bighousg,Big House (German)
+8f51d4c3,prom1g_fp.cpu,bighsgfp,Big House (German Free Play)
+767efc44,prom2f.cpu,bighousf,Big House (French)
+b87150bc,prom1f.cpu,bighousf,Big House (French)
+51012001,prom1f_fp.cpu,bighsffp,Big House (French Free Play)
+7695c7db,prom2.cpu,hotshots,Hot Shots
+122ff4a8,prom1.cpu,hotshots,Hot Shots
+42c3cc3d,drom1.snd,hotshots,Hot Shots
+2933a80e,yrom1.snd,hotshots,Hot Shots
+74c0f7d7,prom1_fp.cpu,hotshtfp,Hot Shots (Free Play)
+7e2f0d59,prom2g.cpu,hotshotg,Hot Shots (German)
+e07b46ad,prom1g.cpu,hotshotg,Hot Shots (German)
+dca0b300,prom1g_fp.cpu,hotshgfp,Hot Shots (German Free Play)
+476e260c,prom2f.cpu,hotshotf,Hot Shots (French)
+8d74aca7,prom1f.cpu,hotshotf,Hot Shots (French)
+dedba56b,prom1f_fp.cpu,hotshffp,Hot Shots (French Free Play)
+681643df,prom2.cpu,bonebstr,Bone Busters Inc.
+052f97be,prom1.cpu,bonebstr,Bone Busters Inc.
+d147d78d,drom2.snd,bonebstr,Bone Busters Inc.
+ec43f4e9,drom1.snd,bonebstr,Bone Busters Inc.
+a95eedfc,yrom1.snd,bonebstr,Bone Busters Inc.
+c5914b1f,prom1_fp.cpu,bonebsfp,Bone Busters Inc. (Free Play)
+3b85c8bd,prom2g.cpu,bonebstg,Bone Busters Inc. (German)
+a0aab93e,prom1g.cpu,bonebstg,Bone Busters Inc. (German)
+0063411b,prom1g_fp.cpu,bonebgfp,Bone Busters Inc. (German Free Play)
+73b6486e,prom2f.cpu,bonebstf,Bone Busters Inc. (French)
+3d334065,prom1f.cpu,bonebstf,Bone Busters Inc. (French)
+5aa1bb17,prom1f_fp.cpu,bonebffp,Bone Busters Inc. (French Free Play)
+2ec8bd4c,684d-cpu.rom,amazonh3,Amazon Hunt III (French)
+a660f233,684d-snd.rom,amazonh3,Amazon Hunt III (French)
+7db1a9a9,684d-cpu_fp.rom,amazn3fp,Amazon Hunt III (French Free Play)
+bf4674e1,684d-1-cpu.rom,amazon3a,Amazon Hunt III (rev. 1)
+6110c1f0,684d-1-cpu_fp.rom,amaz3afp,Amazon Hunt III (rev. 1 French Free Play)
+6199c002,test2.cpu,s80btest,System 80B Test Fixture
+032ccbff,test1.cpu,s80btest,System 80B Test Fixture
+5d04a6d9,testd.snd,s80btest,System 80B Test Fixture
+bd998860,testy.snd,s80btest,System 80B Test Fixture
+a2bc00e4,nmovsp2.732,nmoves,Night Moves
+36837146,nmovsp1.764,nmoves,Night Moves
+90929841,nmovdrom.256,nmoves,Night Moves
+cb74a687,nmovyrom.256,nmoves,Night Moves
+1cd28cac,prom1_fp.cpu,nmovesfp,Night Moves (Free Play)
