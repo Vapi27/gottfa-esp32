@@ -12,6 +12,7 @@
 #include "romcrypt.h"
 #include "epromdump.h"
 #include "romdb.h"
+#include "ownership.h"
 #include <string.h>
 // scratch buffer for a /romup POST body (auto-freed by AsyncWebServerRequest::_tempObject)
 struct RomUp { uint32_t cap; uint32_t got; uint8_t data[1]; };
@@ -118,12 +119,30 @@ void netBegin() {
     bool ok = epromdump::dumpToSD(t, path.c_str());
     if (!ok) { r->send(500, "text/plain", "dump failed"); return; }
     romdb::Match m; romdb::identifyFile(path.c_str(), &m);    // verify against known-good (PinMAME)
-    char buf[160];
-    if (m.found) snprintf(buf, sizeof(buf), "dumped -> %s\nOK %08x = %s (%s) [known-good]",
-                          path.c_str(), (unsigned)m.crc, m.title, m.game);
-    else snprintf(buf, sizeof(buf), "dumped -> %s\ncrc %08x NOT in DB -> corrupted chip or unlisted revision",
-                  path.c_str(), (unsigned)m.crc);
+    char buf[200];
+    if (m.found) {
+      bool added = ownership::own(m.game);                    // verified dump = proof of ownership
+      snprintf(buf, sizeof(buf), "dumped -> %s\nOK %08x = %s (%s) [known-good]%s",
+               path.c_str(), (unsigned)m.crc, m.title, m.game, added ? " — sound unlocked" : "");
+    } else snprintf(buf, sizeof(buf),
+        "dumped -> %s\ncrc %08x NOT in DB -> corrupted chip or unlisted revision (keep as custom, or use the verified backup)",
+        path.c_str(), (unsigned)m.crc);
     r->send(200, "text/plain", buf);
+#else
+    r->send(501, "text/plain", "no SD on C3");
+#endif
+  });
+
+  // --- ownership gate: list owned games / toggle the gate / add manually ---
+  //   GET /owned [?gate=0|1] [?add=romid]  -> {"gate":0|1,"n":N,"games":"a,b,c"}
+  server.on("/owned", HTTP_GET, [](AsyncWebServerRequest *r) {
+#ifndef BOARD_C3
+    if (r->hasParam("gate")) ownership::setGate(r->getParam("gate")->value().toInt() != 0);
+    if (r->hasParam("add"))  ownership::own(r->getParam("add")->value().c_str());
+    char buf[640]; int n = ownership::list(buf, sizeof(buf));
+    String j = "{\"gate\":" + String(ownership::gateEnabled() ? 1 : 0) + ",\"n\":" + String(n) +
+               ",\"games\":\"" + String(buf) + "\"}";
+    r->send(200, "application/json", j);
 #else
     r->send(501, "text/plain", "no SD on C3");
 #endif

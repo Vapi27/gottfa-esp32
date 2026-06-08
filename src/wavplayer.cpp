@@ -9,6 +9,7 @@
 // (C) 2026 Valere Pilpil / Pstore. Original implementation.
 #ifndef BOARD_C3
 #include "wavplayer.h"
+#include "ownership.h"
 #include "wavmix.h"
 #include "wavsrc.h"
 #include "wavfile.h"
@@ -151,6 +152,11 @@ namespace {
     mixer.stopAll(); reapSlots();
     strncpy(theme, name, sizeof(theme) - 1); theme[sizeof(theme) - 1] = 0;
     sndset.reset();
+    if (!ownership::allowed(theme)) {                 // proof-of-ownership gate: locked until a
+      g_hasBanks = false; sndMask = loopM = voiceM = 0; nSnd = 0;   // verified dump of this game
+      log_w("[snd] '%s' LOCKED (ownership gate) — dump this game's CPU ROM to unlock", theme);
+      return;
+    }
     char dirpath[32]; snprintf(dirpath, sizeof(dirpath), "/%s", theme);
     File dir = SD.open(dirpath);
     if (dir && dir.isDirectory()) {
