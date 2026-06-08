@@ -68,7 +68,7 @@ static sdmmc_card_t* s_card = nullptr;
 static bool mountSD() {
   esp_vfs_fat_sdmmc_mount_config_t mcfg = {};
   mcfg.format_if_mount_failed = false;       // surtout pas : on garde les 16 jeux
-  mcfg.max_files = 8;
+  mcfg.max_files = 12;                        // = FAT_MAX_FILES de Ralf
   mcfg.allocation_unit_size = 0;
   struct { int width; int khz; const char* tag; } ladder[] = {
     { 4, SDMMC_FREQ_HIGHSPEED, "4-bit 40MHz" },   // config exacte de Ralf
@@ -85,7 +85,10 @@ static bool mountSD() {
     if (ladder[i].width == 1) host.flags = SDMMC_HOST_FLAG_1BIT;
     sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
     slot.width  = ladder[i].width;
-    slot.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;   // <-- LA cle (le flag que Ralf met, pas le wrapper Arduino)
+    // IDF 4.x (Arduino-ESP32) : les broches SDMMC slot-1 sont FIXES en IOMUX (CLK14/CMD15/D0=2/D1=4/D2=12/
+    // D3=13), pas de champs d1/d2/d3 a assigner (contrairement a l'IDF 5.x de Ralf). Le seul vrai delta avec
+    // le wrapper Arduino qui echoue, c'est le flag pull-up interne ci-dessous (la carte n'a aucun pull-up externe).
+    slot.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;   // = ce que Ralf met (slot.flags |= ... bloc WROVER)
     esp_err_t e = esp_vfs_fat_sdmmc_mount(MP, &host, &slot, &mcfg, &s_card);
     if (e == ESP_OK) {
       snprintf(g_status, sizeof(g_status), "SD: monte (%s)", ladder[i].tag);
