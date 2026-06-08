@@ -75,6 +75,14 @@
 #define OLED_W          128
 #define OLED_H           32
 #define OLED_ADDR      0x3C
+// ---- Optional EPROM-reader daughterboard (dump your own ROM -> SD; see EPROM_READER.md) ------
+// 2x 74HC595 (address + /CE + /OE) + 1x 74HC165 (data) over 5 dedicated GPIOs. Default OFF.
+#define EPROM_READER_ENABLE 0
+#define PIN_EPR_SER      15   // -> 74HC595 SER
+#define PIN_EPR_SCLK     21   // -> 74HC595 SRCLK + 74HC165 CLK (shared)
+#define PIN_EPR_RCLK     42   // -> 74HC595 RCLK (latch)
+#define PIN_EPR_LOAD      2   // -> 74HC165 SH/LD (parallel load)
+#define PIN_EPR_QH        1   // <- 74HC165 QH (serial data in)
 #endif
 
 // ---- Coil current sense (OPTIONAL — needs a shunt; default OFF) -------------

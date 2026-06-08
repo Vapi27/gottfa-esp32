@@ -10,6 +10,7 @@
 #include "wavplayer.h"
 #include "romstore.h"
 #include "romcrypt.h"
+#include "epromdump.h"
 #include <string.h>
 // scratch buffer for a /romup POST body (auto-freed by AsyncWebServerRequest::_tempObject)
 struct RomUp { uint32_t cap; uint32_t got; uint8_t data[1]; };
@@ -99,6 +100,23 @@ void netBegin() {
     } else r->send(400, "text/plain", "usage: /game?id=N (0..62)");
 #else
     r->send(501, "text/plain", "no sound tier on C3");
+#endif
+  });
+
+  // --- EPROM reader (optional daughterboard): dump the user's own chip to /dumps/<name>.bin ---
+  //   GET /dump?type=2716|2732|2764[&name=foo]   (see EPROM_READER.md)
+  server.on("/dump", HTTP_GET, [](AsyncWebServerRequest *r) {
+#ifndef BOARD_C3
+    if (!epromdump::available()) { r->send(503, "text/plain", "EPROM reader disabled (set EPROM_READER_ENABLE=1 + fit the board)"); return; }
+    epromdump::Type t = epromdump::T2764;
+    if (r->hasParam("type")) { String s = r->getParam("type")->value();
+      t = (s == "2716") ? epromdump::T2716 : (s == "2732") ? epromdump::T2732 : epromdump::T2764; }
+    String name = r->hasParam("name") ? r->getParam("name")->value() : String("dump");
+    String path = "/dumps/" + name + ".bin";
+    bool ok = epromdump::dumpToSD(t, path.c_str());
+    r->send(ok ? 200 : 500, "text/plain", ok ? ("dumped -> " + path) : "dump failed");
+#else
+    r->send(501, "text/plain", "no SD on C3");
 #endif
   });
 
