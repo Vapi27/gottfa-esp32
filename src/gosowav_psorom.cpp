@@ -21,12 +21,13 @@
 #ifdef GOSOWAV_BENCH
 #include <Arduino.h>
 #include <SPI.h>
-#include "FS.h"
-#include "SD_MMC.h"
 #include <WiFi.h>
 #include <WebServer.h>
 #include <string.h>
-#include "driver/gpio.h"     // gpio_set_pull_mode : pull-up internes SDMMC (= le flag IDF de Ralf)
+#include <stdio.h>
+#include "driver/sdmmc_host.h"   // montage SD via l'IDF (comme Ralf), avec SDMMC_SLOT_FLAG_INTERNAL_PULLUP
+#include "sdmmc_cmd.h"
+#include "esp_vfs_fat.h"
 #include "psorom.h"
 
 // MCP4921 sur la WROVER GOSOWAV (fait matériel de la carte) : SCK=18, SDI/MOSI=23, CS=5.
@@ -58,31 +59,73 @@ static inline void dacOut(int16_t s) {
   dacspi.endTransaction();
 }
 
-static uint8_t* loadFile(const char* path, size_t& len) {
-  File f = SD_MMC.open(path); if (!f) { len = 0; return nullptr; }
-  len = f.size(); uint8_t* b = (uint8_t*)malloc(len);
-  if (b && f.read(b, len) != (int)len) { free(b); b = nullptr; len = 0; }
-  f.close(); return b;
+static const char* MP = "/sdcard";          // point de montage VFS
+static sdmmc_card_t* s_card = nullptr;
+
+// Monte la SD via l'API IDF (comme le firmware de Ralf), avec SDMMC_SLOT_FLAG_INTERNAL_PULLUP — le
+// wrapper Arduino SD_MMC NE met PAS ce flag, d'ou l'echec sur cette carte (zero pull-up externe).
+// Pins slot-1 fixes en IOMUX sur ESP32 classique (CLK14/CMD15/D0=2/D1=4/D2=12/D3=13) -> pas a regler.
+static bool mountSD() {
+  esp_vfs_fat_sdmmc_mount_config_t mcfg = {};
+  mcfg.format_if_mount_failed = false;       // surtout pas : on garde les 16 jeux
+  mcfg.max_files = 8;
+  mcfg.allocation_unit_size = 0;
+  struct { int width; int khz; const char* tag; } ladder[] = {
+    { 4, SDMMC_FREQ_HIGHSPEED, "4-bit 40MHz" },   // config exacte de Ralf
+    { 4, SDMMC_FREQ_DEFAULT,   "4-bit 20MHz" },
+    { 1, SDMMC_FREQ_DEFAULT,   "1-bit 20MHz" },
+    { 1, SDMMC_FREQ_PROBING,   "1-bit 400kHz" },  // repli le plus robuste
+  };
+  for (int i = 0; i < (int)(sizeof(ladder) / sizeof(ladder[0])); i++) {
+    snprintf(g_status, sizeof(g_status), "SD: montage %s...", ladder[i].tag);
+    Serial.printf("SD: tentative %s\n", ladder[i].tag);
+    esp_vfs_fat_sdmmc_unmount();              // etat propre (ignore l'erreur si rien n'est monte)
+    sdmmc_host_t host = SDMMC_HOST_DEFAULT();
+    host.max_freq_khz = ladder[i].khz;
+    if (ladder[i].width == 1) host.flags = SDMMC_HOST_FLAG_1BIT;
+    sdmmc_slot_config_t slot = SDMMC_SLOT_CONFIG_DEFAULT();
+    slot.width  = ladder[i].width;
+    slot.flags |= SDMMC_SLOT_FLAG_INTERNAL_PULLUP;   // <-- LA cle (le flag que Ralf met, pas le wrapper Arduino)
+    esp_err_t e = esp_vfs_fat_sdmmc_mount(MP, &host, &slot, &mcfg, &s_card);
+    if (e == ESP_OK) {
+      snprintf(g_status, sizeof(g_status), "SD: monte (%s)", ladder[i].tag);
+      Serial.printf("SD mounted (%s).\n", ladder[i].tag);
+      if (s_card) sdmmc_card_print_info(stdout, s_card);
+      return true;
+    }
+    Serial.printf("  -> echec 0x%x (%s)\n", e, esp_err_to_name(e));
+  }
+  return false;
+}
+
+static uint8_t* loadFile(const char* rel, size_t& len) {     // rel = "/games/<id>/yrom1.snd"
+  char full[96]; snprintf(full, sizeof(full), "%s%s", MP, rel);
+  FILE* f = fopen(full, "rb"); if (!f) { len = 0; return nullptr; }
+  fseek(f, 0, SEEK_END); long n = ftell(f); fseek(f, 0, SEEK_SET);
+  if (n <= 0) { fclose(f); len = 0; return nullptr; }
+  uint8_t* b = (uint8_t*)malloc(n);
+  if (b && fread(b, 1, n, f) != (size_t)n) { free(b); b = nullptr; n = 0; }
+  fclose(f); len = (size_t)n; return b;
 }
 
 // Lit /games.idx -> g_games[] (lignes "short|gen|title"). Retourne le nombre de jeux.
 static int parseManifest() {
-  File f = SD_MMC.open("/games.idx");
+  char full[64]; snprintf(full, sizeof(full), "%s/games.idx", MP);
+  FILE* f = fopen(full, "r");
   if (!f) { snprintf(g_status, sizeof(g_status), "games.idx absent (relancer make_sd.sh)"); return 0; }
-  g_nGames = 0;
-  while (f.available() && g_nGames < MAXGAMES) {
-    String line = f.readStringUntil('\n'); line.trim();
-    if (line.length() == 0) continue;
-    int p1 = line.indexOf('|'); int p2 = line.indexOf('|', p1 + 1);
-    if (p1 < 0 || p2 < 0) continue;
+  g_nGames = 0; char line[160];
+  while (g_nGames < MAXGAMES && fgets(line, sizeof(line), f)) {
+    char* nl = strpbrk(line, "\r\n"); if (nl) *nl = 0;            // strip EOL
+    if (!line[0]) continue;
+    char* p1 = strchr(line, '|'); if (!p1) continue; *p1 = 0;
+    char* p2 = strchr(p1 + 1, '|'); if (!p2) continue; *p2 = 0;
     Game& g = g_games[g_nGames];
-    String id = line.substring(0, p1), gn = line.substring(p1 + 1, p2), ti = line.substring(p2 + 1);
-    strncpy(g.id, id.c_str(), sizeof(g.id) - 1);   g.id[sizeof(g.id) - 1] = 0;
-    g.gen = (uint8_t)gn.toInt();
-    strncpy(g.title, ti.c_str(), sizeof(g.title) - 1); g.title[sizeof(g.title) - 1] = 0;
+    strncpy(g.id, line, sizeof(g.id) - 1);          g.id[sizeof(g.id) - 1] = 0;
+    g.gen = (uint8_t)atoi(p1 + 1);
+    strncpy(g.title, p2 + 1, sizeof(g.title) - 1);  g.title[sizeof(g.title) - 1] = 0;
     g_nGames++;
   }
-  f.close();
+  fclose(f);
   return g_nGames;
 }
 
@@ -179,28 +222,7 @@ static void startWeb() {
 // Monte la SD + lit le manifeste dans SA tâche (un SD bloqué ne gèle ni loop ni le web), puis
 // demande le chargement du jeu par défaut via g_pendingLoad (loop() fait le vrai chargement).
 static void sdInitTask(void*) {
-  // Pins SDMMC slot-1 FIXES en IOMUX sur ESP32-WROVER (CLK14/CMD15/D0=2/D1=4/D2=12/D3=13 ; setPins = S3-only).
-  // Le firmware de Ralf (ESP-IDF) monte en 4-bit @40MHz avec SDMMC_SLOT_FLAG_INTERNAL_PULLUP : la carte DEPEND
-  // des pull-up INTERNES de l'ESP (le BOM n'a que 3x 4,7K externes). Le wrapper Arduino SD_MMC ne les active
-  // PAS -> 1-bit renvoie false (D3 flottant = carte en mode SPI) et 4-bit BLOQUE (D0-D3 jamais hauts). On
-  // active donc les pull-up internes nous-memes AVANT begin() (= le flag de Ralf), puis sa config exacte + replis.
-  const gpio_num_t sdPins[] = { GPIO_NUM_14, GPIO_NUM_15, GPIO_NUM_2, GPIO_NUM_4, GPIO_NUM_12, GPIO_NUM_13 };
-  for (int i = 0; i < 6; i++) gpio_set_pull_mode(sdPins[i], GPIO_PULLUP_ONLY);   // = SDMMC_SLOT_FLAG_INTERNAL_PULLUP
-  struct { bool oneBit; int khz; const char* tag; } ladder[] = {
-    { false, 40000, "4-bit 40MHz" },   // config exacte de Ralf (slot.width=4 + SDMMC_FREQ_HIGHSPEED)
-    { false, 20000, "4-bit 20MHz" },
-    { true,  20000, "1-bit 20MHz" },   // 1-bit n'utilise pas GPIO12 (strap)
-    { true,    400, "1-bit 400kHz" },  // probing : repli le plus robuste pour carte marginale
-  };
-  bool ok = false;
-  for (int i = 0; i < (int)(sizeof(ladder) / sizeof(ladder[0])) && !ok; i++) {
-    snprintf(g_status, sizeof(g_status), "SD: montage %s...", ladder[i].tag);
-    Serial.printf("SD: tentative %s\n", ladder[i].tag);
-    SD_MMC.end();                                                  // etat propre entre deux tentatives
-    ok = SD_MMC.begin("/sdcard", ladder[i].oneBit, false, ladder[i].khz);
-    if (ok) { snprintf(g_status, sizeof(g_status), "SD: monte (%s)", ladder[i].tag); Serial.printf("SD mounted (%s).\n", ladder[i].tag); }
-  }
-  if (!ok) { snprintf(g_status, sizeof(g_status), "SD: pas de carte / FAT32 ? (pull-up D1/D2/D3)"); Serial.println(g_status); vTaskDelete(nullptr); return; }
+  if (!mountSD()) { snprintf(g_status, sizeof(g_status), "SD: echec montage (voir serie)"); Serial.println(g_status); vTaskDelete(nullptr); return; }
   if (parseManifest() == 0) { Serial.println(g_status); vTaskDelete(nullptr); return; }
   Serial.printf("manifeste : %d jeux. Defaut -> %s\n", g_nGames, g_games[0].title);
   g_pendingLoad = 0;                                               // loop() charge le 1er jeu (mono-thread émulateur)
