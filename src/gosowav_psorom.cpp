@@ -193,6 +193,12 @@ static wavmix::Mixer g_mixer;
 static wavset::Set   g_set;
 static char          g_theme[24] = "";
 static volatile bool g_psowav = false;                 // un set WAV est-il charge pour ce jeu ?
+// ROM-chef : le CPU (logique seule) pilote le lecteur WAV (start/loop/stop) selon son comportement reel.
+static volatile int  g_chefReq = -1;                   // commande a (re)jouer : web/serie/materiel -> chef
+static int           g_chefId = -1, g_chefSlot = -1;   // son courant pilote + son slot WAV
+static int           g_curGen = 3;                     // generation du jeu (cadence CPU : Gen1=1MHz, Gen2/3=2MHz/CPU)
+static uint32_t      g_actVal = 0, g_actMs = 0;        // suivi activite CPU (sustain/idle)
+static int64_t       g_chefT0 = 0, g_chefEmu = 0;      // cadencement temps-reel du CPU
 struct WSlot { FILE* f; wavsrc::Source src; uint32_t dataOff, dataLen; uint8_t ch; int vid; bool used; };
 static WSlot s_ws[wavmix::MAX_VOICES];
 
@@ -201,26 +207,27 @@ static size_t wsFill(void* p, int16_t* dst, size_t fr) { return wavsrc::fill(&((
 static bool   wsRewind(void* p) { WSlot* s = (WSlot*)p; if (!s->f || fseek(s->f, s->dataOff, SEEK_SET)) return false;
                                   wavsrc::init(s->src, wfRead, s->f, s->ch, s->dataLen); return true; }
 
-static void wavStart(const wavset::Entry* e) {           // joue le WAV d'un son (loop/voice/break geres)
-  if ((e->attr & wavset::A_LOOP) && !(e->attr & wavset::A_VOICE)) g_mixer.stopActiveLoops();  // musique mono : remplace
-  if (e->attr & wavset::A_BREAK) g_mixer.stopTag(e->id);
+// Demarre le WAV du son `id` en ONE-SHOT (le ROM-chef decidera de reboucler). Retourne le slot, ou -1.
+static int wavTrigger(int id) {
+  const wavset::Entry* e = g_set.find(id); if (!e || (e->attr & wavset::A_PLACE)) return -1;
   for (int i = 0; i < wavmix::MAX_VOICES; i++)            // libere les voix terminees
     if (s_ws[i].used && !g_mixer.active(s_ws[i].vid)) { fclose(s_ws[i].f); s_ws[i].used = false; }
-  if (e->attr & wavset::A_PLACE) return;
   int si = -1; for (int i = 0; i < wavmix::MAX_VOICES; i++) if (!s_ws[i].used) { si = i; break; }
-  if (si < 0) return;
+  if (si < 0) return -1;
   char path[96]; snprintf(path, sizeof(path), "%s/%s/%s", MP, g_theme, e->file);
-  FILE* f = fopen(path, "rb"); if (!f) return;
+  FILE* f = fopen(path, "rb"); if (!f) return -1;
   uint8_t hdr[64]; size_t got = fread(hdr, 1, sizeof(hdr), f);
   WavInfo wi = wav_parse(hdr, got);
-  if (!wi.ok || fseek(f, wi.dataOffset, SEEK_SET)) { fclose(f); return; }
+  if (!wi.ok || fseek(f, wi.dataOffset, SEEK_SET)) { fclose(f); return -1; }
   s_ws[si].f = f; s_ws[si].dataOff = wi.dataOffset; s_ws[si].dataLen = wi.dataLen; s_ws[si].ch = (uint8_t)wi.channels;
   wavsrc::init(s_ws[si].src, wfRead, f, (uint8_t)wi.channels, wi.dataLen);
   wavmix::VoiceCfg vc; vc.fill = wsFill; vc.ctx = &s_ws[si]; vc.rewind = wsRewind;
-  vc.gain = 255; vc.tag = e->id; vc.loop = (e->attr & wavset::A_LOOP) != 0; vc.voice = (e->attr & wavset::A_VOICE) != 0;
-  int vid = g_mixer.trigger(vc); if (vid < 0) { fclose(f); return; }
-  s_ws[si].vid = vid; s_ws[si].used = true;
+  vc.gain = 255; vc.tag = id; vc.loop = false;            // one-shot : le chef rejoue si le CPU entretient le son
+  int vid = g_mixer.trigger(vc); if (vid < 0) { fclose(f); return -1; }
+  s_ws[si].vid = vid; s_ws[si].used = true; return si;
 }
+static void wavStopSlot(int si) { if (si >= 0 && s_ws[si].used) { g_mixer.stop(s_ws[si].vid); fclose(s_ws[si].f); s_ws[si].used = false; } }
+static bool wavSlotPlaying(int si) { return si >= 0 && s_ws[si].used && g_mixer.active(s_ws[si].vid); }
 
 static void loadWavSet(const char* theme) {              // scanne /sdcard/<theme>/ -> g_set ; g_psowav si non vide
   g_mixer.stopAll(); g_mixer.setMix(wavmix::MIX_DIV2);
@@ -264,7 +271,10 @@ static bool loadGame(int idx) {
   free(y1); if (y2) free(y2); free(d);                  // begin() a recopié -> on libère les temporaires
   if (!ok) { snprintf(g_status, sizeof(g_status), "%s: begin() FAILED", gm.id); return false; }
   loadWavSet(gm.id);                                    // set WAV du jeu (hybride) ; PSOROM reste pret en repli
-  snprintf(g_status, sizeof(g_status), "OK %s (Gen%d, %s)", gm.title, gm.gen, g_psowav ? "PSOWAV" : "PSOROM");
+  g_curGen = gm.gen;                                     // cadence CPU du ROM-chef
+  g_chefId = g_chefSlot = -1; g_chefReq = -1; g_chefT0 = esp_timer_get_time(); g_chefEmu = 0;
+  g_actVal = psorom::activity(); g_actMs = millis();
+  snprintf(g_status, sizeof(g_status), "OK %s (Gen%d, %s)", gm.title, gm.gen, g_psowav ? "ROM-chef+WAV" : "PSOROM");
   Serial.printf("loaded %-10s Gen%d  y=%u%s d=%u\n", gm.id, gm.gen, (unsigned)yl, (y2 ? "+yrom2" : ""), (unsigned)dl);
   return true;
 }
@@ -383,21 +393,37 @@ void loop() {
   cmdInputPoll();                                                  // bus commande matériel (vraie machine) -> g_pendingCmd
   int pc = g_pendingCmd;                                           // commande web/série/matériel (handoff lock-free)
   if (pc >= 0) { g_pendingCmd = -1;
-    if (g_psowav) { const wavset::Entry* e = g_set.find(pc); if (e) wavStart(e); }  // HYBRIDE : PSOWAV par defaut
-    else psorom::command((uint8_t)pc);                                              // PSOROM (exact) si pas de set WAV
+    if (g_psowav) g_chefReq = pc;                                  // ROM-chef : CPU + WAV traités dans le mix
+    else psorom::command((uint8_t)pc);                             // PSOROM live (pas de set WAV)
   }
 
-  // --- Remplit le ring (vide par le timer ISR a Fs). PSOWAV : down-mix mono de wavmix. Sinon PSOROM. ---
   int guard = 0;
   if (g_psowav) {
-    static int16_t wb[wavmix::BLOCK * 2];
-    while (!ringFull() && guard++ < 24) {
-      g_mixer.mix(wb, wavmix::BLOCK);                               // mixe les voix WAV (stereo)
+    // --- ROM-CHEF : le CPU (logique seule, AUCUNE synthese) interprete la commande et PILOTE le WAV ---
+    int tpu = (g_curGen == 1) ? 2 : 4;                             // ticks/us combine : Gen1=1MHz/CPU, Gen2/3=2MHz/CPU
+    int64_t now = esp_timer_get_time();
+    int64_t tgt = (now - g_chefT0) * tpu;
+    if (tgt - g_chefEmu > (int64_t)tpu * 2000000) { g_chefT0 = now; g_chefEmu = 0; }   // recale si gros retard
+    else { int r = 0; while (g_chefEmu < tgt && r++ < 64) g_chefEmu += psorom::run(64); }  // (a) avance le CPU au temps-reel
+    if (g_chefReq >= 0) {                                          // (b) nouvelle commande -> CPU (comportement) + WAV
+      wavStopSlot(g_chefSlot); psorom::command((uint8_t)g_chefReq);
+      g_chefSlot = wavTrigger(g_chefReq); g_chefId = (g_chefSlot >= 0) ? g_chefReq : -1;
+      g_chefReq = -1; g_actVal = psorom::activity(); g_actMs = millis();
+    }
+    uint32_t a = psorom::activity(); if (a != g_actVal) { g_actVal = a; g_actMs = millis(); }  // (c) activite CPU
+    bool cpuActive = (millis() - g_actMs) < 120;
+    if (g_chefId >= 0) {                                           // (d) le CPU pilote : WAV fini+CPU actif->loop ; CPU idle->stop
+      if (!wavSlotPlaying(g_chefSlot)) { if (cpuActive) g_chefSlot = wavTrigger(g_chefId); else g_chefId = -1; }
+      else if (!cpuActive) { wavStopSlot(g_chefSlot); g_chefSlot = -1; g_chefId = -1; }
+    }
+    static int16_t wb[wavmix::BLOCK * 2];                          // (e) ring <- wavmix (down-mix mono)
+    while (!ringFull() && guard++ < 16) {
+      g_mixer.mix(wb, wavmix::BLOCK);
       for (int i = 0; i < wavmix::BLOCK && !ringFull(); i++) ringPush((int16_t)((wb[2*i] + wb[2*i+1]) >> 1));
     }
   } else {
     while (!ringFull() && guard++ < 96) {
-      int16_t buf[32]; int n = psorom::renderMix(buf, 32);         // DAC + AY + voix (émulateur live)
+      int16_t buf[32]; int n = psorom::renderMix(buf, 32);         // DAC + AY + voix (émulateur live, exact)
       for (int i = 0; i < n && !ringFull(); i++) ringPush(buf[i]);
     }
   }

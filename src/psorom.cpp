@@ -213,6 +213,9 @@ uint16_t pcNow(){ return pc; }
 uint32_t dacCount(){ return dacWrites; }
 uint32_t insCount(){ return instructions; }
 uint32_t ymWrites(){ return ymW; }
+// ROM-chef : "activite son" du CPU = total ecritures DAC + puces. Le firmware echantillonne le delta
+// pour savoir, en live, si le CPU produit encore du son (sustain=loop) ou est repasse a l'idle (stop).
+uint32_t activity(){ return dacWrites + ymW; }
 void dbgGen1(uint32_t* o){ o[0]=cY.pc; o[1]=cD.pc; o[2]=nmi_enable; o[3]=g_yNmiCnt; for(int i=0;i<16;i++)o[4+i]=g_ywHist[i]; } // DEBUG
 // Rend n echantillons @ AY_FS = melange des AY actifs (etat courant). Pour validation host + futur mixeur.
 int ayRender(int16_t* out, int n){
