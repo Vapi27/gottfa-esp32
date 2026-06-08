@@ -26,6 +26,8 @@ static SPIClass dacspi(HSPI);
 static WebServer server(80);
 static float g_thrM = 0;          // measured throughput (M 6502-cycles/sec)
 static int   g_lastCmd = -1;
+static bool  g_ready = false;     // ROMs loaded + emulator running?
+static char  g_status[80] = "booting...";
 
 static inline void dacOut(int16_t s) {
   uint16_t v = (uint16_t)(((int32_t)s + 32768) >> 4) & 0x0FFF;     // 16-bit signed -> 12-bit unsigned
@@ -51,12 +53,13 @@ h1{font-size:1.05rem;margin:.2rem 0}.s{color:#39b6ff;font-variant-numeric:tabula
 button{background:#1d2430;color:#e7ecf3;border:1px solid #2a3340;border-radius:8px;padding:.7rem 0;font-size:1rem;cursor:pointer}
 button:active{background:#39b6ff;color:#04243a}.n{color:#8b97a8;font-size:.78rem;margin-top:1rem}</style></head><body>
 <h1>GOSOWAV &middot; PSOROM <span class=n>(notre 6502 emule sur ton hardware)</span></h1>
+<div>etat <b class=s id=st>...</b></div>
 <div>Debit <b class=s id=thr>--</b> M cyc/s &middot; DAC <b class=s id=dac>0</b> &middot; YM <b class=s id=ym>0</b> &middot; cmd <b class=s id=cmd>--</b></div>
 <div class=g id=pad></div>
 <div class=n>SD: yrom1.snd + drom1.snd (jeu 80B Gen3). Clique une commande pour jouer le son du vrai 6502.</div>
 <script>const pad=document.getElementById('pad');
 for(let i=0;i<32;i++){const b=document.createElement('button');b.textContent=i;b.onclick=()=>fetch('/cmd?n='+i);pad.appendChild(b);}
-function poll(){fetch('/status').then(r=>r.json()).then(d=>{thr.textContent=d.thr;dac.textContent=d.dac;ym.textContent=d.ym;cmd.textContent=d.cmd<0?'--':d.cmd;}).catch(()=>{});}
+function poll(){fetch('/status').then(r=>r.json()).then(d=>{st.textContent=d.st;thr.textContent=d.thr;dac.textContent=d.dac;ym.textContent=d.ym;cmd.textContent=d.cmd<0?'--':d.cmd;}).catch(()=>{});}
 setInterval(poll,500);poll();</script></body></html>)HTML";
 
 static void startWeb() {
@@ -68,8 +71,8 @@ static void startWeb() {
     server.send(200, "text/plain", "ok");
   });
   server.on("/status", []() {
-    char b[96]; snprintf(b, sizeof(b), "{\"thr\":%.2f,\"dac\":%u,\"ym\":%u,\"cmd\":%d}",
-             g_thrM, (unsigned)psorom::dacCount(), (unsigned)psorom::ymWrites(), g_lastCmd);
+    char b[160]; snprintf(b, sizeof(b), "{\"thr\":%.2f,\"dac\":%u,\"ym\":%u,\"cmd\":%d,\"st\":\"%s\"}",
+             g_thrM, (unsigned)psorom::dacCount(), (unsigned)psorom::ymWrites(), g_lastCmd, g_status);
     server.send(200, "application/json", b);
   });
   server.begin();
@@ -81,13 +84,17 @@ void setup() {
   pinMode(DAC_CS, OUTPUT); digitalWrite(DAC_CS, HIGH);
   dacspi.begin(DAC_SCK, -1, DAC_SDI, DAC_CS);
   dacOut(0);                                                       // mid-scale = silence
+  startWeb();                                                      // WiFi FIRST -> the AP always appears, even if SD/ROMs fail
 
-  if (!SD_MMC.begin()) { Serial.println("SD_MMC mount FAILED"); return; }
+  if (!SD_MMC.begin() && !SD_MMC.begin("/sdcard", true)) {         // try 4-bit, then 1-bit
+    strncpy(g_status, "SD mount FAILED (carte / FAT32 ?)", sizeof(g_status) - 1);
+    Serial.println(g_status); return;
+  }
   size_t yl, yl2 = 0, dl;
   uint8_t* y1 = loadFile("/yrom1.snd", yl);
   uint8_t* y2 = loadFile("/yrom2.snd", yl2);                     // optional: present on Gen1 (AY+SP0250, e.g. Arena)
   uint8_t* d  = loadFile("/drom1.snd", dl);
-  if (!y1 || !d) { Serial.printf("need /yrom1.snd + /drom1.snd on the SD (got y=%u d=%u)\n", (unsigned)yl, (unsigned)dl); return; }
+  if (!y1 || !d) { snprintf(g_status, sizeof(g_status), "manque yrom1.snd+drom1.snd (y=%u d=%u)", (unsigned)yl, (unsigned)dl); Serial.println(g_status); return; }
 
   psorom::Board board; uint8_t* yrom; size_t ylen;
   if (y2 && yl2) {                                               // yrom2 present -> Gen1: Y-CPU = yrom1 ++ yrom2
@@ -107,14 +114,15 @@ void setup() {
   uint32_t t0 = millis(), cyc = 0;
   while (millis() - t0 < 1000) cyc += psorom::run(200000);
   g_thrM = cyc / 1e6f;
+  snprintf(g_status, sizeof(g_status), "OK %s  %.2f M cyc/s", (board == psorom::GTS80B_GEN1) ? "Gen1" : "Gen3", g_thrM);
   Serial.printf("THROUGHPUT: %.2f M 6502-cycles/sec   (real-time 80B needs ~2.0 M)\n", g_thrM);
-  Serial.printf("1s of cmd22: dac=%u  ym=%u\n", (unsigned)psorom::dacCount(), (unsigned)psorom::ymWrites());
   Serial.println("Type a sound command number (0-31) + Enter to play it.");
-  startWeb();                                                     // small web UI (SoftAP)
+  g_ready = true;
 }
 
 void loop() {
   server.handleClient();
+  if (!g_ready) { delay(5); return; }                            // WiFi/web alive even if no ROMs
   // best-effort real-time: 2000 6502-cycles ~= 1 ms at 2 MHz; stream the produced DAC samples.
   static uint32_t lastUs = 0;
   psorom::run(2000);
