@@ -282,6 +282,37 @@
         (clé propre à cet ESP) empêche la copie depuis la carte — il ne <b>rend rien légal</b>.</div>
     </div>
     <div class="panel">
+      <h2>Lecteur EPROM — dumpe ta puce</h2>
+      <label class="fld">Type de puce</label>
+      <select id="epr_type">
+        <option value="2764">2764 — 8 Ko (système 80B)</option>
+        <option value="2732">2732 — 4 Ko (ROM jeu)</option>
+        <option value="2716">2716 — 2 Ko (ROM jeu)</option>
+        <option value="u2">U2 — mask 2332 (système 80/80A)</option>
+        <option value="u3">U3 — mask 2332 (système 80/80A)</option>
+      </select>
+      <label class="fld">Nom du dump</label>
+      <input type="text" id="epr_name" value="dump" maxlength="24">
+      <div class="row" style="margin-top:.6rem;align-items:center">
+        <button class="btn accent" onclick="eprDump()">⤓ Dumper + vérifier</button>
+        <span id="epr_msg" class="note" style="white-space:pre-line"></span>
+      </div>
+      <div class="note">Lit la puce (fille-mère 595/165) → <code>/dumps/&lt;nom&gt;.bin</code>, puis vérifie le CRC
+        contre la base PinMAME (identifie le jeu + intégrité). Un dump valide <b>débloque le son</b> de ce jeu.
+        Le son n'est pas lu (PSOWAV le fournit). <i>RIOT 80/80A = illisible → dump PinMAME.</i></div>
+    </div>
+    <div class="panel">
+      <h2>Possession — déverrouillage du son</h2>
+      <div class="kv"><span class="k">Garde de possession</span>
+        <span style="display:flex;gap:.5rem;align-items:center">
+          <span id="own_st" class="pill">—</span>
+          <label class="switch"><input type="checkbox" id="own_gate" onchange="ownGate(this.checked)"><span class="slide"></span></label>
+        </span></div>
+      <div class="kv"><span class="k">Jeux possédés</span><span id="own_list">—</span></div>
+      <div class="note">Garde <b>ON</b> : le son d'un jeu ne joue que si un <b>dump vérifié</b> l'a débloqué.
+        <b>OFF</b> (défaut) : tout le son joue. Bonne foi / réduction de risque — <b>pas</b> une légalisation.</div>
+    </div>
+    <div class="panel">
       <h2>FPGA bitstream — flash 1 clic <span class="pill">à venir</span></h2>
       <div class="note">Prévu : l'ESP programme le <b>bitstream</b> (IS25LP016D via JTAG SFL) en une action. En développement.</div>
     </div>
@@ -548,6 +579,20 @@ function romUpload(){const f=document.getElementById('rom_file').files[0],msg=do
   msg.textContent='chiffrement + envoi ('+(fp?'Free Play':'stock')+')…';
   fetch('/romup?id='+id+'&fp='+fp,{method:'POST',body:f}).then(r=>r.text()).then(t=>{msg.textContent=t;romFetchList();})
     .catch(e=>{msg.textContent='erreur : '+e;});}
+/* ---- EPROM dump + verify + ownership gate ---- */
+function eprDump(){const msg=document.getElementById('epr_msg');
+  if(st.demo){msg.textContent='(démo — pas de lecteur EPROM)';return;}
+  const type=document.getElementById('epr_type').value,name=encodeURIComponent(document.getElementById('epr_name').value||'dump');
+  msg.textContent='lecture de la puce…';
+  fetch('/dump?type='+type+'&name='+name).then(r=>r.text()).then(t=>{msg.textContent=t;ownFetch();romFetchList();})
+    .catch(e=>{msg.textContent='erreur : '+e;});}
+function setOwnPill(g){const p=document.getElementById('own_st');if(p){p.textContent=g?'ON':'OFF';p.classList.toggle('on',!!g);}
+  const cb=document.getElementById('own_gate');if(cb)cb.checked=!!g;}
+function ownFetch(){if(st.demo){document.getElementById('own_list').textContent='(démo)';return;}
+  fetch('/owned').then(r=>r.json()).then(d=>{setOwnPill(!!d.gate);
+    document.getElementById('own_list').textContent=d.n?(d.n+' : '+d.games):'aucun';}).catch(()=>{document.getElementById('own_list').textContent='(hors-ligne)';});}
+function ownGate(on){if(st.demo){setOwnPill(on);return;}
+  fetch('/owned?gate='+(on?1:0)).then(r=>r.json()).then(d=>{setOwnPill(!!d.gate);toast('garde de possession '+(d.gate?'ON':'OFF'));}).catch(()=>{});}
 function renderGate(){document.querySelectorAll('#lamp .grid,#lamp .row,#coil .coils,#snd .snds,#dispFields,#disp80b')
   .forEach(e=>e.classList.toggle('disabled',!gate()));}
 function renderNames(){
@@ -681,7 +726,7 @@ document.getElementById('mst').onchange=e=>{
 document.getElementById('tabs').onclick=e=>{const t=e.target.dataset.t;if(t){
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b===e.target));
   document.querySelectorAll('section').forEach(s=>s.classList.toggle('active',s.id===t));
-  if(t==='sys'||t==='deploy')reqSys();if(t==='deploy'){reqGames();romFetchList();}}};
+  if(t==='sys'||t==='deploy')reqSys();if(t==='deploy'){reqGames();romFetchList();ownFetch();}}};
 let tT;function toast(msg){const c=document.getElementById('conn'),o=c.textContent;c.textContent=msg;
   clearTimeout(tT);tT=setTimeout(()=>setConn(st.connected?'ok':st.demo?'demo':''),1400);}
 
