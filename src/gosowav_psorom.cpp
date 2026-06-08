@@ -50,9 +50,12 @@ static volatile int g_pendingCmd = -1;   // web/série -> loop() : commande à i
 static volatile int g_pendingLoad = -1;  // web/init   -> loop() : index de jeu à (re)charger
 static volatile bool g_ready = false;    // un jeu est chargé + émulateur tourne ?
 static char         g_status[96] = "booting...";
+static volatile int g_vol = 100;         // volume maitre % (0..200, 100 = normal) applique au DAC
 
 static inline void dacOut(int16_t s) {
-  uint16_t v = (uint16_t)(((int32_t)s + 32768) >> 4) & 0x0FFF;     // 16-bit signé -> 12-bit non signé
+  int32_t x = ((int32_t)s * g_vol) / 100;                          // volume maitre (autour de 0 = silence)
+  if (x > 32767) x = 32767; else if (x < -32768) x = -32768;       // clamp anti-wrap si boost > 100%
+  uint16_t v = (uint16_t)((x + 32768) >> 4) & 0x0FFF;              // 16-bit signé -> 12-bit non signé
   dacspi.beginTransaction(SPISettings(20000000, MSBFIRST, SPI_MODE0));
   digitalWrite(DAC_CS, LOW);
   dacspi.transfer16(0x3000 | v);                                   // 0x3000 = cfg MCP4921 (DAC-A,1x,actif)
@@ -181,13 +184,15 @@ button:active{background:#39b6ff;color:#04243a}.n{color:#8b97a8;font-size:.78rem
 <label class=n>Jeu</label><select id=game></select>
 <div>etat <b class=s id=st>...</b></div>
 <div>Debit <b class=s id=thr>--</b> M cyc/s &middot; DAC <b class=s id=dac>0</b> &middot; YM <b class=s id=ym>0</b> &middot; cmd <b class=s id=cmd>--</b></div>
+<div>Volume <b class=s id=volv>100</b>%<input type=range min=0 max=200 value=100 id=vol style="width:100%"></div>
 <div class=g id=pad></div>
 <div class=n>Choisis un jeu, puis clique une commande son (0-31) pour jouer le son du vrai 6502.</div>
-<script>const pad=document.getElementById('pad'),sel=document.getElementById('game');
+<script>const pad=document.getElementById('pad'),sel=document.getElementById('game'),vol=document.getElementById('vol'),volv=document.getElementById('volv');
+vol.oninput=()=>{volv.textContent=vol.value;fetch('/vol?v='+vol.value);};
 for(let i=0;i<32;i++){const b=document.createElement('button');b.textContent=i;b.onclick=()=>fetch('/cmd?n='+i);pad.appendChild(b);}
 fetch('/games').then(r=>r.json()).then(d=>{sel.innerHTML='';d.g.forEach(x=>{const o=document.createElement('option');o.value=x.i;o.textContent='G'+x.n+'  '+x.t;if(x.i==d.sel)o.selected=true;sel.appendChild(o);});});
 sel.onchange=()=>fetch('/load?i='+sel.value);
-function poll(){fetch('/status').then(r=>r.json()).then(d=>{st.textContent=d.st;thr.textContent=d.thr;dac.textContent=d.dac;ym.textContent=d.ym;cmd.textContent=d.cmd<0?'--':d.cmd;}).catch(()=>{});}
+function poll(){fetch('/status').then(r=>r.json()).then(d=>{st.textContent=d.st;thr.textContent=d.thr;dac.textContent=d.dac;ym.textContent=d.ym;cmd.textContent=d.cmd<0?'--':d.cmd;if(document.activeElement!=vol){vol.value=d.vol;volv.textContent=d.vol;}}).catch(()=>{});}
 setInterval(poll,500);poll();</script></body></html>)HTML";
 
 // HTTP servi sur SA tâche FreeRTOS (core 0 = cœur WiFi) -> page joignable dès l'AP, indépendamment
@@ -200,6 +205,10 @@ static void startWeb() {
   server.on("/", []() { server.send_P(200, "text/html", PAGE); });
   server.on("/cmd", []() {
     if (server.hasArg("n")) { int n = server.arg("n").toInt(); if (n >= 0 && n <= 95) { g_pendingCmd = n; g_lastCmd = n; } }
+    server.send(200, "text/plain", "ok");
+  });
+  server.on("/vol", []() {                                         // volume maitre 0..200 %
+    if (server.hasArg("v")) { int v = server.arg("v").toInt(); if (v >= 0 && v <= 200) g_vol = v; }
     server.send(200, "text/plain", "ok");
   });
   server.on("/load", []() {
@@ -216,8 +225,8 @@ static void startWeb() {
     server.send(200, "application/json", j);
   });
   server.on("/status", []() {
-    char b[200]; snprintf(b, sizeof(b), "{\"thr\":%.2f,\"dac\":%u,\"ym\":%u,\"cmd\":%d,\"st\":\"%s\"}",
-             g_thrM, (unsigned)psorom::dacCount(), (unsigned)psorom::ymWrites(), g_lastCmd, g_status);
+    char b[220]; snprintf(b, sizeof(b), "{\"thr\":%.2f,\"dac\":%u,\"ym\":%u,\"cmd\":%d,\"vol\":%d,\"st\":\"%s\"}",
+             g_thrM, (unsigned)psorom::dacCount(), (unsigned)psorom::ymWrites(), g_lastCmd, g_vol, g_status);
     server.send(200, "application/json", b);
   });
   server.begin();
