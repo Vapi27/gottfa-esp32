@@ -14,11 +14,17 @@
 #include <SPI.h>
 #include "FS.h"
 #include "SD_MMC.h"
+#include <WiFi.h>
+#include <WebServer.h>
 #include "psorom.h"
 
 // MCP4921 on the GOSOWAV WROVER (hardware fact from the board): SCK=18, SDI/MOSI=23, CS=5.
 static const int DAC_SCK = 18, DAC_SDI = 23, DAC_CS = 5;
 static SPIClass dacspi(HSPI);
+
+static WebServer server(80);
+static float g_thrM = 0;          // measured throughput (M 6502-cycles/sec)
+static int   g_lastCmd = -1;
 
 static inline void dacOut(int16_t s) {
   uint16_t v = (uint16_t)(((int32_t)s + 32768) >> 4) & 0x0FFF;     // 16-bit signed -> 12-bit unsigned
@@ -34,6 +40,38 @@ static uint8_t* loadFile(const char* path, size_t& len) {
   len = f.size(); uint8_t* b = (uint8_t*)malloc(len);
   if (b && f.read(b, len) != (int)len) { free(b); b = nullptr; len = 0; }
   f.close(); return b;
+}
+
+static const char* PAGE = R"HTML(<!doctype html><html lang=fr><head><meta charset=utf-8>
+<meta name=viewport content="width=device-width,initial-scale=1"><title>GOSOWAV PSOROM</title>
+<style>body{background:#0d1017;color:#e7ecf3;font-family:system-ui;margin:0;padding:1rem}
+h1{font-size:1.05rem;margin:.2rem 0}.s{color:#39b6ff;font-variant-numeric:tabular-nums}
+.g{display:grid;grid-template-columns:repeat(8,1fr);gap:6px;margin-top:1rem}
+button{background:#1d2430;color:#e7ecf3;border:1px solid #2a3340;border-radius:8px;padding:.7rem 0;font-size:1rem;cursor:pointer}
+button:active{background:#39b6ff;color:#04243a}.n{color:#8b97a8;font-size:.78rem;margin-top:1rem}</style></head><body>
+<h1>GOSOWAV &middot; PSOROM <span class=n>(notre 6502 emule sur ton hardware)</span></h1>
+<div>Debit <b class=s id=thr>--</b> M cyc/s &middot; DAC <b class=s id=dac>0</b> &middot; YM <b class=s id=ym>0</b> &middot; cmd <b class=s id=cmd>--</b></div>
+<div class=g id=pad></div>
+<div class=n>SD: yrom1.snd + drom1.snd (jeu 80B Gen3). Clique une commande pour jouer le son du vrai 6502.</div>
+<script>const pad=document.getElementById('pad');
+for(let i=0;i<32;i++){const b=document.createElement('button');b.textContent=i;b.onclick=()=>fetch('/cmd?n='+i);pad.appendChild(b);}
+function poll(){fetch('/status').then(r=>r.json()).then(d=>{thr.textContent=d.thr;dac.textContent=d.dac;ym.textContent=d.ym;cmd.textContent=d.cmd<0?'--':d.cmd;}).catch(()=>{});}
+setInterval(poll,500);poll();</script></body></html>)HTML";
+
+static void startWeb() {
+  WiFi.mode(WIFI_AP); WiFi.softAP("GOSOWAV-PSOROM");
+  Serial.printf("web: join WiFi 'GOSOWAV-PSOROM' -> http://%s/\n", WiFi.softAPIP().toString().c_str());
+  server.on("/", []() { server.send_P(200, "text/html", PAGE); });
+  server.on("/cmd", []() {
+    if (server.hasArg("n")) { int n = server.arg("n").toInt(); if (n >= 0 && n <= 95) { psorom::command((uint8_t)n); g_lastCmd = n; } }
+    server.send(200, "text/plain", "ok");
+  });
+  server.on("/status", []() {
+    char b[96]; snprintf(b, sizeof(b), "{\"thr\":%.2f,\"dac\":%u,\"ym\":%u,\"cmd\":%d}",
+             g_thrM, (unsigned)psorom::dacCount(), (unsigned)psorom::ymWrites(), g_lastCmd);
+    server.send(200, "application/json", b);
+  });
+  server.begin();
 }
 
 void setup() {
@@ -57,12 +95,15 @@ void setup() {
   psorom::command(22);                                            // a DAC-music command (badgirls)
   uint32_t t0 = millis(), cyc = 0;
   while (millis() - t0 < 1000) cyc += psorom::run(200000);
-  Serial.printf("THROUGHPUT: %.2f M 6502-cycles/sec   (real-time 80B needs ~2.0 M)\n", cyc / 1e6);
+  g_thrM = cyc / 1e6f;
+  Serial.printf("THROUGHPUT: %.2f M 6502-cycles/sec   (real-time 80B needs ~2.0 M)\n", g_thrM);
   Serial.printf("1s of cmd22: dac=%u  ym=%u\n", (unsigned)psorom::dacCount(), (unsigned)psorom::ymWrites());
   Serial.println("Type a sound command number (0-31) + Enter to play it.");
+  startWeb();                                                     // small web UI (SoftAP)
 }
 
 void loop() {
+  server.handleClient();
   // best-effort real-time: 2000 6502-cycles ~= 1 ms at 2 MHz; stream the produced DAC samples.
   static uint32_t lastUs = 0;
   psorom::run(2000);
