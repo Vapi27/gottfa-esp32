@@ -68,6 +68,13 @@ echo "Copie de $NSRC fichiers .snd + manifeste (16 jeux 80B)..."
 cp -f "$SRC/games.idx" "$MP/games.idx" || { echo "❌ copie games.idx échouée"; exit 1; }
 rm -rf "$MP/games" 2>/dev/null
 cp -R "$SRC/games" "$MP/games" || { echo "❌ copie games/ échouée"; exit 1; }
+# Sets WAV PSOWAV (hybride) : tout dossier de ~/gosowav_sd/ sauf "games" -> racine SD /<jeu>/
+for d in "$SRC"/*/; do
+  name=$(basename "$d"); [ "$name" = "games" ] && continue
+  rm -rf "$MP/$name" 2>/dev/null
+  cp -R "$d" "$MP/$name" || { echo "❌ copie set WAV $name échouée"; exit 1; }
+  echo "  set WAV $name ($(find "$d" -name '*.wav'|wc -l|tr -d ' ') sons)"
+done
 dot_clean -m "$MP" 2>/dev/null                                   # supprime les ._AppleDouble crees sur FAT
 sync
 
