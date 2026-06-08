@@ -44,6 +44,7 @@ static int   g_nGames = 0;
 static int   g_sel = 0;                  // jeu courant (index dans g_games)
 
 static float        g_thrM = 0;          // débit mesuré (M 6502-cycles/s)
+static uint32_t     g_mixSps = 0;        // débit renderMix (echantillons/s ; besoin = Fs pour temps-reel)
 static bool         g_benched = false;   // bench déjà fait ?
 static volatile int g_lastCmd = -1;      // dernière commande son
 static volatile int g_pendingCmd = -1;   // web/série -> loop() : commande à injecter
@@ -201,7 +202,7 @@ button:active{background:#39b6ff;color:#04243a}.n{color:#8b97a8;font-size:.78rem
 <h1>GOSOWAV &middot; PSOROM <span class=n>(notre 6502 emule sur ton hardware)</span></h1>
 <label class=n>Jeu</label><select id=game></select>
 <div>etat <b class=s id=st>...</b></div>
-<div>Debit <b class=s id=thr>--</b> M cyc/s &middot; DAC <b class=s id=dac>0</b> &middot; YM <b class=s id=ym>0</b> &middot; cmd <b class=s id=cmd>--</b></div>
+<div>Debit <b class=s id=thr>--</b> M cyc/s &middot; mix <b class=s id=mix>--</b>/s &middot; DAC <b class=s id=dac>0</b> &middot; YM <b class=s id=ym>0</b> &middot; cmd <b class=s id=cmd>--</b></div>
 <div>Volume <b class=s id=volv>100</b>%<input type=range min=0 max=200 value=100 id=vol style="width:100%"></div>
 <div class=g id=pad></div>
 <div class=n>Choisis un jeu, puis clique une commande son (0-31) pour jouer le son du vrai 6502.</div>
@@ -210,7 +211,7 @@ vol.oninput=()=>{volv.textContent=vol.value;fetch('/vol?v='+vol.value);};
 for(let i=0;i<32;i++){const b=document.createElement('button');b.textContent=i;b.onclick=()=>fetch('/cmd?n='+i);pad.appendChild(b);}
 fetch('/games').then(r=>r.json()).then(d=>{sel.innerHTML='';d.g.forEach(x=>{const o=document.createElement('option');o.value=x.i;o.textContent='G'+x.n+'  '+x.t;if(x.i==d.sel)o.selected=true;sel.appendChild(o);});});
 sel.onchange=()=>fetch('/load?i='+sel.value);
-function poll(){fetch('/status').then(r=>r.json()).then(d=>{st.textContent=d.st;thr.textContent=d.thr;dac.textContent=d.dac;ym.textContent=d.ym;cmd.textContent=d.cmd<0?'--':d.cmd;if(document.activeElement!=vol){vol.value=d.vol;volv.textContent=d.vol;}}).catch(()=>{});}
+function poll(){fetch('/status').then(r=>r.json()).then(d=>{st.textContent=d.st;thr.textContent=d.thr;mix.textContent=d.mix;dac.textContent=d.dac;ym.textContent=d.ym;cmd.textContent=d.cmd<0?'--':d.cmd;if(document.activeElement!=vol){vol.value=d.vol;volv.textContent=d.vol;}}).catch(()=>{});}
 setInterval(poll,500);poll();</script></body></html>)HTML";
 
 // HTTP servi sur SA tâche FreeRTOS (core 0 = cœur WiFi) -> page joignable dès l'AP, indépendamment
@@ -243,8 +244,8 @@ static void startWeb() {
     server.send(200, "application/json", j);
   });
   server.on("/status", []() {
-    char b[220]; snprintf(b, sizeof(b), "{\"thr\":%.2f,\"dac\":%u,\"ym\":%u,\"cmd\":%d,\"vol\":%d,\"st\":\"%s\"}",
-             g_thrM, (unsigned)psorom::dacCount(), (unsigned)psorom::ymWrites(), g_lastCmd, g_vol, g_status);
+    char b[220]; snprintf(b, sizeof(b), "{\"thr\":%.2f,\"mix\":%u,\"dac\":%u,\"ym\":%u,\"cmd\":%d,\"vol\":%d,\"st\":\"%s\"}",
+             g_thrM, g_mixSps, (unsigned)psorom::dacCount(), (unsigned)psorom::ymWrites(), g_lastCmd, g_vol, g_status);
     server.send(200, "application/json", b);
   });
   server.begin();
@@ -289,6 +290,11 @@ void loop() {
         while (millis() - t0 < 1000) { cyc += psorom::run(200000); vTaskDelay(0); }
         g_thrM = cyc / 1e6f;
         Serial.printf("THROUGHPUT: %.2f M 6502-cycles/sec   (80B temps-reel ~2.0 M)\n", g_thrM);
+        int16_t tb[64]; uint32_t t1 = millis(), smp = 0;          // debit renderMix (emu+puces) = temps-reel ?
+        while (millis() - t1 < 500) smp += psorom::renderMix(tb, 64);
+        g_mixSps = smp * 2;
+        Serial.printf("renderMix: %u ech/s  (besoin %d = temps-reel%s)\n", g_mixSps, psorom::ayFs(),
+                      g_mixSps >= (uint32_t)psorom::ayFs() ? " OK" : " TROP LENT !");
       }
       g_ready = true;
     }

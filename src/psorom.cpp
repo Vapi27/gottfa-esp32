@@ -7,6 +7,7 @@
 #include "fake6502.h"
 #include "emu2149.h"      // AY-3-8910/8913 (MIT, M. Okazaki) pour Gen1/Gen2
 #include "sp0250.h"       // voix SP0250 (BSD-3, O. Galibert / MAME) pour Gen1
+#include "ym2151w.h"      // YM2151 (BSD-3, ymfm / A. Giles) pour Gen3
 #include <string.h>
 #include <stdlib.h>
 
@@ -99,7 +100,7 @@ static void y_write(uint16_t a,uint8_t d){ g_ywHist[(a>>12)&15]++; if(a<0x0800){
                 if(a==0x8000){ayLatch=d; ymW++; return;}           // latch AY (data sur le bus)
                 if(a==0xa000){nmi_rate=d;return;}
                 if(a==0xb000){dNmi=true;return;} return; }
-  if(g_gen==3 && a==0x4000){ ymW++; return; }          // Gen3 YM2151 (stubbed -> PSOWAV trigger)
+  if(g_gen==3 && a==0x4000){ ym2151w::write(ym_port, d); ymW++; return; }  // Gen3 YM2151 (port 0=addr,1=data via sound_control bit7)
   if(g_gen==2 && a==0x8000){ ayLatch=d; ymW++; return; }           // Gen2 AY latch (data sur le bus)
   if(a==0x6000){ nmi_rate=d; return; }
   if(a==0x7000){ dNmi=true; return; }
@@ -163,6 +164,7 @@ void reset() {
     ayLatch=0; ayAddr[0]=ayAddr[1]=0; ayCtlLast=0; spLatch=0; g_dacHeld=0;
     for(int i=0;i<2;i++) if(g_psg[i]) PSG_reset(g_psg[i]);
     if(g_gen==1) sp0250::reset();
+    if(g_gen==3) ym2151w::reset();
     wallclk=0; nextYnmi=0xffffffff; yIrq=dIrq=yNmi=dNmi=false;
     g_cpu=0; reset6502(); saveCpu(cY);
     g_cpu=1; reset6502(); saveCpu(cD);
@@ -224,9 +226,10 @@ int ayFs(){ return (int)AY_FS; }
 // Mixeur a cadence fixe AY_FS : fait avancer l'emulateur (~1MHz wallclk) et produit n echantillons
 // = DAC maintenu (sample&hold) + AY. Appele a la cadence AY_FS par la boucle -> temps-reel + mix.
 int renderMix(int16_t* out, int n){
-  static double cyc=0, spAcc=0; static int16_t spHeld=0;
+  static double cyc=0, spAcc=0, ymAcc=0; static int16_t spHeld=0, ymHeld=0;
   const double per = 1000000.0/(double)AY_FS;        // ~31.25 wallclk-units/echantillon
   const double spPer = 10000.0/(double)AY_FS;        // SP0250 : trame ~10 kHz -> sur-echantillonne a AY_FS
+  const double ymPer = 55930.0/(double)AY_FS;        // YM2151 : natif ~55.93 kHz -> decime a AY_FS
   for(int i=0;i<n;i++){
     cyc += per;
     while(cyc >= 64.0){ run(1); cyc -= 64.0; }       // run(1) = 1 quantum -> wallclk += 64
@@ -234,7 +237,8 @@ int renderMix(int16_t* out, int n){
     if(g_psg[0]) s += PSG_calc(g_psg[0]);
     if(g_psg[1]) s += PSG_calc(g_psg[1]);
     if(g_gen==1){ spAcc += spPer; if(spAcc>=1.0){ spAcc-=1.0; spHeld=(int16_t)(sp0250::next()<<7); } s += spHeld; }
-    s = (s * 3) >> 2;                                  // ~0.75 : headroom anti-saturation du mix DAC+AY+voix
+    if(g_gen==3){ ymAcc += ymPer; while(ymAcc>=1.0){ ymAcc-=1.0; int16_t t; ym2151w::generate(&t,1); ymHeld=t; } s += ymHeld; }
+    s = (s * 3) >> 2;                                  // ~0.75 : headroom anti-saturation du mix
     if(s>32767)s=32767; else if(s<-32768)s=-32768; out[i]=(int16_t)s;
   }
   return n;
