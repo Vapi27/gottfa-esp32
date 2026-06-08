@@ -79,7 +79,8 @@ static bool mountSD() {
   for (int i = 0; i < (int)(sizeof(ladder) / sizeof(ladder[0])); i++) {
     snprintf(g_status, sizeof(g_status), "SD: montage %s...", ladder[i].tag);
     Serial.printf("SD: tentative %s\n", ladder[i].tag);
-    esp_vfs_fat_sdmmc_unmount();              // etat propre (ignore l'erreur si rien n'est monte)
+    // PAS de unmount ici : esp_vfs_fat_sdmmc_mount() nettoie deja seul en cas d'echec, et appeler
+    // esp_vfs_fat_sdmmc_unmount() quand rien n'est monte crashe (null deref dans call_host_deinit, IDF 4.x).
     sdmmc_host_t host = SDMMC_HOST_DEFAULT();
     host.max_freq_khz = ladder[i].khz;
     if (ladder[i].width == 1) host.flags = SDMMC_HOST_FLAG_1BIT;
