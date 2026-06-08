@@ -65,10 +65,14 @@ struct Cpu { uint16_t pc; uint8_t sp,a,x,y,st; } static cY,cD;
 static void saveCpu(Cpu&c){ c.pc=pc;c.sp=sp;c.a=a;c.x=x;c.y=y;c.st=status; }
 static void loadCpu(Cpu&c){ pc=c.pc;sp=c.sp;a=c.a;x=c.x;y=c.y;status=c.st; }
 
+static int g_gen=3;                                    // 2 = AY (Gen2), 3 = YM2151 (Gen3)
 static uint8_t y_read(uint16_t a){ if(a<0x0800)return yRam[a]; if(a==0x6800)return soundlatch;
-  if(a==0x7000){ dNmi=true; return 0; } if(a>=0x8000)return yRom[a]; return 0; }
+  if(a==0x7000){ dNmi=true; return 0; }
+  if(g_gen==2 && a==0x4000) return 0;                  // Gen2 sound_input (dips/test) -> 0
+  if(a>=0x8000)return yRom[a]; return 0; }
 static void y_write(uint16_t a,uint8_t d){ if(a<0x0800){yRam[a]=d;return;}
-  if(a==0x4000){ ymW++; return; }                      // YM2151 (stubbed -> later PSOWAV trigger)
+  if(g_gen==3 && a==0x4000){ ymW++; return; }          // Gen3 YM2151 (stubbed -> PSOWAV trigger)
+  if(g_gen==2 && a==0x8000){ ymW++; return; }          // Gen2 AY latch  (stubbed -> PSOWAV trigger)
   if(a==0x6000){ nmi_rate=d; return; }
   if(a==0x7000){ dNmi=true; return; }
   if(a==0xa000){ nmi_enable=d&1; ym_port=(d&0x80)?1:0; return; }  // sound_control
@@ -102,6 +106,7 @@ bool begin(Board b, const uint8_t* rom1, size_t len1, const uint8_t* rom2, size_
     if(rom2&&len2) for(size_t i=0;i<len2&&(0x0400+i)<=0x0BFF;i++) sRom[0x0400+i]=rom2[i]&0x0f; // .snd 4-bit data
     for(int i=0;i<0x100;i++) sRam1[i]=sRom[0x0700+i];
   } else {
+    g_gen = (b==GTS80B_GEN2) ? 2 : 3;
     if(!rom1||!rom2||!len1||!len2) return false;
     if(!yRom) yRom=(uint8_t*)malloc(0x10000); if(!dRom) dRom=(uint8_t*)malloc(0x10000);
     if(!yRom||!dRom) return false;

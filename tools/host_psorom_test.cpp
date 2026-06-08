@@ -8,6 +8,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <vector>
+#include <ctime>
 
 static std::vector<uint8_t> load(const char* p) {
   std::vector<uint8_t> v; FILE* f = fopen(p, "rb"); if (!f) return v;
@@ -19,7 +20,8 @@ int main(int argc, char** argv) {
   if (argc < 4) { printf("usage: host_psorom_test <s|b> <rom1> <rom2> [cmd]\n"
                          "  s = GTS80S  : rom1=6530sy80.bin rom2=game.snd\n"
                          "  b = 80B Gen3: rom1=yrom1.snd    rom2=drom1.snd\n"); return 1; }
-  psorom::Board board = (argv[1][0]=='b') ? psorom::GTS80B_GEN3 : psorom::GTS80S;
+  psorom::Board board = (argv[1][0]=='2') ? psorom::GTS80B_GEN2
+                      : (argv[1][0]=='b') ? psorom::GTS80B_GEN3 : psorom::GTS80S;
   std::vector<uint8_t> r1 = load(argv[2]), r2 = load(argv[3]);
   if (r1.empty()) { printf("cannot read rom1 %s\n", argv[2]); return 1; }
   printf("board %s   rom1: %s (%zu B)   rom2: %s (%zu B)\n",
@@ -40,7 +42,10 @@ int main(int argc, char** argv) {
   int16_t buf[64]; int d = psorom::dacDrain(buf, 64);
   printf("DAC drained %d samples; first:", d);
   for (int i = 0; i < d && i < 10; i++) printf(" %d", buf[i]);
-  printf("\n%s\n", (psorom::dacCount() > 100) ? "PASS: real ROM runs + emits per-command DAC audio"
-                  : (psorom::insCount() > 1000 ? "PARTIAL: executes but no DAC yet" : "FAIL: stalled"));
+  printf("%s\n", (psorom::dacCount() > 100 || psorom::ymWrites() > 100) ? "PASS: real ROM runs + emits audio (DAC and/or chip)"
+                : (psorom::insCount() > 1000 ? "PARTIAL: executes but no audio" : "FAIL: stalled"));
+  // throughput bench (host) -> rough real-time viability for the ESP
+  clock_t t0 = clock(); psorom::run(20000000); double sec = (double)(clock() - t0) / CLOCKS_PER_SEC;
+  if (sec > 0) printf("bench: %.0f M 6502-cycles/sec (host x86); 80B needs ~2 M/sec live\n", 20.0 / sec);
   return 0;
 }

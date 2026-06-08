@@ -66,6 +66,12 @@ which `psorom.cpp` provides = the sound-board memory map.
   YM effect). So the D-CPU streams the DAC **directly** (the bulk of 80B sound) and the Y-CPU's YM2151
   register writes are **captured** (→ map to PSOWAV sample triggers next). The PSOROM thesis is proven
   on the real target.
-- **Remaining:** map captured YM/AY writes → PSOWAV triggers (or light YM synth); sample-exact DAC
-  diff vs PinMAME (scaling/timing fidelity); Gen1/Gen2 (AY) maps (trivial vs Gen3); **Stage 3** = ESP
-  RTOS audio-task feeding PCM5102A + FPGA command link → `psorom::command()` + real-time bench.
+- **Gen2 (GTS80BS2, AY) DONE too**: same dual-CPU engine, Gen2 Y-map (AY latch @0x8000, sound_input
+  @0x4000), shared D-CPU. excaliba: cmd18 → 54 574 DAC writes (DAC-dominant ✓), cmd6 → 3014 DAC + AY.
+  So PSOROM now runs **GTS80S + 80B Gen2 (AY) + 80B Gen3 (YM)**.
+- **Throughput (host bench):** ~22 M 6502-cycles/sec on the rig x86 with the current step-by-step +
+  64-cycle-quantum loop; the 80B needs ~2 M/sec live. → feasible on the S3 (≈10-20× slower than x86
+  → ~1-2 M/sec as-is, with headroom from bigger quanta / exec6502 chunks) — confirm on real N16R8.
+- **Remaining:** map captured YM/AY writes → PSOWAV triggers (or light synth); sample-exact DAC diff
+  vs PinMAME (scaling/timing); Gen1 (AY+SP0250) map; **Stage 3** = ESP RTOS audio-task → PCM5102A +
+  FPGA command link → `psorom::command()` + real-time bench + optimize the run loop.

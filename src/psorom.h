@@ -11,7 +11,7 @@
 
 namespace psorom {
 
-enum Board { GTS80S = 0, GTS80B_GEN3 = 1 };
+enum Board { GTS80S = 0, GTS80B_GEN3 = 1, GTS80B_GEN2 = 2 };   // Gen2 = AY-3-8912, Gen3 = YM2151
 
 // GTS80S:      rom1 = 6530 system code (6530sy80.bin), rom2 = per-game .snd (4-bit DAC data).
 // GTS80B_GEN3: rom1 = Y-CPU ROM (yrom1.snd),           rom2 = D-CPU ROM (drom1.snd).
