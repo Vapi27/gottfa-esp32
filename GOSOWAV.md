@@ -4,17 +4,20 @@ The user has **GOSOWAV_11** boards (Ralf / lisy.dev). Goal: run **our** PSOWAV f
 (commercial-OK, our features) instead of the CC-BY-NC-SA `pwavplayer`. Hardware (from the GOSOWAV
 gerbers/BOM + `bontango/pwavplayer` pin defines):
 
-## GOSOWAV hardware = ESP32-WROVER + MCP4921 + SDMMC + ULN2803 cmd-bus + TDA7267
+## GOSOWAV hardware = ESP32-WROVER-E-N16R8 + MCP4921 + SDMMC + ULN2803 cmd-bus + TDA7267
+**Pinout VERIFIED against the official schematic** `GOSOWAV_11_SCH.PDF` (lisy.dev/swrep/soundboards/
+GOSOWAV/schematics/), IC1 net labels — 2026-06-08.
 | Function | WROVER GPIO | Note |
 |---|---|---|
-| **MCP4921 DAC** | SDI/MOSI=**23**, SCK=**18**, CS=**5** | 12-bit SPI DAC (our S3 board uses PCM5102A I2S instead) |
-| **SD card (4-bit SDMMC)** | CLK=14, CMD=15, D0=2, D1=4, D2=12, D3=13 | fixed SDMMC slot-1 pins; our S3 board uses SPI SD |
-| UART | TX=22, **RX=36** | RX=36 is input-only (no pull-up) — FPGA→ESP command link lands here |
-| LED "playing" | 21 | active-LOW |
-| Cmd bus (BW11, via ULN2803) | PB0..7 + CB1/CB2 + RES | 8-bit parallel sound command from a machine (Bally/Williams-style) |
+| **MCP4921 DAC** | SDI/MOSI=**23**, SCK=**18**, CS=**5** | ✅ schematic-exact. LDAC tied to **GND** (immediate update, no latch). VOUT→2.2K/10µF→150K→TDA7267 amp. Our S3 board uses PCM5102A I2S instead |
+| **SD card (4-bit SDMMC, TF-01A)** | CLK=14, CMD=15, D0=2, D1=4, D2=12, D3=13 | ✅ schematic-exact, fixed SDMMC slot-1 IOMUX pins. **NO external pull-ups on any SD line** (R1/R2/R3 4.7K are LED resistors, not SD) → the board RELIES on the ESP's INTERNAL pull-ups. Arduino `SD_MMC.begin()` doesn't enable them → 1-bit returns false (D3/CS floats→card latches SPI mode) + 4-bit hangs. FIX (commit 8e385d6): `gpio_set_pull_mode(GPIO_PULLUP_ONLY)` on all 6 pins before begin (= Ralf's `SDMMC_SLOT_FLAG_INTERNAL_PULLUP`) |
+| **Sound-cmd bus** (from a real System 80 machine, via ULN2803 IC2) | S1_A=**27**, S2_B=**26**, S4_C=**25**, S8_D=**33**, S16_E=**32**, F=**35**, Strobe=**34** | inverted by the ULN2803; the machine drives a 5-bit sound code (S1..S16) + F + Strobe. Read these for real-pinball mode; PSOROM bench injects via web/serial instead |
+| UART0 (USB debug, via CH340C) | TXD0, RXD0 | the USB-serial console |
+| Status LEDs | D1 on GPIO39, D2 on GPIO36 (Sig$54), D3 (power) | GPIO36/39 are input-only sensor pins; LEDs via 4.7K (R1/R2). IO21, IO22 = **NC** |
 
 (pwavplayer is `#define ESP32_WROVER` by default; it also has an ESP32_S3 variant — confirming the
-GOSOWAV is WROVER.)
+GOSOWAV is WROVER. Ralf mounts the SD 4-bit @40MHz with internal pull-ups, ground-truth from
+`github.com/bontango/pwavplayer` main/wavplayer.c MountSDCard() + main/pgpio.h.)
 
 ## The 4 deltas vs our S3 firmware
 1. **MCU = WROVER** (Xtensa LX6, no octal PSRAM, different reserved pins) → new PlatformIO env +
