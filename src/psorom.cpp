@@ -144,6 +144,7 @@ bool begin(Board b, const uint8_t* rom1, size_t len1, const uint8_t* rom2, size_
                  PSG_setVolumeMode(g_psg[i],2); PSG_setQuality(g_psg[i],1); PSG_reset(g_psg[i]); }
       else if(g_psg[i]){ PSG_delete(g_psg[i]); g_psg[i]=nullptr; }
     }
+    if(g_gen==3) ym2151w::begin();                     // demarre la tache YM sur le coeur 0 (perf)
     if(!rom1||!rom2||!len1||!len2) return false;
     if(!yRom) yRom=(uint8_t*)malloc(0x10000); if(!dRom) dRom=(uint8_t*)malloc(0x10000);
     if(!yRom||!dRom) return false;
@@ -238,7 +239,7 @@ int renderMix(int16_t* out, int n){
     if(g_psg[0]) s += ((int32_t)PSG_calc(g_psg[0]) * 699) >> 8;     // AY puce0 (~2.73x, niveau 25)
     if(g_psg[1]) s += ((int32_t)PSG_calc(g_psg[1]) * 699) >> 8;     // AY puce1
     if(g_gen==1){ spAcc += spPer; if(spAcc>=1.0){ spAcc-=1.0; spHeld=(int16_t)(sp0250::next()<<7); } s += ((int32_t)spHeld * 512) >> 8; } // voix (~2x, niveau 50)
-    if(g_gen==3){ ymAcc += ymPer; while(ymAcc>=1.0){ ymAcc-=1.0; int16_t t; ym2151w::generate(&t,1); ymHeld=t; } s += ((int32_t)ymHeld * 2097) >> 8; } // YM (~8.2x, niveau 75)
+    if(g_gen==3){ ymAcc += ymPer; while(ymAcc>=1.0){ ymAcc-=1.0; ymHeld = ym2151w::nextSample(); } s += ((int32_t)ymHeld * 2097) >> 8; } // YM core-0 (~8.2x, niveau 75)
     s >>= 1;                                            // headroom maitre (le boost YM peut saturer)
     if(s>32767)s=32767; else if(s<-32768)s=-32768; out[i]=(int16_t)s;
   }
