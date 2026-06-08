@@ -155,10 +155,10 @@ static bool loadGame(int idx) {
   psorom::Board board = (gm.gen == 1) ? psorom::GTS80B_GEN1
                       : (gm.gen == 2) ? psorom::GTS80B_GEN2 : psorom::GTS80B_GEN3;
   uint8_t* yrom; size_t ylen; uint8_t* yconcat = nullptr;
-  if (gm.gen == 1 && y2 && yl2) {                       // Gen1 avec yrom2 : Y-CPU = yrom1 ++ yrom2
-    ylen = yl + yl2; yconcat = (uint8_t*)malloc(ylen);
+  if (gm.gen == 1 && y2 && yl2) {                       // Gen1 (GTS80BSSOUND888) : yrom2 @0xC000, yrom1 @0xE000
+    ylen = yl + yl2; yconcat = (uint8_t*)malloc(ylen); // -> Y-CPU = yrom2 ++ yrom1 (yrom1 porte les vecteurs @0xFFFx)
     if (!yconcat) { snprintf(g_status, sizeof(g_status), "%s: malloc Y FAILED", gm.id); free(y1); free(y2); free(d); return false; }
-    memcpy(yconcat, y1, yl); memcpy(yconcat + yl, y2, yl2); yrom = yconcat; ylen = yl + yl2;
+    memcpy(yconcat, y2, yl2); memcpy(yconcat + yl2, y1, yl); yrom = yconcat; ylen = yl + yl2;
   } else {                                              // Gen1 sans yrom2 (ex. Raven), Gen2, Gen3
     yrom = y1; ylen = yl;
   }

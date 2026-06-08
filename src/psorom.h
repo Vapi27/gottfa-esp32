@@ -29,6 +29,7 @@ uint32_t insCount();                                // total instructions (both 
 uint32_t ymWrites();                                // 80B: YM2151 register writes (chip stubbed)
 int      ayRender(int16_t* out, int n);             // Gen1/Gen2: rend n echantillons AY (emu2149) @ ayFs()
 int      ayFs();                                    // frequence d'echantillonnage AY (Hz)
+void     dbgGen1(uint32_t* o);  // DEBUG: [Ypc,Dpc,nmi_en,yNmiCnt,hist0..15]
 int      renderMix(int16_t* out, int n);            // 80B: avance l'emu + rend n ech. mixes (DAC + AY) @ ayFs()
 
 } // namespace psorom

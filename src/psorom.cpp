@@ -86,12 +86,14 @@ static void ayControl(uint8_t d){          // s80bs1_sound_control_w : AY (Gen1 
 }
 static uint8_t y_read(uint16_t a){ if(a<0x0800)return yRam[a];
   if(g_gen==1){ if(a==0xa800)return soundlatch; if(a==0xb000){dNmi=true;return 0;}   // GTS80BS1
-                if(a==0x6000)return 0; if(a>=0xc000)return yRom[a]; return 0; }
+                if(a==0x6000) return (uint8_t)(0x40 | (sp0250::ready()?0x80:0));     // sound_input: DIP(~d4&1)<<6 + bit7=DRQ SP0250
+                if(a>=0xc000)return yRom[a]; return 0; }
   if(a==0x6800)return soundlatch;
   if(a==0x7000){ dNmi=true; return 0; }
   if(g_gen==2 && a==0x4000) return 0;                  // Gen2 sound_input (dips/test) -> 0
   if(a>=0x8000)return yRom[a]; return 0; }
-static void y_write(uint16_t a,uint8_t d){ if(a<0x0800){yRam[a]=d;return;}
+static uint32_t g_yNmiCnt=0, g_ywHist[16]={0};   // DEBUG Gen1
+static void y_write(uint16_t a,uint8_t d){ g_ywHist[(a>>12)&15]++; if(a<0x0800){yRam[a]=d;return;}
   if(g_gen==1){ if(a==0x2000){spLatch=d; ymW++; return;}           // Gen1: latch octet pour le SP0250
                 if(a==0x4000){nmi_enable=d&1; ayControl(d); return;} // sound_control: nmi_en + strobe AY (+SP0250)
                 if(a==0x8000){ayLatch=d; ymW++; return;}           // latch AY (data sur le bus)
@@ -193,7 +195,7 @@ uint32_t run(uint32_t cycles) {
     saveCpu(cY);
     wallclk+=Q;
     if(nmi_enable){ if(nextYnmi==0xffffffff) nextYnmi=wallclk+ynmiPeriod();
-                    if(wallclk>=nextYnmi){ yNmi=true; nextYnmi=wallclk+ynmiPeriod(); } }
+                    if(wallclk>=nextYnmi){ yNmi=true; g_yNmiCnt++; nextYnmi=wallclk+ynmiPeriod(); } }
     g_cpu=1; loadCpu(cD);
     if(dNmi){ nmi6502(); dNmi=false; }
     if(dIrq && !(status&0x04)){ irq6502(); dIrq=false; }
@@ -208,6 +210,7 @@ uint16_t pcNow(){ return pc; }
 uint32_t dacCount(){ return dacWrites; }
 uint32_t insCount(){ return instructions; }
 uint32_t ymWrites(){ return ymW; }
+void dbgGen1(uint32_t* o){ o[0]=cY.pc; o[1]=cD.pc; o[2]=nmi_enable; o[3]=g_yNmiCnt; for(int i=0;i<16;i++)o[4+i]=g_ywHist[i]; } // DEBUG
 // Rend n echantillons @ AY_FS = melange des AY actifs (etat courant). Pour validation host + futur mixeur.
 int ayRender(int16_t* out, int n){
   for(int i=0;i<n;i++){ int32_t s=0;
@@ -230,7 +233,8 @@ int renderMix(int16_t* out, int n){
     int32_t s = g_dacHeld;
     if(g_psg[0]) s += PSG_calc(g_psg[0]);
     if(g_psg[1]) s += PSG_calc(g_psg[1]);
-    if(g_gen==1){ spAcc += spPer; if(spAcc>=1.0){ spAcc-=1.0; spHeld=(int16_t)(sp0250::next()<<8); } s += spHeld; }
+    if(g_gen==1){ spAcc += spPer; if(spAcc>=1.0){ spAcc-=1.0; spHeld=(int16_t)(sp0250::next()<<7); } s += spHeld; }
+    s = (s * 3) >> 2;                                  // ~0.75 : headroom anti-saturation du mix DAC+AY+voix
     if(s>32767)s=32767; else if(s<-32768)s=-32768; out[i]=(int16_t)s;
   }
   return n;
