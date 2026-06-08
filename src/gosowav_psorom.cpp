@@ -26,6 +26,7 @@
 #include <WiFi.h>
 #include <WebServer.h>
 #include <string.h>
+#include "driver/gpio.h"     // gpio_set_pull_mode : pull-up internes SDMMC (= le flag IDF de Ralf)
 #include "psorom.h"
 
 // MCP4921 sur la WROVER GOSOWAV (fait matériel de la carte) : SCK=18, SDI/MOSI=23, CS=5.
@@ -178,11 +179,28 @@ static void startWeb() {
 // Monte la SD + lit le manifeste dans SA tâche (un SD bloqué ne gèle ni loop ni le web), puis
 // demande le chargement du jeu par défaut via g_pendingLoad (loop() fait le vrai chargement).
 static void sdInitTask(void*) {
-  snprintf(g_status, sizeof(g_status), "SD: montage 1-bit...");
-  bool ok = SD_MMC.begin("/sdcard", true);                         // 1-bit : robuste, libère GPIO12 (strap)
-  if (!ok) { snprintf(g_status, sizeof(g_status), "SD: montage 4-bit..."); ok = SD_MMC.begin(); }
-  if (!ok) { snprintf(g_status, sizeof(g_status), "SD: pas de carte / FAT32 ?"); Serial.println(g_status); vTaskDelete(nullptr); return; }
-  Serial.println("SD mounted.");
+  // Pins SDMMC slot-1 FIXES en IOMUX sur ESP32-WROVER (CLK14/CMD15/D0=2/D1=4/D2=12/D3=13 ; setPins = S3-only).
+  // Le firmware de Ralf (ESP-IDF) monte en 4-bit @40MHz avec SDMMC_SLOT_FLAG_INTERNAL_PULLUP : la carte DEPEND
+  // des pull-up INTERNES de l'ESP (le BOM n'a que 3x 4,7K externes). Le wrapper Arduino SD_MMC ne les active
+  // PAS -> 1-bit renvoie false (D3 flottant = carte en mode SPI) et 4-bit BLOQUE (D0-D3 jamais hauts). On
+  // active donc les pull-up internes nous-memes AVANT begin() (= le flag de Ralf), puis sa config exacte + replis.
+  const gpio_num_t sdPins[] = { GPIO_NUM_14, GPIO_NUM_15, GPIO_NUM_2, GPIO_NUM_4, GPIO_NUM_12, GPIO_NUM_13 };
+  for (int i = 0; i < 6; i++) gpio_set_pull_mode(sdPins[i], GPIO_PULLUP_ONLY);   // = SDMMC_SLOT_FLAG_INTERNAL_PULLUP
+  struct { bool oneBit; int khz; const char* tag; } ladder[] = {
+    { false, 40000, "4-bit 40MHz" },   // config exacte de Ralf (slot.width=4 + SDMMC_FREQ_HIGHSPEED)
+    { false, 20000, "4-bit 20MHz" },
+    { true,  20000, "1-bit 20MHz" },   // 1-bit n'utilise pas GPIO12 (strap)
+    { true,    400, "1-bit 400kHz" },  // probing : repli le plus robuste pour carte marginale
+  };
+  bool ok = false;
+  for (int i = 0; i < (int)(sizeof(ladder) / sizeof(ladder[0])) && !ok; i++) {
+    snprintf(g_status, sizeof(g_status), "SD: montage %s...", ladder[i].tag);
+    Serial.printf("SD: tentative %s\n", ladder[i].tag);
+    SD_MMC.end();                                                  // etat propre entre deux tentatives
+    ok = SD_MMC.begin("/sdcard", ladder[i].oneBit, false, ladder[i].khz);
+    if (ok) { snprintf(g_status, sizeof(g_status), "SD: monte (%s)", ladder[i].tag); Serial.printf("SD mounted (%s).\n", ladder[i].tag); }
+  }
+  if (!ok) { snprintf(g_status, sizeof(g_status), "SD: pas de carte / FAT32 ? (pull-up D1/D2/D3)"); Serial.println(g_status); vTaskDelete(nullptr); return; }
   if (parseManifest() == 0) { Serial.println(g_status); vTaskDelete(nullptr); return; }
   Serial.printf("manifeste : %d jeux. Defaut -> %s\n", g_nGames, g_games[0].title);
   g_pendingLoad = 0;                                               // loop() charge le 1er jeu (mono-thread émulateur)
