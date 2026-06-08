@@ -121,16 +121,13 @@ void setup() {
 }
 
 void loop() {
-  server.handleClient();
-  if (!g_ready) { delay(5); return; }                            // WiFi/web alive even if no ROMs
-  // best-effort real-time: 2000 6502-cycles ~= 1 ms at 2 MHz; stream the produced DAC samples.
-  static uint32_t lastUs = 0;
-  psorom::run(2000);
-  int16_t buf[256]; int n = psorom::dacDrain(buf, 256);
+  server.handleClient();                                         // web FIRST, every iteration
+  if (!g_ready) { delay(2); return; }
+  // small emulation chunk so handleClient stays frequent (web responsive even if the WROVER is
+  // slow). NO blocking pace delay here -> audio is best-effort (may be fast), connectivity wins.
+  psorom::run(800);
+  int16_t buf[128]; int n = psorom::dacDrain(buf, 128);
   for (int i = 0; i < n; i++) dacOut(buf[i]);
-  uint32_t now = micros(); int32_t dt = 1000 - (int32_t)(now - lastUs);
-  if (dt > 0 && dt < 2000) delayMicroseconds(dt);                 // pace to ~real-time
-  lastUs = micros();
   if (Serial.available()) { int c = Serial.parseInt(); if (c >= 0 && c <= 95) { psorom::command((uint8_t)c); Serial.printf("-> cmd %d\n", c); } }
 }
 #endif // GOSOWAV_BENCH
