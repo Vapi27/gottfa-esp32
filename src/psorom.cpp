@@ -73,7 +73,7 @@ static int16_t g_dacHeld=0;                            // dernier echantillon DA
 static inline void dacFromVolData(){ g_dacHeld=(int16_t)((int)dac_vol*(int)dac_data - 0x4000); dacPush(g_dacHeld); }
 
 // ---- AY-3-8910/8913 via emu2149 (MIT). Gen1 = 2 puces (bit3 selectionne), Gen2 = 1. Horloge AY = 2 MHz. ----
-static const uint32_t AY_CLK=2000000, AY_FS=32000;
+static const uint32_t AY_CLK=2000000, AY_FS=44100;   // 44.1kHz : aligne le mix sur les WAV PSOWAV (pitch inchange: per=1e6/Fs)
 static PSG*    g_psg[2] = {nullptr,nullptr};
 static uint8_t ayLatch=0, ayAddr[2]={0,0}, ayCtlLast=0, spLatch=0;
 static void ayControl(uint8_t d){          // s80bs1_sound_control_w : AY (Gen1 0x4000 / Gen2 0xa000) + SP0250 (Gen1)

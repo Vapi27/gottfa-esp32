@@ -31,6 +31,11 @@
 #include "esp_timer.h"           // esp_timer_get_time() : horloge us pour le cadencement temps-reel
 #include "soc/gpio_struct.h"     // GPIO.out_w1ts/w1tc : bit-bang du MCP4921 en ISR (comme Ralf)
 #include "psorom.h"
+#include "wavmix.h"              // PSOWAV : moteur de mixage WAV (clean-room, hybride par defaut)
+#include "wavfile.h"
+#include "wavsrc.h"
+#include "wavset.h"
+#include <dirent.h>
 
 // MCP4921 sur la WROVER GOSOWAV (fait matériel de la carte) : SCK=18, SDI/MOSI=23, CS=5.
 static const int DAC_SCK = 18, DAC_SDI = 23, DAC_CS = 5;
@@ -183,6 +188,51 @@ static int parseManifest() {
   return g_nGames;
 }
 
+// ---- PSOWAV : set WAV par jeu (hybride : si un dossier /sdcard/<jeu>/ existe -> PSOWAV par defaut) ----
+static wavmix::Mixer g_mixer;
+static wavset::Set   g_set;
+static char          g_theme[24] = "";
+static volatile bool g_psowav = false;                 // un set WAV est-il charge pour ce jeu ?
+struct WSlot { FILE* f; wavsrc::Source src; uint32_t dataOff, dataLen; uint8_t ch; int vid; bool used; };
+static WSlot s_ws[wavmix::MAX_VOICES];
+
+static size_t wfRead(void* ctx, uint8_t* d, size_t n) { return fread(d, 1, n, (FILE*)ctx); }
+static size_t wsFill(void* p, int16_t* dst, size_t fr) { return wavsrc::fill(&((WSlot*)p)->src, dst, fr); }
+static bool   wsRewind(void* p) { WSlot* s = (WSlot*)p; if (!s->f || fseek(s->f, s->dataOff, SEEK_SET)) return false;
+                                  wavsrc::init(s->src, wfRead, s->f, s->ch, s->dataLen); return true; }
+
+static void wavStart(const wavset::Entry* e) {           // joue le WAV d'un son (loop/voice/break geres)
+  if ((e->attr & wavset::A_LOOP) && !(e->attr & wavset::A_VOICE)) g_mixer.stopActiveLoops();  // musique mono : remplace
+  if (e->attr & wavset::A_BREAK) g_mixer.stopTag(e->id);
+  for (int i = 0; i < wavmix::MAX_VOICES; i++)            // libere les voix terminees
+    if (s_ws[i].used && !g_mixer.active(s_ws[i].vid)) { fclose(s_ws[i].f); s_ws[i].used = false; }
+  if (e->attr & wavset::A_PLACE) return;
+  int si = -1; for (int i = 0; i < wavmix::MAX_VOICES; i++) if (!s_ws[i].used) { si = i; break; }
+  if (si < 0) return;
+  char path[96]; snprintf(path, sizeof(path), "%s/%s/%s", MP, g_theme, e->file);
+  FILE* f = fopen(path, "rb"); if (!f) return;
+  uint8_t hdr[64]; size_t got = fread(hdr, 1, sizeof(hdr), f);
+  WavInfo wi = wav_parse(hdr, got);
+  if (!wi.ok || fseek(f, wi.dataOffset, SEEK_SET)) { fclose(f); return; }
+  s_ws[si].f = f; s_ws[si].dataOff = wi.dataOffset; s_ws[si].dataLen = wi.dataLen; s_ws[si].ch = (uint8_t)wi.channels;
+  wavsrc::init(s_ws[si].src, wfRead, f, (uint8_t)wi.channels, wi.dataLen);
+  wavmix::VoiceCfg vc; vc.fill = wsFill; vc.ctx = &s_ws[si]; vc.rewind = wsRewind;
+  vc.gain = 255; vc.tag = e->id; vc.loop = (e->attr & wavset::A_LOOP) != 0; vc.voice = (e->attr & wavset::A_VOICE) != 0;
+  int vid = g_mixer.trigger(vc); if (vid < 0) { fclose(f); return; }
+  s_ws[si].vid = vid; s_ws[si].used = true;
+}
+
+static void loadWavSet(const char* theme) {              // scanne /sdcard/<theme>/ -> g_set ; g_psowav si non vide
+  g_mixer.stopAll(); g_mixer.setMix(wavmix::MIX_DIV2);
+  for (int i = 0; i < wavmix::MAX_VOICES; i++) if (s_ws[i].used) { fclose(s_ws[i].f); s_ws[i].used = false; }
+  g_set.reset(); strncpy(g_theme, theme, sizeof(g_theme) - 1); g_theme[sizeof(g_theme) - 1] = 0;
+  g_psowav = false;
+  char dp[64]; snprintf(dp, sizeof(dp), "%s/%s", MP, theme);
+  DIR* dir = opendir(dp);
+  if (dir) { struct dirent* de; while ((de = readdir(dir))) g_set.addName(de->d_name); closedir(dir); g_psowav = g_set.nEntry > 0; }
+  Serial.printf("PSOWAV set '%s' : %d sons -> %s\n", theme, g_set.nEntry, g_psowav ? "PSOWAV" : "PSOROM (pas de WAV)");
+}
+
 // Charge le jeu idx : lit ses .snd, démarre l'émulateur avec le bon mapping (Gen). Appelé UNIQUEMENT
 // depuis loop() (core 1). Les buffers fichiers sont temporaires : begin() les recopie en interne.
 static bool loadGame(int idx) {
@@ -213,7 +263,8 @@ static bool loadGame(int idx) {
   if (yconcat) free(yconcat);
   free(y1); if (y2) free(y2); free(d);                  // begin() a recopié -> on libère les temporaires
   if (!ok) { snprintf(g_status, sizeof(g_status), "%s: begin() FAILED", gm.id); return false; }
-  snprintf(g_status, sizeof(g_status), "OK %s (Gen%d)", gm.title, gm.gen);
+  loadWavSet(gm.id);                                    // set WAV du jeu (hybride) ; PSOROM reste pret en repli
+  snprintf(g_status, sizeof(g_status), "OK %s (Gen%d, %s)", gm.title, gm.gen, g_psowav ? "PSOWAV" : "PSOROM");
   Serial.printf("loaded %-10s Gen%d  y=%u%s d=%u\n", gm.id, gm.gen, (unsigned)yl, (y2 ? "+yrom2" : ""), (unsigned)dl);
   return true;
 }
@@ -295,9 +346,9 @@ void setup() {
   pinMode(DAC_SCK, OUTPUT); pinMode(DAC_SDI, OUTPUT); pinMode(DAC_CS, OUTPUT);
   GPIO.out_w1ts = (1u << DAC_CS); GPIO.out_w1tc = (1u << DAC_SCK); // CS haut, SCK bas
   dacBitbang(0x3000 | 2048);                                       // mi-échelle = silence
-  s_dacTimer = timerBegin(0, 4, true);                             // 80MHz/4 = 20 MHz
+  s_dacTimer = timerBegin(0, 2, true);                             // 80MHz/2 = 40 MHz
   timerAttachInterrupt(s_dacTimer, &onDacTimer, true);
-  timerAlarmWrite(s_dacTimer, 20000000 / psorom::ayFs(), true);    // 20MHz/32000 = 625 -> 32 kHz pile
+  timerAlarmWrite(s_dacTimer, 40000000 / psorom::ayFs(), true);    // 40MHz/44100 = 907 -> 44.1 kHz
   timerAlarmEnable(s_dacTimer);                                    // -> flux DAC regulier des maintenant
   cmdInputBegin();                                                 // bus commande son (vraie machine System 80)
   startWeb();                                                      // AP + tâche web EN PREMIER
@@ -331,14 +382,24 @@ void loop() {
   if (!g_ready) { vTaskDelay(5 / portTICK_PERIOD_MS); return; }    // pas de jeu chargé : le web reste vivant
   cmdInputPoll();                                                  // bus commande matériel (vraie machine) -> g_pendingCmd
   int pc = g_pendingCmd;                                           // commande web/série/matériel (handoff lock-free)
-  if (pc >= 0) { g_pendingCmd = -1; psorom::command((uint8_t)pc); }
+  if (pc >= 0) { g_pendingCmd = -1;
+    if (g_psowav) { const wavset::Entry* e = g_set.find(pc); if (e) wavStart(e); }  // HYBRIDE : PSOWAV par defaut
+    else psorom::command((uint8_t)pc);                                              // PSOROM (exact) si pas de set WAV
+  }
 
-  // --- On GARDE LE RING PLEIN : le timer ISR le vide a Fs exact -> flux DAC regulier. renderMix()
-  // fait avancer l'emulateur+puces et fixe le pitch ; le ring (back-pressure) cale le temps-reel.
+  // --- Remplit le ring (vide par le timer ISR a Fs). PSOWAV : down-mix mono de wavmix. Sinon PSOROM. ---
   int guard = 0;
-  while (!ringFull() && guard++ < 96) {
-    int16_t buf[32]; int n = psorom::renderMix(buf, 32);          // DAC + AY + voix mixes
-    for (int i = 0; i < n && !ringFull(); i++) ringPush(buf[i]);
+  if (g_psowav) {
+    static int16_t wb[wavmix::BLOCK * 2];
+    while (!ringFull() && guard++ < 24) {
+      g_mixer.mix(wb, wavmix::BLOCK);                               // mixe les voix WAV (stereo)
+      for (int i = 0; i < wavmix::BLOCK && !ringFull(); i++) ringPush((int16_t)((wb[2*i] + wb[2*i+1]) >> 1));
+    }
+  } else {
+    while (!ringFull() && guard++ < 96) {
+      int16_t buf[32]; int n = psorom::renderMix(buf, 32);         // DAC + AY + voix (émulateur live)
+      for (int i = 0; i < n && !ringFull(); i++) ringPush(buf[i]);
+    }
   }
   delayMicroseconds(300);                                          // ring plein -> petite pause (l'ISR vide)
   if (Serial.available()) { int c = Serial.parseInt(); if (c >= 0 && c <= 255) { g_pendingCmd = c; Serial.printf("-> cmd %d\n", c); } }
