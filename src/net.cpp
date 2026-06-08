@@ -88,6 +88,20 @@ void netBegin() {
 #endif
   });
 
+  // --- bench game-select: load a game's PSOWAV sound set without an FPGA token ---
+  //   GET /game?id=N   (N = FPGA game No 0..62 = DIP S1 = games.txt index)
+  server.on("/game", HTTP_GET, [](AsyncWebServerRequest *r) {
+#ifndef BOARD_C3
+    if (r->hasParam("id")) {
+      int id = r->getParam("id")->value().toInt();
+      wavplayer::selectGame(id);
+      r->send(200, "text/plain", "game -> " + String(id));
+    } else r->send(400, "text/plain", "usage: /game?id=N (0..62)");
+#else
+    r->send(501, "text/plain", "no sound tier on C3");
+#endif
+  });
+
   // --- ROM store: list per-game variants + device key fingerprint + global Free-Play setting ---
   //   GET /roms -> {"key":"<hex>","fp":0|1,"games":[{"n":N,"s":stock,"se":stockEnc,"f":fp,"fe":fpEnc}]}
   server.on("/roms", HTTP_GET, [](AsyncWebServerRequest *r) {
