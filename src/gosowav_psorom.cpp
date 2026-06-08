@@ -102,6 +102,7 @@ static inline void cmdInputPoll() {
     if (!digitalRead(PIN_STROBE)) {                                // toujours asserte -> vraie commande
       uint8_t c = 0;
       for (int i = 0; i < 5; i++) if (!digitalRead(PIN_S[i])) c |= (1u << i);  // de-inverse l'ULN
+      if (!digitalRead(35)) c |= 0x20;                            // F = bit5 -> 0..63
       g_pendingCmd = c; g_lastCmd = c;                             // meme chemin que le web /cmd
     }
   }
@@ -231,10 +232,10 @@ button:active{background:#39b6ff;color:#04243a}.n{color:#8b97a8;font-size:.78rem
 <div>Debit <b class=s id=thr>--</b> M cyc/s &middot; mix <b class=s id=mix>--</b>/s &middot; DAC <b class=s id=dac>0</b> &middot; YM <b class=s id=ym>0</b> &middot; cmd <b class=s id=cmd>--</b></div>
 <div>Volume <b class=s id=volv>100</b>%<input type=range min=0 max=200 value=100 id=vol style="width:100%"></div>
 <div class=g id=pad></div>
-<div class=n>Choisis un jeu, puis clique une commande son (0-31) pour jouer le son du vrai 6502.</div>
+<div class=n>cmd libre <input type=number id=cmdn min=0 max=255 value=32 style="width:4rem;background:#1d2430;color:#e7ecf3;border:1px solid #2a3340;border-radius:6px"> <button onclick="fetch('/cmd?n='+cmdn.value)">envoyer</button> &middot; ou clique le pave (0-63)</div>
 <script>const pad=document.getElementById('pad'),sel=document.getElementById('game'),vol=document.getElementById('vol'),volv=document.getElementById('volv');
 vol.oninput=()=>{volv.textContent=vol.value;fetch('/vol?v='+vol.value);};
-for(let i=0;i<32;i++){const b=document.createElement('button');b.textContent=i;b.onclick=()=>fetch('/cmd?n='+i);pad.appendChild(b);}
+for(let i=0;i<64;i++){const b=document.createElement('button');b.textContent=i;b.onclick=()=>fetch('/cmd?n='+i);pad.appendChild(b);}
 fetch('/games').then(r=>r.json()).then(d=>{sel.innerHTML='';d.g.forEach(x=>{const o=document.createElement('option');o.value=x.i;o.textContent='G'+x.n+'  '+x.t;if(x.i==d.sel)o.selected=true;sel.appendChild(o);});});
 sel.onchange=()=>fetch('/load?i='+sel.value);
 function poll(){fetch('/status').then(r=>r.json()).then(d=>{st.textContent=d.st;thr.textContent=d.thr;mix.textContent=d.mix;dac.textContent=d.dac;ym.textContent=d.ym;cmd.textContent=d.cmd<0?'--':d.cmd;if(document.activeElement!=vol){vol.value=d.vol;volv.textContent=d.vol;}}).catch(()=>{});}
@@ -249,7 +250,7 @@ static void startWeb() {
   Serial.printf("web: join WiFi 'GOSOWAV-PSOROM' -> http://%s/\n", WiFi.softAPIP().toString().c_str());
   server.on("/", []() { server.send_P(200, "text/html", PAGE); });
   server.on("/cmd", []() {
-    if (server.hasArg("n")) { int n = server.arg("n").toInt(); if (n >= 0 && n <= 95) { g_pendingCmd = n; g_lastCmd = n; } }
+    if (server.hasArg("n")) { int n = server.arg("n").toInt(); if (n >= 0 && n <= 255) { g_pendingCmd = n; g_lastCmd = n; } }
     server.send(200, "text/plain", "ok");
   });
   server.on("/vol", []() {                                         // volume maitre 0..200 %
@@ -340,6 +341,6 @@ void loop() {
     for (int i = 0; i < n && !ringFull(); i++) ringPush(buf[i]);
   }
   delayMicroseconds(300);                                          // ring plein -> petite pause (l'ISR vide)
-  if (Serial.available()) { int c = Serial.parseInt(); if (c >= 0 && c <= 95) { g_pendingCmd = c; Serial.printf("-> cmd %d\n", c); } }
+  if (Serial.available()) { int c = Serial.parseInt(); if (c >= 0 && c <= 255) { g_pendingCmd = c; Serial.printf("-> cmd %d\n", c); } }
 }
 #endif // GOSOWAV_BENCH
