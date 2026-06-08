@@ -38,7 +38,6 @@ static float        g_thrM = 0;          // measured throughput (M 6502-cycles/s
 static volatile int g_lastCmd = -1;      // last command shown in the UI
 static volatile int g_pendingCmd = -1;   // web/serial -> loop() handoff (single int write = atomic on ESP32)
 static volatile bool g_ready = false;    // ROMs loaded + emulator running?
-static bool         g_sdOk = false;      // SD mounted? (so the lazy retry doesn't re-begin)
 static char         g_status[80] = "booting...";
 
 static inline void dacOut(int16_t s) {
@@ -97,30 +96,35 @@ static void startWeb() {
   xTaskCreatePinnedToCore(httpTask, "http", 4096, nullptr, 1, nullptr, 0);   // core 0 = WiFi core
 }
 
-// Lazy init: mount SD, load ROMs, start the emulator, measure throughput. Called once per second
-// from loop() until it succeeds — so a missing/bad SD never blocks the web (which is already up).
-static void initRoms() {
-  if (!g_sdOk) {
-    if (!SD_MMC.begin() && !SD_MMC.begin("/sdcard", true)) {       // try 4-bit, then 1-bit
-      strncpy(g_status, "SD mount FAILED (carte / FAT32 ?)", sizeof(g_status) - 1);
-      return;                                                      // retried next second
-    }
-    g_sdOk = true;
-  }
+// SD mount + ROM load + emulator start + throughput bench — in its OWN FreeRTOS task so a hung/slow
+// SD (SD_MMC.begin() can block FOREVER in 4-bit mode without pull-ups) never freezes loop() or the
+// web. 1-bit mode is tried FIRST: robust path (only CLK/CMD/D0, and frees GPIO12 — an ESP32 strap
+// pin a 4-bit card pull-up can hang at boot). g_status is updated at each step so the web page shows
+// exactly how far this got (no serial cable needed). Touches psorom only on core 1; sets g_ready
+// LAST, then deletes itself — so loop() (also core 1) never races it on the emulator.
+static void sdInitTask(void*) {
+  snprintf(g_status, sizeof(g_status), "SD: montage 1-bit...");
+  bool ok = SD_MMC.begin("/sdcard", true);                        // 1-bit: robust, no GPIO12 strap issue
+  if (!ok) { snprintf(g_status, sizeof(g_status), "SD: montage 4-bit..."); ok = SD_MMC.begin(); }
+  if (!ok) { snprintf(g_status, sizeof(g_status), "SD: pas de carte / FAT32 ?"); Serial.println(g_status); vTaskDelete(nullptr); return; }
+  Serial.println("SD mounted.");
+
+  snprintf(g_status, sizeof(g_status), "SD: lecture ROMs...");
   size_t yl, yl2 = 0, dl;
   uint8_t* y1 = loadFile("/yrom1.snd", yl);
   uint8_t* y2 = loadFile("/yrom2.snd", yl2);                       // optional: present on Gen1 (AY+SP0250)
   uint8_t* d  = loadFile("/drom1.snd", dl);
   if (!y1 || !d) {
     snprintf(g_status, sizeof(g_status), "manque yrom1.snd+drom1.snd (y=%u d=%u)", (unsigned)yl, (unsigned)dl);
+    Serial.println(g_status);
     if (y1) free(y1); if (y2) free(y2); if (d) free(d);
-    return;                                                        // retried next second
+    vTaskDelete(nullptr); return;
   }
 
   psorom::Board board; uint8_t* yrom; size_t ylen;
   if (y2 && yl2) {                                                 // yrom2 present -> Gen1: Y-CPU = yrom1 ++ yrom2
     ylen = yl + yl2; yrom = (uint8_t*)malloc(ylen);
-    if (!yrom) { strncpy(g_status, "malloc yrom concat FAILED", sizeof(g_status) - 1); free(y1); free(y2); free(d); return; }
+    if (!yrom) { snprintf(g_status, sizeof(g_status), "malloc yrom FAILED"); free(y1); free(y2); free(d); vTaskDelete(nullptr); return; }
     memcpy(yrom, y1, yl); memcpy(yrom + yl, y2, yl2);
     free(y1); free(y2);                                            // copied into yrom; originals no longer needed
     board = psorom::GTS80B_GEN1;
@@ -134,16 +138,16 @@ static void initRoms() {
   psorom::command(0); psorom::run(20000);                          // prime (80B ignores the 1st byte)
 
   // --- THROUGHPUT BENCH: how many 6502-cycles/sec does this WROVER sustain? (80B needs ~2.0 M) ---
-  // Runs on core 1; the web stays live the whole time (core-0 httpTask). vTaskDelay(0) yields so the
-  // core-1 scheduler/WDT is happy. The bench no longer blocks anything user-visible.
-  psorom::command(22);                                             // a DAC-music command (badgirls)
+  snprintf(g_status, sizeof(g_status), "bench...");
+  psorom::command(22);                                            // a DAC-music command (badgirls)
   uint32_t t0 = millis(), cyc = 0;
   while (millis() - t0 < 1000) { cyc += psorom::run(200000); vTaskDelay(0); }
   g_thrM = cyc / 1e6f;
   snprintf(g_status, sizeof(g_status), "OK %s  %.2f M cyc/s", (board == psorom::GTS80B_GEN1) ? "Gen1" : "Gen3", g_thrM);
   Serial.printf("THROUGHPUT: %.2f M 6502-cycles/sec   (real-time 80B needs ~2.0 M)\n", g_thrM);
-  Serial.println("Type a sound command number (0-31) + Enter, or use the web UI.");
-  g_ready = true;
+  Serial.println("Use the web UI, or type a command 0-31 + Enter.");
+  g_ready = true;                                                  // LAST: from here loop() owns psorom
+  vTaskDelete(nullptr);
 }
 
 void setup() {
@@ -153,16 +157,12 @@ void setup() {
   dacspi.begin(DAC_SCK, -1, DAC_SDI, DAC_CS);
   dacOut(0);                                                       // mid-scale = silence
   startWeb();                                                      // AP + web TASK up FIRST; nothing below can block HTTP
-  Serial.println("web up (core 0). Loading SD/ROMs lazily from loop()...");
+  xTaskCreatePinnedToCore(sdInitTask, "sdinit", 8192, nullptr, 1, nullptr, 1);  // core 1; SD hang can't freeze web/loop
+  Serial.println("web up (core 0); SD/ROM init in its own task. Watch 'etat' on the page.");
 }
 
 void loop() {
-  if (!g_ready) {                                                  // SD/ROM not ready yet: retry ~1 Hz, keep yielding
-    static uint32_t t = 0; uint32_t now = millis();
-    if (now - t > 1000) { t = now; initRoms(); }
-    vTaskDelay(5 / portTICK_PERIOD_MS);                            // web task (core 0) serves throughout
-    return;
-  }
+  if (!g_ready) { vTaskDelay(5 / portTICK_PERIOD_MS); return; }    // sdInitTask is doing SD/ROM init; web stays live
   int pc = g_pendingCmd;                                           // apply a web/serial command (lock-free handoff)
   if (pc >= 0) { g_pendingCmd = -1; psorom::command((uint8_t)pc); }
   psorom::run(800);                                                // small chunk -> stays responsive
