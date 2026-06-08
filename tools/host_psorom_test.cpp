@@ -20,7 +20,8 @@ int main(int argc, char** argv) {
   if (argc < 4) { printf("usage: host_psorom_test <s|b> <rom1> <rom2> [cmd]\n"
                          "  s = GTS80S  : rom1=6530sy80.bin rom2=game.snd\n"
                          "  b = 80B Gen3: rom1=yrom1.snd    rom2=drom1.snd\n"); return 1; }
-  psorom::Board board = (argv[1][0]=='2') ? psorom::GTS80B_GEN2
+  psorom::Board board = (argv[1][0]=='1') ? psorom::GTS80B_GEN1
+                      : (argv[1][0]=='2') ? psorom::GTS80B_GEN2
                       : (argv[1][0]=='b') ? psorom::GTS80B_GEN3 : psorom::GTS80S;
   std::vector<uint8_t> r1 = load(argv[2]), r2 = load(argv[3]);
   if (r1.empty()) { printf("cannot read rom1 %s\n", argv[2]); return 1; }

@@ -65,23 +65,34 @@ struct Cpu { uint16_t pc; uint8_t sp,a,x,y,st; } static cY,cD;
 static void saveCpu(Cpu&c){ c.pc=pc;c.sp=sp;c.a=a;c.x=x;c.y=y;c.st=status; }
 static void loadCpu(Cpu&c){ pc=c.pc;sp=c.sp;a=c.a;x=c.x;y=c.y;status=c.st; }
 
-static int g_gen=3;                                    // 2 = AY (Gen2), 3 = YM2151 (Gen3)
-static uint8_t y_read(uint16_t a){ if(a<0x0800)return yRam[a]; if(a==0x6800)return soundlatch;
+static int g_gen=3;                                    // 1=AY+SP0250 (Gen1), 2=AY (Gen2), 3=YM2151 (Gen3)
+static inline void dacFromVolData(){ dacPush((int16_t)((int)dac_vol*(int)dac_data - 0x4000)); } // sample = vol*data
+static uint8_t y_read(uint16_t a){ if(a<0x0800)return yRam[a];
+  if(g_gen==1){ if(a==0xa800)return soundlatch; if(a==0xb000){dNmi=true;return 0;}   // GTS80BS1
+                if(a==0x6000)return 0; if(a>=0xc000)return yRom[a]; return 0; }
+  if(a==0x6800)return soundlatch;
   if(a==0x7000){ dNmi=true; return 0; }
   if(g_gen==2 && a==0x4000) return 0;                  // Gen2 sound_input (dips/test) -> 0
   if(a>=0x8000)return yRom[a]; return 0; }
 static void y_write(uint16_t a,uint8_t d){ if(a<0x0800){yRam[a]=d;return;}
+  if(g_gen==1){ if(a==0x2000){ymW++;return;}           // Gen1: SP0250 speech latch (chip write)
+                if(a==0x4000){nmi_enable=d&1;return;}  // sound_control (AY/SP0250 strobe stubbed; bit0=nmi_en)
+                if(a==0x8000){ymW++;return;}           // AY-3-8910 latch (chip write)
+                if(a==0xa000){nmi_rate=d;return;}
+                if(a==0xb000){dNmi=true;return;} return; }
   if(g_gen==3 && a==0x4000){ ymW++; return; }          // Gen3 YM2151 (stubbed -> PSOWAV trigger)
   if(g_gen==2 && a==0x8000){ ymW++; return; }          // Gen2 AY latch  (stubbed -> PSOWAV trigger)
   if(a==0x6000){ nmi_rate=d; return; }
   if(a==0x7000){ dNmi=true; return; }
   if(a==0xa000){ nmi_enable=d&1; ym_port=(d&0x80)?1:0; return; }  // sound_control
 }
-static uint8_t d_read(uint16_t a){ if(a<0x0800)return dRam[a]; if(a==0x4000)return soundlatch;
-  if(a>=0x8000)return dRom[a]; return 0; }
+static uint8_t d_read(uint16_t a){ if(a<0x0800)return dRam[a];
+  if(g_gen==1){ if(a==0x8000)return soundlatch; if(a>=0xe000)return dRom[a]; return 0; }   // GTS80BS1
+  if(a==0x4000)return soundlatch; if(a>=0x8000)return dRom[a]; return 0; }
 static void d_write(uint16_t a,uint8_t d){ if(a<0x0800){dRam[a]=d;return;}
-  if(a==0x8000){ dac_vol=d; return; }                  // DAC volume
-  if(a==0x8001){ dac_data=d; dacPush((int16_t)((int)dac_vol*(int)dac_data - 0x4000)); return; } // sample = vol*data
+  if(g_gen==1){ if(a==0x4000){dac_vol=d;return;} if(a==0x4001){dac_data=d;dacFromVolData();return;} return; } // Gen1 DAC @4000/4001
+  if(a==0x8000){ dac_vol=d; return; }                  // Gen2/3 DAC volume
+  if(a==0x8001){ dac_data=d; dacFromVolData(); return; } // Gen2/3 DAC data -> sample
 }
 static uint32_t ynmiPeriod(){ int cl1=16-(nmi_rate&0x0f), cl2=16-((nmi_rate>>4)&0x0f);
   if(cl1<1)cl1=1; if(cl2<1)cl2=1; double hz=976.5625/((double)cl1*cl2); if(hz<1)hz=1;
@@ -106,7 +117,7 @@ bool begin(Board b, const uint8_t* rom1, size_t len1, const uint8_t* rom2, size_
     if(rom2&&len2) for(size_t i=0;i<len2&&(0x0400+i)<=0x0BFF;i++) sRom[0x0400+i]=rom2[i]&0x0f; // .snd 4-bit data
     for(int i=0;i<0x100;i++) sRam1[i]=sRom[0x0700+i];
   } else {
-    g_gen = (b==GTS80B_GEN2) ? 2 : 3;
+    g_gen = (b==GTS80B_GEN1) ? 1 : (b==GTS80B_GEN2) ? 2 : 3;
     if(!rom1||!rom2||!len1||!len2) return false;
     if(!yRom) yRom=(uint8_t*)malloc(0x10000); if(!dRom) dRom=(uint8_t*)malloc(0x10000);
     if(!yRom||!dRom) return false;

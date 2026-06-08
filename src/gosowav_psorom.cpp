@@ -16,6 +16,7 @@
 #include "SD_MMC.h"
 #include <WiFi.h>
 #include <WebServer.h>
+#include <string.h>
 #include "psorom.h"
 
 // MCP4921 on the GOSOWAV WROVER (hardware fact from the board): SCK=18, SDI/MOSI=23, CS=5.
@@ -82,13 +83,23 @@ void setup() {
   dacOut(0);                                                       // mid-scale = silence
 
   if (!SD_MMC.begin()) { Serial.println("SD_MMC mount FAILED"); return; }
-  size_t yl, dl;
-  uint8_t* y = loadFile("/yrom1.snd", yl);
-  uint8_t* d = loadFile("/drom1.snd", dl);
-  if (!y || !d) { Serial.printf("need /yrom1.snd + /drom1.snd on the SD (got y=%u d=%u)\n", (unsigned)yl, (unsigned)dl); return; }
-  Serial.printf("ROMs loaded: yrom1=%u  drom1=%u bytes\n", (unsigned)yl, (unsigned)dl);
+  size_t yl, yl2 = 0, dl;
+  uint8_t* y1 = loadFile("/yrom1.snd", yl);
+  uint8_t* y2 = loadFile("/yrom2.snd", yl2);                     // optional: present on Gen1 (AY+SP0250, e.g. Arena)
+  uint8_t* d  = loadFile("/drom1.snd", dl);
+  if (!y1 || !d) { Serial.printf("need /yrom1.snd + /drom1.snd on the SD (got y=%u d=%u)\n", (unsigned)yl, (unsigned)dl); return; }
 
-  psorom::begin(psorom::GTS80B_GEN3, y, yl, d, dl);
+  psorom::Board board; uint8_t* yrom; size_t ylen;
+  if (y2 && yl2) {                                               // yrom2 present -> Gen1: Y-CPU = yrom1 ++ yrom2
+    ylen = yl + yl2; yrom = (uint8_t*)malloc(ylen);
+    memcpy(yrom, y1, yl); memcpy(yrom + yl, y2, yl2);
+    board = psorom::GTS80B_GEN1;
+    Serial.printf("Gen1 (AY+SP0250): yrom1=%u + yrom2=%u, drom1=%u\n", (unsigned)yl, (unsigned)yl2, (unsigned)dl);
+  } else {                                                       // Gen3 (YM2151, e.g. badgirls)
+    yrom = y1; ylen = yl; board = psorom::GTS80B_GEN3;
+    Serial.printf("Gen3 (YM2151): yrom1=%u, drom1=%u\n", (unsigned)yl, (unsigned)dl);
+  }
+  psorom::begin(board, yrom, ylen, d, dl);
   psorom::command(0); psorom::run(20000);                         // prime (80B ignores the 1st byte)
 
   // --- THROUGHPUT BENCH: how many 6502-cycles/sec does this WROVER sustain? (80B needs ~2.0 M) ---
