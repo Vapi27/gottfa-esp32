@@ -22,15 +22,16 @@ done
 [ -d "$SRC/games" ]     || { echo "❌ $SRC/games/ manquant"; exit 1; }
 NSRC=$(find "$SRC/games" -name '*.snd' | wc -l | tr -d ' ')
 
-# --- liste les volumes candidats (externes, writable, hors système/installeurs) ---
+# --- liste les volumes candidats : disques EXTERNES/AMOVIBLES (carte SD), hors système/installeurs ---
 candidates=()
-while IFS= read -r vol; do
-  [ -z "$vol" ] && continue
-  case "$vol" in
-    "Macintosh HD"|"Macintosh HD - Data"|"Fedora"*|"com.apple"*) continue;;
-  esac
-  [ -w "/Volumes/$vol" ] && candidates+=("$vol")
-done < <(ls -1 /Volumes 2>/dev/null)
+for mp in /Volumes/*; do
+  [ -d "$mp" ] || continue
+  vol="${mp#/Volumes/}"
+  case "$vol" in "Macintosh HD"*|"com.apple"*|"Fedora"*) continue;; esac   # système + installeur Fedora
+  info=$(diskutil info "$mp" 2>/dev/null)
+  echo "$info" | grep -qiE "Removable Media: *(Removable|Yes)|Device Location: *External" || continue
+  candidates+=("$vol")
+done
 
 # --- choisit le volume cible ---
 if [ -n "$ARGVOL" ]; then VOL="$ARGVOL"
