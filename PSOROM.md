@@ -20,10 +20,22 @@ which `psorom.cpp` provides = the sound-board memory map.
   1000-10FF RAM · F800-FFFF ROM`. DAC sample = `((portA<<7)-0x4000)*2`. Command: latch on port B +
   pulse IRQ. **This is also the 80B D-CPU (DAC) core**, so Stage 1 is reused for 80B.
 - **GTS80SS** (speech): 1×6502 + **6532 RIOT** + 2×DAC + Votrax (`1000/3000` DA latches, `2000` VS).
-- **GTS80BS** (80B, the target): **2×6502** (Y-CPU = YM2151/AY, D-CPU = DAC) + cross-NMI between them
-  (`s80bs_cause_dac_nmi`), AY-3-8912 or YM2151. The two CPUs run time-sliced; the Y-CPU's chip
-  writes drive YM/AY, the D-CPU streams the DAC. (80B = DAC-dominant per our characterization, so
-  the D-CPU/DAC path carries the bulk; the YM is often mono/minor.)
+- **GTS80BS** (80B, the target): **2×6502** (Y-CPU = YM2151/AY+speech, D-CPU = DAC) + cross-NMI,
+  AY-3-8912 (Gen1/2) or YM2151 (Gen3). Maps (Gen3, from gts80s.c):
+  - **D-CPU** (`GTS80BS3_dreadmem/dwritemem`) — SIMPLE, reuses our engine: `0000-07FF RAM ·
+    4000 = soundlatch_r (command) · 8000-FFFF ROM (drom1.snd) · 8001 = s80bs_dac_data_w (DAC data)`.
+    DAC out = `dac_volume * dac_data` (a multiplying DAC, unlike GTS80S's port-A formula).
+  - **Y-CPU** (`GTS80BS3_yreadmem/ywritemem`): `0000-07FF RAM · 6800 = soundlatch_r · 8000-FFFF ROM
+    (yrom1.snd)`; writes hit YM2151 (`s80bs_ym2151_w`, reg/data port via sound_control bit7),
+    `nmi_rate`, `sound_control`, `cause_dac_nmi` (→ D-CPU NMI = the DAC sample clock).
+  - **Flow:** MPU command → `s80bs_sh_w` → soundlatch + IRQ(HOLD) to BOTH CPUs. The Y-CPU's
+    programmable NMI timer (`nmi_rate`/`nmi_enable`) + `cause_dac_nmi` drive the D-CPU → it streams
+    DAC samples. (Bone Busters adds a 3rd CPU = 2nd DAC.)
+  - **Needs:** dual-6502 **context switching** (our PD core uses globals → save/restore {pc,sp,a,x,y,
+    status,clockticks} at instruction boundaries + a "current CPU" pointer for the memory hooks),
+    time-sliced like MAME's INTERLEAVE(50); the simple D-CPU map (DAC); the Y-CPU map; the NMI timer
+    + cross-NMI; and **YM2151** (the only hard chip — but 80B is DAC-dominant per our characterization,
+    so a stubbed/log YM still yields the bulk of the audio via the D-CPU; YM→PSOWAV triggers later).
 
 ## Staged plan
 - **Stage 1 — foundation (DONE, this commit):** vendored PD 6502 + `psorom` GTS80S model (RAM/ROM/
