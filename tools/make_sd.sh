@@ -20,7 +20,7 @@ done
 # --- vérifie les sources ---
 [ -f "$SRC/games.idx" ] || { echo "❌ $SRC/games.idx manquant"; exit 1; }
 [ -d "$SRC/games" ]     || { echo "❌ $SRC/games/ manquant"; exit 1; }
-NSRC=$(find "$SRC/games" -name '*.snd' | wc -l | tr -d ' ')
+NSRC=$(find "$SRC/games" -name '*.snd' ! -name '._*' | wc -l | tr -d ' ')
 
 # --- liste les volumes candidats : disques EXTERNES/AMOVIBLES (carte SD), hors système/installeurs ---
 candidates=()
@@ -68,10 +68,11 @@ echo "Copie de $NSRC fichiers .snd + manifeste (16 jeux 80B)..."
 cp -f "$SRC/games.idx" "$MP/games.idx" || { echo "❌ copie games.idx échouée"; exit 1; }
 rm -rf "$MP/games" 2>/dev/null
 cp -R "$SRC/games" "$MP/games" || { echo "❌ copie games/ échouée"; exit 1; }
+dot_clean -m "$MP" 2>/dev/null                                   # supprime les ._AppleDouble crees sur FAT
 sync
 
 # --- vérif ---
-NDST=$(find "$MP/games" -name '*.snd' | wc -l | tr -d ' ')
+NDST=$(find "$MP/games" -name '*.snd' ! -name '._*' | wc -l | tr -d ' ')
 echo "Vérification :"
 echo "  manifeste  : $([ -f "$MP/games.idx" ] && echo OK || echo MANQUANT)  ($(wc -l <"$MP/games.idx" | tr -d ' ') jeux)"
 echo "  fichiers   : $NDST / $NSRC .snd copiés"
