@@ -36,6 +36,7 @@
 #include "wavsrc.h"
 #include "wavset.h"
 #include <dirent.h>
+#include <Preferences.h>        // NVS : jeu installe + volume persistes (montage physique en machine)
 
 // MCP4921 sur la WROVER GOSOWAV (fait matériel de la carte) : SCK=18, SDI/MOSI=23, CS=5.
 static const int DAC_SCK = 18, DAC_SDI = 23, DAC_CS = 5;
@@ -57,6 +58,7 @@ static volatile int g_pendingLoad = -1;  // web/init   -> loop() : index de jeu 
 static volatile bool g_ready = false;    // un jeu est chargé + émulateur tourne ?
 static char         g_status[96] = "booting...";
 static volatile int g_vol = 100;         // volume maitre % (0..200, 100 = normal) applique au DAC
+static Preferences  g_prefs;             // NVS : jeu installe ("game") + volume ("vol")
 
 // --- Sortie audio cadencee par TIMER MATERIEL (comme Ralf) : un ring SPSC rempli par loop(), vide
 // --- par une ISR a Fs exact qui bit-bang le MCP4921. Fini les rafales SPI -> flux DAC regulier = son
@@ -348,14 +350,17 @@ static void startWeb() {
 static void sdInitTask(void*) {
   if (!mountSD()) { snprintf(g_status, sizeof(g_status), "SD: echec montage (voir serie)"); Serial.println(g_status); vTaskDelete(nullptr); return; }
   if (parseManifest() == 0) { Serial.println(g_status); vTaskDelete(nullptr); return; }
-  Serial.printf("manifeste : %d jeux. Defaut -> %s\n", g_nGames, g_games[0].title);
-  g_pendingLoad = 0;                                               // loop() charge le 1er jeu (mono-thread émulateur)
+  String gid = g_prefs.getString("game", "arena");                // jeu installe (defaut arena) -> auto-boot
+  int idx = 0; for (int i = 0; i < g_nGames; i++) if (gid == g_games[i].id) { idx = i; break; }
+  Serial.printf("manifeste : %d jeux. Jeu installe -> %s\n", g_nGames, g_games[idx].title);
+  g_pendingLoad = idx;                                             // loop() charge le jeu de la machine (mono-thread émulateur)
   vTaskDelete(nullptr);
 }
 
 void setup() {
   Serial.begin(115200); delay(500);
   Serial.println("\n=== GOSOWAV PSOROM multi-jeux (notre 6502 emu sur hardware reel) ===");
+  g_prefs.begin("gosowav", false); g_vol = g_prefs.getInt("vol", 100);   // reglages persistes (montage machine)
   pinMode(DAC_SCK, OUTPUT); pinMode(DAC_SDI, OUTPUT); pinMode(DAC_CS, OUTPUT);
   GPIO.out_w1ts = (1u << DAC_CS); GPIO.out_w1tc = (1u << DAC_SCK); // CS haut, SCK bas
   dacBitbang(0x3000 | 2048);                                       // mi-échelle = silence
@@ -375,6 +380,7 @@ void loop() {
     g_ready = false;
     if (loadGame(i)) {
       g_sel = i;
+      g_prefs.putString("game", g_games[i].id);                    // memorise le jeu installe (auto-boot machine)
       if (!g_benched) {                                            // bench débit une seule fois
         g_benched = true;
         psorom::command(22);
@@ -431,6 +437,9 @@ void loop() {
     }
   }
   delayMicroseconds(300);                                          // ring plein -> petite pause (l'ISR vide)
+  static int s_volSaved = -1, s_volPrev = -1; static uint32_t s_volMs = 0;   // persiste le volume (debounce 3s, anti-usure NVS)
+  if (g_vol != s_volPrev) { s_volPrev = g_vol; s_volMs = millis(); }
+  if (g_vol != s_volSaved && millis() - s_volMs > 3000) { g_prefs.putInt("vol", g_vol); s_volSaved = g_vol; }
   if (Serial.available()) { int c = Serial.parseInt(); if (c >= 0 && c <= 255) { g_pendingCmd = c; Serial.printf("-> cmd %d\n", c); } }
 }
 #endif // GOSOWAV_BENCH
