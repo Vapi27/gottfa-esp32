@@ -291,6 +291,7 @@ button:active{background:#39b6ff;color:#04243a}.n{color:#8b97a8;font-size:.78rem
 <label class=n>Jeu</label><select id=game></select>
 <div>etat <b class=s id=st>...</b></div>
 <div>Debit <b class=s id=thr>--</b> M cyc/s &middot; mix <b class=s id=mix>--</b>/s &middot; DAC <b class=s id=dac>0</b> &middot; YM <b class=s id=ym>0</b> &middot; cmd <b class=s id=cmd>--</b></div>
+<div class=n>bus cmd materiel (brut, live) : <b class=s id=bus>--</b> &middot; regarde-le changer quand tu injectes une commande sur la carte</div>
 <div>Volume <b class=s id=volv>100</b>%<input type=range min=0 max=200 value=100 id=vol style="width:100%"></div>
 <div class=g id=pad></div>
 <div class=n>cmd libre <input type=number id=cmdn min=0 max=255 value=32 style="width:4rem;background:#1d2430;color:#e7ecf3;border:1px solid #2a3340;border-radius:6px"> <button onclick="fetch('/cmd?n='+cmdn.value)">envoyer</button> &middot; ou clique le pave (0-63)</div>
@@ -299,7 +300,7 @@ vol.oninput=()=>{volv.textContent=vol.value;fetch('/vol?v='+vol.value);};
 for(let i=0;i<64;i++){const b=document.createElement('button');b.textContent=i;b.onclick=()=>fetch('/cmd?n='+i);pad.appendChild(b);}
 fetch('/games').then(r=>r.json()).then(d=>{sel.innerHTML='';d.g.forEach(x=>{const o=document.createElement('option');o.value=x.i;o.textContent='G'+x.n+'  '+x.t;if(x.i==d.sel)o.selected=true;sel.appendChild(o);});});
 sel.onchange=()=>fetch('/load?i='+sel.value);
-function poll(){fetch('/status').then(r=>r.json()).then(d=>{st.textContent=d.st;thr.textContent=d.thr;mix.textContent=d.mix;dac.textContent=d.dac;ym.textContent=d.ym;cmd.textContent=d.cmd<0?'--':d.cmd;if(document.activeElement!=vol){vol.value=d.vol;volv.textContent=d.vol;}}).catch(()=>{});}
+function poll(){fetch('/status').then(r=>r.json()).then(d=>{st.textContent=d.st;thr.textContent=d.thr;mix.textContent=d.mix;dac.textContent=d.dac;ym.textContent=d.ym;cmd.textContent=d.cmd<0?"--":d.cmd;bus.textContent=d.bus;if(document.activeElement!=vol){vol.value=d.vol;volv.textContent=d.vol;}}).catch(()=>{});}
 setInterval(poll,500);poll();</script></body></html>)HTML";
 
 // HTTP servi sur SA tâche FreeRTOS (core 0 = cœur WiFi) -> page joignable dès l'AP, indépendamment
@@ -332,8 +333,11 @@ static void startWeb() {
     server.send(200, "application/json", j);
   });
   server.on("/status", []() {
-    char b[220]; snprintf(b, sizeof(b), "{\"thr\":%.2f,\"mix\":%u,\"dac\":%u,\"ym\":%u,\"cmd\":%d,\"vol\":%d,\"st\":\"%s\"}",
-             g_thrM, g_mixSps, (unsigned)psorom::dacCount(), (unsigned)psorom::ymWrites(), g_lastCmd, g_vol, g_status);
+    char b[260]; snprintf(b, sizeof(b),
+             "{\"thr\":%.2f,\"mix\":%u,\"dac\":%u,\"ym\":%u,\"cmd\":%d,\"vol\":%d,\"bus\":\"S%d%d%d%d%d F%d STB%d\",\"st\":\"%s\"}",
+             g_thrM, g_mixSps, (unsigned)psorom::dacCount(), (unsigned)psorom::ymWrites(), g_lastCmd, g_vol,
+             digitalRead(PIN_S[0]), digitalRead(PIN_S[1]), digitalRead(PIN_S[2]), digitalRead(PIN_S[3]), digitalRead(PIN_S[4]),
+             digitalRead(35), digitalRead(PIN_STROBE), g_status);
     server.send(200, "application/json", b);
   });
   server.begin();
