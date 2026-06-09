@@ -87,31 +87,30 @@ static void IRAM_ATTR onDacTimer() {                              // tire 1 echa
 static inline bool ringFull()  { return ((s_rHead + 1) & (ARING - 1)) == s_rTail; }
 static inline void ringPush(int16_t s) { uint32_t h = s_rHead; s_ring[h] = s; s_rHead = (h + 1) & (ARING - 1); }
 
-// --- Bus commande son d'une vraie machine Gottlieb System 80 (via ULN2803 IC2, qui INVERSE le signal).
-// S1_A=27, S2_B=26, S4_C=25, S8_D=33, S16_E=32 (bits 0..4 = commande 0..31), F=35, Strobe=34.
-// GPIO34/35 sont input-only (pas de pull-up interne) -> pull-ups externes R5/R8 sur la carte. On
-// de-inverse l'ULN et on latch sur le FRONT DESCENDANT du Strobe, puis on injecte dans g_pendingCmd
-// (meme chemin que le web). NB: polarite a confirmer sur une vraie machine (regle: mesurer d'abord).
+// --- Bus commande son d'une vraie machine Gottlieb System 80 (via ULN2803 IC2). Méthode de Ralf
+// (if_G80.c, prouvée sur cette carte) : PAS de strobe — on déclenche sur le CHANGEMENT des 5 bits de
+// données (S1_A=27, S2_B=26, S4_C=25, S8_D=33, S16_E=32 = bits 0..4), settle, puis on lit. En plus :
+// POLARITÉ AUTO — on échantillonne le niveau de repos au boot (s_idle) et on compare par XOR, donc ça
+// marche que l'ULN inverse ou non. 0 = repos ; bits != repos = commande. (Strobe/F non utilisés.)
 static const int PIN_S[5] = {27, 26, 25, 33, 32};
 static const int PIN_STROBE = 34;
-static int s_lastStrobe = 1;
+static uint8_t s_idle = 0;                                         // niveau repos des 5 bits (polarité auto)
+static uint8_t s_lastBus = 0;
+static inline uint8_t readBus5() { uint8_t v = 0; for (int i = 0; i < 5; i++) if (digitalRead(PIN_S[i])) v |= (1u << i); return v; }
 static void cmdInputBegin() {
   for (int i = 0; i < 5; i++) pinMode(PIN_S[i], INPUT);
-  pinMode(35, INPUT); pinMode(PIN_STROBE, INPUT);                  // F=35 (lu plus tard si besoin), Strobe=34
-  s_lastStrobe = digitalRead(PIN_STROBE);
+  pinMode(35, INPUT); pinMode(PIN_STROBE, INPUT);
+  delay(50); s_idle = readBus5(); s_lastBus = 0;                   // repos -> polarité-agnostique (XOR)
+  Serial.printf("cmd-input: repos bus = 0x%02X (polarite auto, pas de strobe)\n", s_idle);
 }
-static inline void cmdInputPoll() {
-  int st = digitalRead(PIN_STROBE);
-  if (s_lastStrobe && !st) {                                       // front descendant (ULN: asserte = LOW)
-    delayMicroseconds(20);                                         // settle : laisse les 5 bits se propager
-    if (!digitalRead(PIN_STROBE)) {                                // toujours asserte -> vraie commande
-      uint8_t c = 0;
-      for (int i = 0; i < 5; i++) if (!digitalRead(PIN_S[i])) c |= (1u << i);  // de-inverse l'ULN
-      if (!digitalRead(35)) c |= 0x20;                            // F = bit5 -> 0..63
-      g_pendingCmd = c; g_lastCmd = c;                             // meme chemin que le web /cmd
-    }
-  }
-  s_lastStrobe = st;
+static inline void cmdInputPoll() {                                // comme if_G80 : declenche au changement des bits
+  uint8_t c = (uint8_t)(readBus5() ^ s_idle);                      // bits differents du repos = commande
+  if (c != 0 && s_lastBus == 0) {                                  // repos -> commande
+    delayMicroseconds(30);                                         // settle (de-skew des 5 bits)
+    uint8_t c2 = (uint8_t)(readBus5() ^ s_idle);
+    if (c2 != 0) { g_pendingCmd = c2; g_lastCmd = c2; }
+    s_lastBus = c2;
+  } else s_lastBus = c;                                            // re-arme au retour au repos
 }
 
 static const char* MP = "/sdcard";          // point de montage VFS
