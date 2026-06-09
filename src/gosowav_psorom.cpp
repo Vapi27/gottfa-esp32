@@ -231,7 +231,7 @@ static void wavStopSlot(int si) { if (si >= 0 && s_ws[si].used) { g_mixer.stop(s
 static bool wavSlotPlaying(int si) { return si >= 0 && s_ws[si].used && g_mixer.active(s_ws[si].vid); }
 
 static void loadWavSet(const char* theme) {              // scanne /sdcard/<theme>/ -> g_set ; g_psowav si non vide
-  g_mixer.stopAll(); g_mixer.setMix(wavmix::MIX_DIV2);
+  g_mixer.stopAll(); g_mixer.setMix(wavmix::MIX_SUM);   // pleine echelle (1 son a la fois en general) -> +6dB, meilleur S/N ; clamp gere les rares chevauchements
   for (int i = 0; i < wavmix::MAX_VOICES; i++) if (s_ws[i].used) { fclose(s_ws[i].f); s_ws[i].used = false; }
   g_set.reset(); strncpy(g_theme, theme, sizeof(g_theme) - 1); g_theme[sizeof(g_theme) - 1] = 0;
   g_psowav = false;
