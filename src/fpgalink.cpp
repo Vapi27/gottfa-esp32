@@ -11,6 +11,10 @@ namespace {
   HardwareSerial& port = Serial1;     // dedicated UART for the FPGA link (Debug pin)
   bool g_diag = false;                // last diag-mode token (touched only from poll())
   bool g_gameRunning = false;         // last game-state token (0xF2/0xF3) — tournament auto-timer
+  // --- bring-up counters: prove the GPIO8 link is alive (no behaviour change) ---
+  uint32_t g_rxCount = 0;             // total bytes ever received on the link
+  uint8_t  g_lastByte = 0;            // most recent raw byte
+  uint32_t g_lastMs = 0;             // millis() of the most recent byte
 }
 
 namespace fpgalink {
@@ -22,6 +26,7 @@ void begin() {
 void poll() {
   while (port.available()) {
     uint8_t b = (uint8_t)port.read();
+    g_rxCount++; g_lastByte = b; g_lastMs = millis();   // bring-up telemetry
     if ((b & 0xFE) == 0xF0) {                 // diag-mode token: 0xF0 normal / 0xF1 diag
       g_diag = (b & 0x01) != 0;
     }
@@ -40,5 +45,11 @@ void poll() {
 
 bool diagActive() { return g_diag; }
 bool gameRunning() { return g_gameRunning; }
+
+// Bring-up telemetry: total bytes seen, last raw byte, ms since last byte.
+void stats(uint32_t& total, uint8_t& last, uint32_t& ageMs) {
+  total = g_rxCount; last = g_lastByte;
+  ageMs = g_rxCount ? (millis() - g_lastMs) : 0xFFFFFFFF;
+}
 
 } // namespace fpgalink

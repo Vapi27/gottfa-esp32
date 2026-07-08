@@ -258,7 +258,10 @@ bool begin() {
   if (!reqQ) return false;
 
   sdspi.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
-  if (!SD.begin(PIN_SD_CS, sdspi, 20000000)) { log_e("[snd] SD mount failed"); return false; }
+  // 4 MHz (was 20): flying-wire SD wiring drops out during write bursts at 20 MHz
+  // (the card unmounts -> "File system is not mounted"). 4 MHz is far more tolerant
+  // of long leads / weak 3.3V; raise again once the SD is on a clean, decoupled board.
+  if (!SD.begin(PIN_SD_CS, sdspi, 4000000)) { log_e("[snd] SD mount failed"); return false; }
 
   // I2S TX -> PCM5102A (16-bit, DMA). Mono is sent on both L/R. SCK->GND on the module (no MCLK).
   i2s_config_t i2scfg = {};

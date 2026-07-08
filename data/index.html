@@ -223,8 +223,11 @@
       <div class="kv"><span class="k">Carte SD</span><span id="s_sd">—</span></div>
       <div class="row" style="margin-top:.8rem">
         <button class="btn" onclick="reqSys()">↻ Rafraîchir</button>
+        <button class="btn" onclick="reqJtag()">⚙ Relire IDCODE FPGA</button>
+        <button class="btn" onclick="reqLink()">📡 Tester lien FPGA</button>
         <button class="btn danger" onclick="reboot()">⏻ Redémarrer l'ESP</button>
       </div>
+      <div class="kv" style="margin-top:.5rem"><span class="k">Lien FPGA (UART)</span><span id="s_link">—</span></div>
     </div>
   </section>
 
@@ -536,6 +539,24 @@ function renderTfpga(){const cb=document.getElementById('tfpga'),st2=document.ge
   st2.classList.toggle('on',!!st.tfpga);}
 function fmtUp(s){s|=0;if(s<60)return s+'s';const m=(s/60)|0;if(m<60)return m+'m '+(s%60)+'s';const h=(m/60)|0;return h+'h '+(m%60)+'m';}
 function reqSys(){send({c:'sysinfo'});}
+function reqJtag(){
+  const el=document.getElementById('s_id');const old=el.textContent;el.textContent='lecture…';
+  fetch('/jtag').then(r=>r.json()).then(d=>{
+    el.textContent=d.idcode+(d.name?(' ('+d.name+')'):'');
+    toast(d.ok?('FPGA détecté : '+d.idcode):('pas de réponse JTAG ('+d.idcode+')'));
+  }).catch(e=>{el.textContent=old;toast('erreur JTAG : '+e);});
+}
+function reqLink(){
+  const el=document.getElementById('s_link');el.textContent='lecture…';
+  fetch('/link').then(r=>r.json()).then(d=>{
+    const alive=d.total>0;
+    const age=(d.ageMs>60000)?'ancien':(d.ageMs+' ms');
+    el.textContent=alive
+      ? (d.total+' octets · dernier '+d.last+' · il y a '+age+(d.diag?' · DIAG':'')+(d.running?' · jeu ON':''))
+      : 'aucun octet reçu (FPGA muet / câble GPIO8 ?)';
+    toast(alive?('Lien FPGA vivant : '+d.total+' octets'):'Lien FPGA : aucun octet reçu');
+  }).catch(e=>{el.textContent='erreur';toast('erreur lien : '+e);});
+}
 function reboot(){if(confirm('Redémarrer l’ESP ? Son + diag coupés ~5 s.'))send({c:'reboot'});}
 function doOta(){const f=document.getElementById('otaFile').files[0],msg=document.getElementById('otaMsg');
   if(!f){msg.textContent='choisis un fichier .bin';return;}

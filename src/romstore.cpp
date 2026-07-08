@@ -100,15 +100,38 @@ bool store(int gameNo, bool fp, const uint8_t* plain) {
   if (ok) {
     if (!SD.exists("/roms")) SD.mkdir("/roms");
     char p[28]; path(gameNo, fp, p, sizeof(p));
-    SD.remove(p);                                              // clean overwrite
+    // Robust overwrite: remove, then confirm the delete settled before re-opening.
+    // On the SPI SD (FatFS) an open() racing a just-issued remove() can fail, which is
+    // why a re-write of an existing slot used to fail while a fresh slot always worked.
+    if (SD.exists(p)) {
+      SD.remove(p);
+      for (int i = 0; i < 20 && SD.exists(p); i++) delay(5);   // wait out the FAT update
+    }
     File f = SD.open(p, FILE_WRITE);
+    if (!f) { delay(20); f = SD.open(p, FILE_WRITE); }         // one retry
     ok = (bool)f;
-    if (ok) { ok = (f.write(cont, romcrypt::CONT_SIZE) == (size_t)romcrypt::CONT_SIZE); f.close(); }
+    if (ok) {
+      f.seek(0);                                               // ensure we start at byte 0
+      ok = (f.write(cont, romcrypt::CONT_SIZE) == (size_t)romcrypt::CONT_SIZE);
+      f.flush();                                               // commit before close
+      f.close();
+    }
     if (ok) { g_ready = true; log_i("[rom] stored game %d %s (%d B)", gameNo, fp ? "FP" : "stock", romcrypt::CONT_SIZE); }
     else log_e("[rom] write failed for game %d %s", gameNo, fp ? "FP" : "stock");
   }
   free(cont);
   return ok;
+}
+
+bool remove(int gameNo, bool fp) {
+  if (gameNo < 0 || gameNo >= MAX_GAME) return false;
+  char p[28]; path(gameNo, fp, p, sizeof(p));
+  if (!SD.exists(p)) return true;                 // already gone
+  SD.remove(p);
+  for (int i = 0; i < 20 && SD.exists(p); i++) delay(5);
+  bool gone = !SD.exists(p);
+  if (gone) log_i("[rom] removed game %d %s", gameNo, fp ? "FP" : "stock");
+  return gone;
 }
 
 bool freePlay() { return g_freePlay; }

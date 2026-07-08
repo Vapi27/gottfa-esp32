@@ -11,6 +11,7 @@
  * - MSX-Datapack   -- 1991 ASCII Corp.
  * - AY-3-8910 data sheet
  */
+#pragma GCC optimize("O3")   /* chemin chaud temps-reel : vitesse > taille (PlatformIO compile en -Os) */
 #include <stdlib.h>
 #include <string.h>
 #include "emu2149.h"

@@ -102,10 +102,15 @@ LOW**, **U3 = both HIGH**. Endpoint: `GET /dump?type=u2` / `?type=u3`. Same inse
 part (JP1 = 24-pin Vcc); a 2332 has **no Vpp**. *(Polarity presets are from the verified study;
 confirm on the first real chip — if a dump is all 0xFF/0x00, the CS2 level is flipped.)*
 
-## 7b. Remaining limit (true for *any* reader)
-- ✅ **80B + all socketed EPROMs** (2716/2732/2764, DROM/YROM sound) **and now 80/80A U2/U3** → dumped.
-- ❌ **80/80A sound 6530 RIOT** = ROM **internal to the RIOT chip**, factory-masked → **unreadable**
-  by anything. → use the verified **PinMAME** sound dump (it's a sound ROM anyway → PSOWAV covers it).
+## 7b. Scope: the reader dumps CODE only — sound is provided by us (PSOWAV)
+**Design decision (user, 2026-06-08): we ship the sound ourselves (PSOWAV samples), we do NOT read
+the user's sound chips.** So the reader only ever dumps the **CPU / game / system code**:
+- ✅ game ROM (2716/2732), 80B system (2764), **80/80A system U2/U3 (2332)** → all readable here.
+- The **6530 RIOT** and the sound EPROMs are **never read** → the "RIOT is unreadable" limit is **moot**.
+Code → `romstore` (`/roms/NN.img`); sound → PSOWAV folders (`/<game>/…wav`). The two are already
+separate, so `/dump` feeds only the code side. (Legal note: dumping your own code = clean; the
+PSOWAV samples are derived from the original sound ROMs = the bundled/derivative part — use original
+re-created samples if you want the sound clean too.)
 - A dumped chip is a **raw 2/4/8 KB image**. Assembling chips into the GottFA **16 KB game image**
   (pad + concat game + system) is a separate step — and the exact layout differs across GottFA
   manual versions (HW20 v1.01 = 4 KB game | 4 KB soundcard | 8 KB system; a v4.00 doc = 8 KB game |

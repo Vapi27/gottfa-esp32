@@ -48,13 +48,16 @@ public:
   void stopTag(int tag);               // break: stop voices playing this sound id
   void stopExcept(bool keepBg, bool keepLoop, bool keepVoice);   // kill/soft-kill/quit
   void stopActiveLoops();              // mono music: stop active looping (non-voice) voices
+  void stopBgLoops();                  // chef: stop active looping BACKGROUND (music) voices when the CPU silences AY/YM
+  int  loopTags(int* out, int mx);     // tags des boucles actives (GC des boucles orphelines)
   bool active(int id) const;
   int  activeCount() const;
   void setMix(uint8_t mode) { mix_ = mode; }
   void mix(int16_t* out, size_t frames);   // mix `frames` stereo frames, per mix mode
+  uint32_t deaths = 0;                 // voix tuees pour famine prolongee (source morte) — diagnostic SD
 private:
   struct Voice { FillFn fill; void* ctx; RewindFn rewind; uint8_t gain;
-                 int tag; bool loop, bg, voice, active; };
+                 int tag; bool loop, bg, voice, active; uint8_t starve; };
   Voice   v_[MAX_VOICES] = {};
   int16_t tmp_[BLOCK * 2];             // per-voice stereo scratch
   int32_t acc_[BLOCK * 2];             // mix accumulator (off the audio-task stack)

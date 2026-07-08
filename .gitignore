@@ -3,3 +3,6 @@
 *.bin
 *.elf
 *.map
+fpga_bitstream/
+__pycache__/
+*.pyc

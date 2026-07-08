@@ -33,6 +33,7 @@ bool   has(int gameNo, bool fp);                 // present (plaintext 16 KB or 
 bool   encrypted(int gameNo, bool fp);           // stored as an encrypted PSRC container?
 size_t read(int gameNo, bool fp, uint8_t* buf, size_t bufLen);   // 16 KB plaintext (auto-decrypt); IMG_SIZE or 0
 bool   store(int gameNo, bool fp, const uint8_t* plain);         // encrypt + write the variant; true on success
+bool   remove(int gameNo, bool fp);              // delete one variant's file; true if gone after
 
 int    count();                                  // games with at least one variant present (0..MAX_GAME)
 

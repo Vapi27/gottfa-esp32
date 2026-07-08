@@ -6,6 +6,8 @@
 #include "board_config.h"
 #include "net.h"
 #include "diag.h"
+#include "jtag.h"
+#include "fpgalink.h"
 #ifndef BOARD_C3
 #include "wavplayer.h"
 #include "romstore.h"
@@ -66,6 +68,32 @@ void netBegin() {
 
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
+
+  // --- JTAG re-read (bring-up): re-scan the FPGA IDCODE on demand, no reboot needed ---
+  //   /jtag  -> re-read TAP IDCODE, refresh s_idcode, return JSON {idcode, name, ok}
+  server.on("/jtag", HTTP_GET, [](AsyncWebServerRequest *r) {
+    uint32_t id = jtag::readIdcode();
+    s_idcode = id;
+    bool ok = (id != 0x00000000 && id != 0xFFFFFFFF);   // 0/all-ones = no TAP response
+    char j[96];
+    snprintf(j, sizeof(j), "{\"idcode\":\"0x%08X\",\"name\":\"%s\",\"ok\":%s}",
+             (unsigned)id, jtag::idcodeName(id), ok ? "true" : "false");
+    r->send(200, "application/json", j);
+  });
+
+  // --- FPGA link telemetry (bring-up): is the GPIO8 UART receiving bytes? ---
+  //   /link -> JSON {total, last (hex), ageMs, diag, running}
+  server.on("/link", HTTP_GET, [](AsyncWebServerRequest *r) {
+    uint32_t total, age; uint8_t last;
+    fpgalink::stats(total, last, age);
+    char j[160];
+    snprintf(j, sizeof(j),
+      "{\"total\":%u,\"last\":\"0x%02X\",\"ageMs\":%u,\"diag\":%s,\"running\":%s}",
+      (unsigned)total, last, (unsigned)age,
+      fpgalink::diagActive() ? "true" : "false",
+      fpgalink::gameRunning() ? "true" : "false");
+    r->send(200, "application/json", j);
+  });
 
   // --- PSOWAV sound test (bring-up): play any sound / set theme from a browser, no FPGA ---
   //   /snd?id=N      play PSOWAV sound N (0..31)      /snd?theme=arena   load a game set
@@ -182,6 +210,22 @@ void netBegin() {
     }
     j += "]}";
     r->send(200, "application/json", j);
+#else
+    r->send(501, "text/plain", "no store on C3");
+#endif
+  });
+
+  // --- ROM delete: remove one game slot (stock+FP, or one variant with ?fp=1) ---
+  //   GET /romdel?id=N[&fp=1]   -> delete; fp omitted = delete BOTH variants of that slot
+  server.on("/romdel", HTTP_GET, [](AsyncWebServerRequest *r) {
+#ifndef BOARD_C3
+    if (!r->hasParam("id")) { r->send(400, "text/plain", "usage: /romdel?id=N[&fp=1]"); return; }
+    int id = r->getParam("id")->value().toInt();
+    bool ok;
+    if (r->hasParam("fp")) ok = romstore::remove(id, r->getParam("fp")->value().toInt() != 0);
+    else { bool a = romstore::remove(id, false), b = romstore::remove(id, true); ok = a && b; }
+    r->send(ok ? 200 : 500, "text/plain",
+            ok ? ("deleted game " + String(id)) : "delete failed");
 #else
     r->send(501, "text/plain", "no store on C3");
 #endif

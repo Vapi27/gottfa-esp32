@@ -7,6 +7,7 @@
 // 15-byte LPC frame decode) is retained; all MAME device/stream/timer glue is removed. Redistributed
 // under the BSD-3-Clause license (copyright Olivier Galibert and the MAME team) — the copyright notice,
 // this license reference, and the disclaimer are preserved per BSD-3-Clause.
+#pragma GCC optimize("O3")   /* chemin chaud temps-reel : vitesse > taille (PlatformIO compile en -Os) */
 #include "sp0250.h"
 
 namespace sp0250 {
@@ -62,12 +63,15 @@ void reset() {
 }
 
 static unsigned long g_feeds=0;
-void feed(uint8_t d) { g_feeds++; if (fifoPos != 15) fifo[fifoPos++] = d; }
+static uint32_t g_idleN = 0;                          // echantillons depuis le dernier feed : affame = MUET
+void feed(uint8_t d) { g_feeds++; g_idleN = 0; if (fifoPos != 15) fifo[fifoPos++] = d; }
 unsigned long feeds() { return g_feeds; }
 bool ready() { return fifoPos != 15; }
 
 int next() {
-  if (rcount >= repeat) {
+  if (++g_idleN > 4480) return 0;                     // plus nourri depuis ~450 ms (vraie parole = flux continu de trames) :
+  if (rcount >= repeat) {                             // la puce reelle REPETE la derniere trame a l'infini -> "tut-tut" perpetuel
+
     if (fifoPos == 15) loadValues();
     else { repeat = 1; pcount = 0; rcount = 0; }     // NOP frame while waiting for input
   }
