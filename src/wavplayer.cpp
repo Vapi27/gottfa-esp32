@@ -10,6 +10,7 @@
 #ifndef BOARD_C3
 #include "wavplayer.h"
 #include "ownership.h"
+#include <math.h>
 #include "wavmix.h"
 #include "wavsrc.h"
 #include "wavfile.h"
@@ -257,12 +258,9 @@ bool begin() {
   reqQ = xQueueCreate(8, sizeof(Req));
   if (!reqQ) return false;
 
-  sdspi.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
-  // 4 MHz (was 20): flying-wire SD wiring drops out during write bursts at 20 MHz
-  // (the card unmounts -> "File system is not mounted"). 4 MHz is far more tolerant
-  // of long leads / weak 3.3V; raise again once the SD is on a clean, decoupled board.
-  if (!SD.begin(PIN_SD_CS, sdspi, 4000000)) { log_e("[snd] SD mount failed"); return false; }
-
+  // --- I2S FIRST, independent of the SD ---
+  // The DAC/I2S must come up even if the SD fails to mount, so audio hardware can
+  // be tested (testTone) and a flaky SD never silences the whole sound tier.
   // I2S TX -> PCM5102A (16-bit, DMA). Mono is sent on both L/R. SCK->GND on the module (no MCLK).
   i2s_config_t i2scfg = {};
   i2scfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
@@ -273,7 +271,7 @@ bool begin() {
   i2scfg.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
   i2scfg.dma_buf_count = 8;
   i2scfg.dma_buf_len = 256;
-  i2scfg.use_apll = true;            // cleaner audio clock
+  i2scfg.use_apll = false;           // APLL can fail to generate the I2S clock on some S3 -> silence
   i2scfg.tx_desc_auto_clear = true;  // output silence on underrun (no click/repeat)
   if (i2s_driver_install(I2S_NUM_0, &i2scfg, 0, nullptr) != ESP_OK) { log_e("[snd] I2S install failed"); return false; }
   i2s_pin_config_t i2spin = {};
@@ -283,6 +281,12 @@ bool begin() {
   i2spin.data_out_num = PIN_I2S_DOUT;
   i2spin.data_in_num  = I2S_PIN_NO_CHANGE;
   i2s_set_pin(I2S_NUM_0, &i2spin);
+
+  // --- SD SECOND (non-fatal): flying-wire SD drops out; audio still works without it ---
+  sdspi.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
+  // 1 MHz is the most tolerant of long leads / weak 3.3V. The real fix is a clean,
+  // decoupled board (add a 10-100uF cap across the card's 3V3/GND); raise then.
+  if (!SD.begin(PIN_SD_CS, sdspi, 1000000)) log_e("[snd] SD mount failed (audio still up)");
 
   mixer.reset();
 
@@ -334,6 +338,28 @@ void stopAll() {
   xQueueSend(reqQ, &r, 0);                         // mix task does mixer.stopAll()
 }
 bool ready()   { return g_ready; }
+
+// --- HARDWARE TEST: synth a 440 Hz sine straight to I2S, no SD/mixer/WAV needed. ---
+// Isolates the PCM5102A DAC from every software path: if you hear this beep, the
+// I2S + DAC + wiring are all good and any silence is a SD/WAV problem instead.
+void testTone(int ms) {
+  if (!g_ready) return;
+  const int freq = 440;
+  const int total = (RATE * ms) / 1000;
+  static int16_t blk[FRAMES * 2];
+  double ph = 0.0, step = 2.0 * 3.14159265 * freq / RATE;
+  int sent = 0;
+  while (sent < total) {
+    for (int i = 0; i < FRAMES; i++) {
+      int16_t s = (int16_t)(9000.0 * sin(ph));     // ~0.27 full-scale, comfortable level
+      ph += step; if (ph > 6.2831853) ph -= 6.2831853;
+      blk[2 * i] = s; blk[2 * i + 1] = s;          // both channels
+    }
+    size_t wrote;
+    i2s_write(I2S_NUM_0, blk, sizeof(blk), &wrote, portMAX_DELAY);
+    sent += FRAMES;
+  }
+}
 
 // --- cached status for the web UI (benign cross-task reads, display only) ---
 const char* curTheme()        { return theme; }

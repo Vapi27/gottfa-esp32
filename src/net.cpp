@@ -9,6 +9,9 @@
 #include "jtag.h"
 #include "fpgalink.h"
 #ifndef BOARD_C3
+#include <SD.h>
+#endif
+#ifndef BOARD_C3
 #include "wavplayer.h"
 #include "romstore.h"
 #include "romcrypt.h"
@@ -113,7 +116,21 @@ void netBegin() {
     }
     if (r->hasParam("stop")) { wavplayer::stopAll(); r->send(200, "text/plain", "stopped"); return; }
     r->send(200, "text/plain", String("PSOWAV ") + (wavplayer::ready() ? "ready" : "NOT ready") +
-            "\nusage: /snd?id=N (0..95) | /snd?theme=NAME | /snd?stop=1");
+            " theme='" + wavplayer::curTheme() + "' sounds=" + String(wavplayer::soundCount()) +
+            "\nusage: /snd?id=N (0..95) | /snd?theme=NAME | /snd?stop=1 | /beep");
+#else
+    r->send(501, "text/plain", "no sound tier on C3");
+#endif
+  });
+
+  // --- HARDWARE TEST: /beep -> 440 Hz sine straight to the PCM5102A, no SD/WAV ---
+  //   Isolates the DAC. If you hear this, I2S+DAC+wiring are good; any WAV silence is the SD.
+  server.on("/beep", HTTP_GET, [](AsyncWebServerRequest *r) {
+#ifndef BOARD_C3
+    int ms = r->hasParam("ms") ? r->getParam("ms")->value().toInt() : 800;
+    if (ms < 50) ms = 50; if (ms > 3000) ms = 3000;
+    wavplayer::testTone(ms);
+    r->send(200, "text/plain", "beep " + String(ms) + "ms (I2S sine, no SD)");
 #else
     r->send(501, "text/plain", "no sound tier on C3");
 #endif
@@ -241,6 +258,38 @@ void netBegin() {
     r->send(501, "text/plain", "no store on C3");
 #endif
   });
+
+  // --- WAV upload: stream a sound file straight to the SD (no RAM buffer) ---
+  //   POST /wavup?dir=DIR&name=FILE   body = raw WAV bytes -> /DIR/FILE on the SD.
+  //   Creates /DIR if needed. Used to load a game's PSOWAV sound set from a browser.
+  server.on("/wavup", HTTP_POST,
+    [](AsyncWebServerRequest *r) {
+#ifndef BOARD_C3
+      File *f = (File *)r->_tempObject;
+      bool ok = f && *f;
+      if (f) { if (*f) f->close(); delete f; r->_tempObject = nullptr; }
+      r->send(ok ? 200 : 500, "text/plain", ok ? "ok" : "write failed (SD?)");
+#else
+      r->send(501, "text/plain", "no SD on C3");
+#endif
+    },
+    NULL,
+    [](AsyncWebServerRequest *r, uint8_t *data, size_t len, size_t index, size_t total) {
+#ifndef BOARD_C3
+      if (index == 0) {
+        if (!r->hasParam("dir") || !r->hasParam("name")) return;
+        String dir = "/" + r->getParam("dir")->value();
+        String name = r->getParam("name")->value();
+        if (!SD.exists(dir)) SD.mkdir(dir);
+        String path = dir + "/" + name;
+        SD.remove(path);
+        File *f = new File(SD.open(path, FILE_WRITE));
+        r->_tempObject = f;
+      }
+      File *f = (File *)r->_tempObject;
+      if (f && *f) f->write(data, len);
+#endif
+    });
 
   // --- ROM upload: POST a raw 16384-byte GottFA game image -> ENCRYPTED into /roms/<NN>.img ---
   //   POST /romup?id=N[&fp=1]   body = exactly 16384 bytes (the user supplies their own ROM).

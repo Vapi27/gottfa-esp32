@@ -30,13 +30,23 @@ void setup() {
 
   idleGroupA();
 
+  // --- Power-up sequencing: let the FPGA finish configuring from its EPCS ---
+  // The JTAG IDCODE read below drives a TAP-reset on the shared JTAG pins. That
+  // is harmless on an ALREADY-configured FPGA, but if the ESP and the FPGA power
+  // up together, this read can land WHILE the FPGA is still loading its bitstream
+  // from the EPCS (~100-200 ms) and abort its configuration -> the FPGA never
+  // starts, so no sound_link heartbeat. Symptom: "works only if the ESP is
+  // powered before the FPGA". Waiting here lets the FPGA configure first,
+  // regardless of power-on order. The bus stays Hi-Z (idleGroupA) meanwhile.
+  jtag::begin();                 // pins to Hi-Z idle (does NOT touch the TAP)
+  delay(1500);                   // >> EPCS config time; safe margin for any order
+
   if (!LittleFS.begin(true))
     Serial.println("[fs] LittleFS mount failed (run: pio run -t uploadfs)");
   tourney::begin();              // load saved tournament (players + scores) from LittleFS
 
   // --- Bring-up step 1: read the FPGA JTAG IDCODE on header P5 ---
-  // Non-intrusive even on a running FPGA. Expect 0x020F10DD for the 10CL006.
-  jtag::begin();
+  // Non-intrusive now that the FPGA is configured. Expect 0x020F10DD (10CL006).
   uint32_t id = jtag::readIdcode();
   Serial.printf("[jtag] IDCODE = 0x%08X  (%s)\n", (unsigned)id, jtag::idcodeName(id));
   netSetFpgaIdcode(id);

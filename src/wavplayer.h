@@ -19,6 +19,7 @@ namespace wavplayer {
   bool playLive(int soundId);         // FPGA live path: applies hybrid routing (skips GOSOF80-handled cmds)
   bool soundHybrid();                 // true if sndmode=hybrid (config.txt) — GOSOF80 does part of the sound
   void stopAll();
+  void testTone(int ms);              // HW test: 440 Hz sine straight to I2S (no SD/WAV)
   bool ready();
   // --- status for the web UI (cached; safe to read from another task for display) ---
   const char* curTheme();             // currently loaded game/theme folder
