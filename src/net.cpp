@@ -15,6 +15,7 @@
 #include "norprog.h"
 #include "fpgalink.h"
 #include "dispinject.h"
+#include "wifiprov.h"
 #ifndef BOARD_C3
 #include <SD.h>
 #endif
@@ -486,21 +487,12 @@ static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
 }
 
 void netBegin() {
-  WiFi.persistent(false);
-  bool connected = false;
-  if (strlen(WIFI_STA_SSID) > 0) {
-    WiFi.mode(WIFI_STA);
-    WiFi.setHostname(MDNS_HOST);
-    Serial.printf("[net] STA connecting to '%s' ...\n", WIFI_STA_SSID);
-    WiFi.begin(WIFI_STA_SSID, WIFI_STA_PASS);
-    uint32_t t0 = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - t0 < WIFI_STA_TIMEOUT_MS) { delay(250); Serial.print('.'); }
-    Serial.println();
-    connected = (WiFi.status() == WL_CONNECTED);
-  }
-  if (connected) { s_mode = "STA"; s_ip = WiFi.localIP().toString(); Serial.printf("[net] STA OK ip=%s\n", s_ip.c_str()); }
-  else { WiFi.mode(WIFI_AP); WiFi.softAP(WIFI_AP_SSID, WIFI_AP_PASS); s_mode = "SoftAP"; s_ip = WiFi.softAPIP().toString();
-         Serial.printf("[net] SoftAP '%s' ip=%s\n", WIFI_AP_SSID, s_ip.c_str()); }
+  // WiFi: credentials come from NVS via the provisioning wizard, never from a compile-time
+  // #define — a customer has no toolchain. wifiprov guarantees the board always ends up
+  // reachable: stored creds -> STA, otherwise (or on failure) the SoftAP + captive portal.
+  wifiprov::begin();
+  s_mode = wifiprov::mode();
+  s_ip   = wifiprov::ip();
 
   if (MDNS.begin(MDNS_HOST)) { MDNS.addService("http", "tcp", 80); Serial.printf("[net] http://%s.local/\n", MDNS_HOST); }
 
@@ -510,6 +502,8 @@ void netBegin() {
 
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
+
+  wifiprov::attachRoutes(server);   // /wifi* — must precede serveStatic("/")
 
   // --- JTAG re-read (bring-up): re-scan the FPGA IDCODE on demand, no reboot needed ---
   //   /jtag  -> re-read TAP IDCODE, refresh s_idcode, return JSON {idcode, name, ok}
@@ -1193,13 +1187,17 @@ void netBegin() {
   });
 
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
-  server.onNotFound([](AsyncWebServerRequest *r){ r->send(404, "text/plain", "404"); });
+  server.onNotFound([](AsyncWebServerRequest *r){
+    if (wifiprov::captiveRedirect(r)) return;   // pops the OS "sign in to network" sheet
+    r->send(404, "text/plain", "404");
+  });
   server.begin();
   Serial.println("[net] HTTP + WS on :80");
 }
 
 volatile bool g_norloop = false;
 void netLoop() {
+  wifiprov::tick();          // scans/connects run HERE, never inside an HTTP handler
   ws.cleanupClients(); diag::tick();
   // Deferred work, on loopTask (priority 1) instead of the AsyncTCP service task
   // (priority 10, also the LwIP event pump).  Running it HERE also serialises it
@@ -1230,5 +1228,5 @@ void netLoop() {
     if (v != nl_id || (++nl_n % 50) == 0) { nl_id = v; Serial.printf("[norloop] 0x%06X\n", (unsigned)v); }
   }
 }
-const char* netIp()   { return s_ip.c_str(); }
-const char* netMode() { return s_mode.c_str(); }
+const char* netIp()   { return wifiprov::ip(); }    // live: follows an AP<->STA switch
+const char* netMode() { return wifiprov::mode(); }
