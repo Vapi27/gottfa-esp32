@@ -1,5 +1,7 @@
 #include "jtag.h"
 #include "board_config.h"
+#include <Arduino.h>
+#include "soc/gpio_struct.h"   // direct GPIO regs for the fast XVC shift path
 
 namespace {
 
@@ -83,6 +85,45 @@ uint64_t jtag::shiftDR(uint64_t tdi, int n) {         // RTI -> Shift-DR -> RTI,
   for (int i = 0; i < n; i++) r |= (uint64_t)clockBit((i == n - 1) ? 1 : 0, (uint8_t)((tdi >> i) & 1)) << i;
   clockBit(1, 0); clockBit(0, 0);                     // Exit1 -> Update -> RTI
   return r;
+}
+
+// XVC bulk shift: TMS/TDI/TDO are LSB-first byte vectors (bit i lives in
+// byte[i>>3] at mask (1<<(i&7))) — the exact XVC layout. TDO is sampled before
+// each rising edge. No enable() here: the XVC server drives enable(true)/
+// enable(false) around the whole session.
+//
+// FAST PATH: direct GPIO register access (out_w1ts/out_w1tc/in), no delays.
+// All 4 TAP pins are < GPIO32 (TCK=4 TMS=5 TDI=6 TDO=7) => single low bank.
+// Effective TCK ~2 MHz (vs ~250 kHz for the delayMicroseconds clockBit) — the
+// Cyclone 10 TAP is rated far above that, and TDO (updated on the falling
+// edge) has hundreds of ns to settle before we sample it next cycle. The slow
+// clockBit stays for the scalar helpers (IDCODE etc.) — negligible traffic.
+// ~20 ns per iteration: calibrated settle for clean edges on flying leads.
+// 4 MHz (bare nops) desynced the TAP (SVF TDO-compare fails at line B79);
+// ~150 ns half-periods (~1.7 MHz) are solid and still ~7x the old clockBit.
+static inline void settle(uint32_t n) {
+  for (volatile uint32_t i = 0; i < n; i++) { __asm__ __volatile__("nop"); }
+}
+
+void jtag::shift(uint32_t nbits, const uint8_t* tms, const uint8_t* tdi, uint8_t* tdo) {
+  const uint32_t TCK = 1u << PIN_JTAG_TCK;
+  const uint32_t TMS = 1u << PIN_JTAG_TMS;
+  const uint32_t TDI = 1u << PIN_JTAG_TDI;
+  for (uint32_t i = 0; i < nbits; i++) {
+    uint8_t m = (tms[i >> 3] >> (i & 7)) & 1;
+    uint8_t d = (tdi[i >> 3] >> (i & 7)) & 1;
+    uint32_t setm = (m ? TMS : 0u) | (d ? TDI : 0u);
+    uint32_t clrm = (m ? 0u : TMS) | (d ? 0u : TDI);
+    GPIO.out_w1ts = setm;                       // drive TMS/TDI (TCK low)
+    GPIO.out_w1tc = clrm;
+    settle(7);                                  // ~150 ns: lines + TDO settle
+    uint8_t o = (GPIO.in >> PIN_JTAG_TDO) & 1;  // sample TDO before the rising edge
+    GPIO.out_w1ts = TCK;                        // rising edge: device samples TMS/TDI
+    settle(7);                                  // ~150 ns TCK high
+    GPIO.out_w1tc = TCK;                        // falling edge: device updates TDO
+    if (o) tdo[i >> 3] |=  (uint8_t)(1u << (i & 7));
+    else   tdo[i >> 3] &= (uint8_t)~(1u << (i & 7));
+  }
 }
 
 const char* jtag::idcodeName(uint32_t id) {

@@ -3,6 +3,7 @@
 #include <SPI.h>
 #include "diag.h"
 #include "board_config.h"
+#include "net.h"
 #include "wavplayer.h"
 #include "fpgalink.h"
 #include "tourney.h"
@@ -94,7 +95,13 @@ namespace {
     d["tfpga"]=tourneyFpga?1:0;                             // FPGA tournament mode (CTRL2)
     String s; serializeJson(d,s); txt(c,s);
   }
+  // ball in play (fpgalink token 0xA0|value): same trio que /link, ballAge=-1 si jamais recu.
+  void addBall(JsonDocument&d){
+    uint8_t bv; uint32_t bn, ba; fpgalink::ballStats(bv,bn,ba);
+    d["ball"]=bv; d["ballN"]=bn; d["ballAge"]=(ba==0xFFFFFFFF)?-1:(int32_t)ba;
+  }
   void sendStatus(){ JsonDocument d; d["t"]="status"; d["outputs"]=outputs?1:0; d["wd"]=wd_tripped?1:0;
+    addBall(d);
     String s; serializeJson(d,s); txt(nullptr,s); }
   void sendArr(const char*type, const uint8_t*a, int n, AsyncWebSocketClient*c){
     JsonDocument d; d["t"]=type; JsonArray j=d["d"].to<JsonArray>();
@@ -102,6 +109,7 @@ namespace {
   }
 
   uint32_t rebootAt=0;               // set by {c:'reboot'} -> tick() restarts the ESP
+  uint32_t exitAt=0;                 // set by {c:'exit'} -> tick() pulses S8 reset to leave diag
 
   // ESP device status for the Système tab.
   void sendSysInfo(AsyncWebSocketClient*c){
@@ -117,6 +125,118 @@ namespace {
   }
 
   void sendTourney(AsyncWebSocketClient*c){ txt(c, tourney::json()); }   // tournament leaderboard
+
+  // ======================= TIME-ATTACK ENGINE ==============================================
+  // Runs entirely OUTSIDE diag mode and touches no SPI: diag holds the 6502 in reset, so a
+  // tournament game can only ever be played with the bus released. Everything here is driven
+  // by the FPGA link (game state + sound commands) and drives the one-wire control/display UART.
+  //
+  // Game state comes from fpgalink::gameInProgress() = RIOT RAM $0072. The previous trigger
+  // (fpgalink::gameRunning(), link token 0xF2/0xF3) was proven on hardware to be a "the 6502
+  // has booted" latch — high ~0.25 s after reset and never clearing — so the auto-timer built
+  // on it could never fire. $0072 is the real 0 = attract / 1 = playing flag.
+  //
+  // Session shape: arm a player -> control bit0 (auto-restart) + bit1 (countdown on the glass)
+  // go out at 4 Hz -> the machine starts a game -> the countdown runs -> at every game over the
+  // FPGA re-coins/re-starts, and the countdown PAUSES for that gap so the restart costs nothing
+  // -> when the clock hits 0 we send bit2 (end the game NOW), drop the flags and record.
+  constexpr uint32_t TA_DISP_MS   = 250;    // countdown -> glass (4 Hz)
+  constexpr uint32_t TA_PUSH_MS   = 500;    // countdown -> web UI
+  constexpr uint32_t TA_SND_CD_MS = 150;    // per-command bonus cooldown
+  constexpr uint32_t TA_GAP_MS    = 30000;  // attract gap tolerated before we call the session over
+  uint32_t taSndMs[32] = {0};               // last bonus per sound command (cooldown)
+  uint32_t taGapMs = 0;                     // millis() when the current attract gap started
+
+  void sendTa(){
+    uint32_t now = millis();
+    JsonDocument d; d["t"]="ta";
+    d["mode"]=tourney::curMode(); d["armed"]=tourney::armed(); d["id"]=tourney::activePlayer();
+    d["rem"]=tourney::liveScore(now); d["pause"]=tourney::paused()?1:0;
+    d["bgot"]=tourney::bonusGiven(); d["gip"]=fpgalink::gameInProgress()?1:0;
+    d["ctrl"]=dispinject::ctrl();
+    d["start"]=tourney::taStart(); d["decay"]=tourney::taDecay();
+    d["bonus"]=tourney::taBonus(); d["cap"]=tourney::taCap();
+    String s; serializeJson(d,s); txt(nullptr,s);
+  }
+
+  // End the running time-attack session: record the remainder, drop the FPGA flags and, when
+  // asked, tell the FPGA to end the game on the machine (control bit2, edge-triggered one-shot).
+  // setCtrl(0) BEFORE pulseKill() matters: the frame carrying the kill edge must already have
+  // auto-restart cleared, else the FPGA would helpfully start another game.
+  void taFinish(bool killGame){
+    uint32_t sc = tourney::stopGame(millis());
+    tourney::arm(0);                        // one armed session = one run; re-arm explicitly
+    taGapMs = 0;
+    dispinject::setCtrl(0);
+    if(killGame) dispinject::pulseKill();
+    dispinject::send(sc);                   // final value stays on the glass until the overlay drops
+    JsonDocument a; a["t"]="timer"; a["id"]=0; a["score"]=sc; String s; serializeJson(a,s); txt(nullptr,s);
+    sendTourney(nullptr); sendTa();
+  }
+
+  // One live sound command -> maybe a time bonus. Ignored when no game is running, so a queued
+  // burst can never pay out later; ignored for looping/drone cues (holding one would farm
+  // infinite time); rate-limited per command; the overall per-game cap lives in tourney.
+  void taSoundHit(uint8_t cmd, uint32_t now){
+    if(cmd >= 32) return;
+    if(!tourney::gameActive() || tourney::paused()) return;
+    if(!tourney::taBonus()) return;
+#ifndef BOARD_C3
+    if(wavplayer::loopMask() & (1u << cmd)) return;    // drone/loop: not a scoring event
+#endif
+    if(taSndMs[cmd] && (now - taSndMs[cmd]) < TA_SND_CD_MS) return;
+    taSndMs[cmd] = now ? now : 1;                      // 0 means "never", so skip that tick
+    tourney::addBonus(tourney::taBonus(), now);
+  }
+
+  void taTick(){
+    uint32_t now = millis();
+    // Always drain the sound FIFO, even with no game running: stale commands must not pile up
+    // and pay out in a burst at the next start.
+    uint8_t cmd; while(fpgalink::popSound(cmd)) taSoundHit(cmd, now);
+
+    const bool ta = (tourney::curMode() == 1);
+    // Keep the FPGA flags alive while a session is armed or running. setCtrl() is idempotent and
+    // only writes on change; dispinject::tick() does the 4 Hz repeat the 2 s fail-safe needs.
+    if(ta && (tourney::armed() > 0 || tourney::gameActive()))
+      dispinject::setCtrl(dispinject::CTRL_AUTORESTART | dispinject::CTRL_TA_DISPLAY);
+
+    static bool lastGip = false;
+    bool gip = fpgalink::gameInProgress();
+    if(gip != lastGip){ lastGip = gip;
+      if(ta){
+        if(gip){
+          if(tourney::gameActive()){ tourney::setPaused(false, now); taGapMs = 0; }  // auto-restart served
+          else if(tourney::armed() > 0){
+            tourney::startGame(tourney::armed(), now);
+            memset(taSndMs, 0, sizeof taSndMs); taGapMs = 0;
+            JsonDocument a; a["t"]="timer"; a["id"]=tourney::activePlayer();
+            String s; serializeJson(a,s); txt(nullptr,s);
+          }
+        } else if(tourney::gameActive()){
+          tourney::setPaused(true, now);                  // between games: the clock stops
+          taGapMs = now ? now : 1;                        // 0 is the "no gap open" value
+        }
+        sendTa();
+      }
+    }
+
+    if(!tourney::gameActive()) return;
+    uint32_t rem = tourney::liveScore(now);              // advances the countdown
+
+    // Stream the countdown to the machine display. DIGITS AND BLANK ONLY — the System-80 glass
+    // renders no letters, so the value goes out as-is ("%7lu" in dispinject::send).
+    { static uint32_t lastDisp=0;
+      if(now-lastDisp >= TA_DISP_MS){ lastDisp = now; dispinject::send(rem); } }
+    { static uint32_t lastPush=0;
+      if(now-lastPush >= TA_PUSH_MS){ lastPush = now; sendTa(); } }
+
+    if(rem == 0){ taFinish(true); return; }             // clock out -> end the game on the machine
+    // Auto-restart failed (3 attempts exhausted, machine off, link down): close the session and
+    // keep the remaining points rather than pausing forever.
+    if(tourney::paused() && taGapMs && (now-taGapMs) >= TA_GAP_MS) taFinish(false);
+  }
+  // ======================= end time-attack engine ==========================================
 
   // game-select reference (games.txt): FPGA No -> romname, for the Déploiement tab.
   void sendGameList(AsyncWebSocketClient*c){
@@ -158,6 +278,15 @@ namespace {
     Serial.println("[diag] bus released -> Hi-Z (FPGA owns SPI)");
     sendInfo(nullptr); sendArr("sw",sw,8,nullptr); sendStatus();
   }
+  // one 20-char row to the 80B glass (lisyctrl 0x50..0x77; disp80b_diag streams it)
+  void writeDispRow(int p, const char* txt){
+    bool end=false;
+    for(int i=0;i<20;i++){
+      char ch=' ';
+      if(!end){ if(txt[i]) ch=toupper((unsigned char)txt[i]); else end=true; }
+      bridgeWrite(0x50 + p*20 + i, (uint8_t)ch);
+    }
+  }
   void busAcquire(){
     SPI.begin(PIN_SPI_SCLK,PIN_SPI_MISO,PIN_SPI_MOSI,-1);   // shared bus, no hardware CS
     busOwned=true;
@@ -171,6 +300,10 @@ namespace {
     outputs=false; blink=false;
     memset(lamps,0,sizeof(lamps)); memset(sw,0,sizeof(sw));
     strncpy(busmode,(lisyId==0x80)?"diag":"bus?",sizeof(busmode)-1); busmode[sizeof(busmode)-1]=0;
+    // welcome banner on the 80B glass: mode + where to point the browser
+    char l2[24]; snprintf(l2,sizeof(l2),"WEB %s", netIp());
+    writeDispRow(0, "PSTORE DIAG MODE");
+    writeDispRow(1, l2);
     Serial.printf("[diag] bus acquired: lisy ID=0x%02X status=0x%02X\n",lisyId,st);
     sendInfo(nullptr); sendArr("lamps",lamps,6,nullptr); sendArr("sw",sw,8,nullptr); sendStatus();
   }
@@ -193,7 +326,9 @@ void diag::setInfo(const char*f,uint32_t id,const char*m,const char*i){
 void diag::onConnect(AsyncWebSocketClient*c){
   sendInfo(c); sendArr("lamps",lamps,6,c); sendArr("sw",sw,8,c);
   sendArr("sound",snd,4,c); sendArr("dip",dipv,4,c); sendSndInfo(c); sendSysInfo(c); sendTourney(c);
+  sendTa();                                    // live time-attack state (countdown, arm, FPGA flags)
   JsonDocument d; d["t"]="status"; d["outputs"]=outputs?1:0; d["wd"]=wd_tripped?1:0;
+  addBall(d);
   String s; serializeJson(d,s); c->text(s);
 }
 
@@ -269,19 +404,34 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
     tourney::applyScores(sc,n); sendTourney(nullptr); }
   else if(!strcmp(cmd,"t_mode"))   { tourney::setMode((uint8_t)(d["mode"]|0),  // 0 score / 1 time-attack
     (uint32_t)(d["start"]|0), (uint32_t)(d["decay"]|0));
+    if(tourney::curMode()!=1){ tourney::arm(0); dispinject::setCtrl(0); }      // leaving TA disarms the FPGA
     pushTaConfig(tourney::taStart(), tourney::taDecay());                      // sync FPGA on-display countdown
-    sendTourney(nullptr); }
-  else if(!strcmp(cmd,"t_start"))  { tourney::startGame(d["id"]|0, millis());   // time-attack: start the clock
-    JsonDocument a; a["t"]="timer"; a["id"]=tourney::activePlayer(); String s; serializeJson(a,s); txt(nullptr,s); }
-  else if(!strcmp(cmd,"t_stop"))   { uint32_t sc=tourney::stopGame(millis());   // stop -> record time score
-    JsonDocument a; a["t"]="timer"; a["id"]=0; a["score"]=sc; String s; serializeJson(a,s); txt(nullptr,s);
-    sendTourney(nullptr); }
+    sendTourney(nullptr); sendTa(); }
+  else if(!strcmp(cmd,"t_bonus"))  { tourney::setBonus((uint32_t)(d["v"]|0),    // time bonus per sound cue + cap
+    (uint32_t)(d["cap"]|0)); sendTourney(nullptr); sendTa(); }
+  else if(!strcmp(cmd,"t_start"))  { tourney::startGame(d["id"]|0, millis());   // time-attack: start the clock now
+    memset(taSndMs,0,sizeof taSndMs); taGapMs=0;
+    if(tourney::gameActive()) dispinject::setCtrl(dispinject::CTRL_AUTORESTART|dispinject::CTRL_TA_DISPLAY);
+    JsonDocument a; a["t"]="timer"; a["id"]=tourney::activePlayer(); String s; serializeJson(a,s); txt(nullptr,s);
+    sendTa(); }
+  else if(!strcmp(cmd,"t_stop"))   { taFinish(true); }        // stop now: record + end the game on the machine
+  else if(!strcmp(cmd,"t_pause"))  { tourney::setPaused(((int)(d["v"]|0))!=0, millis()); sendTa(); }
+  else if(!strcmp(cmd,"t_top"))    { tourney::addBonus((uint32_t)(d["v"]|0), millis()); sendTa(); }  // manual top-up
+  else if(!strcmp(cmd,"t_ta"))     { sendTa(); }              // UI asks for the live time-attack state
   else if(!strcmp(cmd,"t_fpga"))   {                                 // arm FPGA tournament mode (lisyctrl CTRL2)
     if(busOwned){ bool on=(int)(d["on"]|0)!=0; bridgeWrite(REG_CTRL2, on?0x01:0x00);
       tourneyFpga=(bridgeRead(REG_CTRL2)&1)!=0; }                    // read back the latched value
     JsonDocument a; a["t"]="tfpga"; a["on"]=tourneyFpga?1:0; a["bus"]=busOwned?1:0;
     String s; serializeJson(a,s); txt(nullptr,s); }
-  else if(!strcmp(cmd,"t_arm"))    { tourney::arm(d["id"]|0); sendTourney(nullptr); }  // auto-time this player
+  // Arm a player: from now on the FPGA auto-restarts games (ctrl bit0) and shows our countdown
+  // (bit1), and the countdown starts by itself at the next $0072 game start. id 0 = disarm.
+  else if(!strcmp(cmd,"t_arm"))    { int id=d["id"]|0; tourney::arm(id);
+    if(tourney::armed()>0 && tourney::curMode()==1)
+      dispinject::setCtrl(dispinject::CTRL_AUTORESTART|dispinject::CTRL_TA_DISPLAY);
+    else if(!tourney::gameActive()) dispinject::setCtrl(0);
+    sendTourney(nullptr); sendTa(); }
+  else if(!strcmp(cmd,"t_disarm")) { tourney::arm(0);                          // disarm, keep any running game
+    if(!tourney::gameActive()) dispinject::setCtrl(0); sendTourney(nullptr); sendTa(); }
   else if(!strcmp(cmd,"sndtheme")) {                                  // load a game's PSOWAV set
 #ifndef BOARD_C3
     const char* nm=d["name"]|""; if(nm[0]) wavplayer::setTheme(nm);
@@ -296,9 +446,27 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
   else if(!strcmp(cmd,"reboot"))  { rebootAt = millis() + 500;        // reboot the ESP (deploy tab)
     JsonDocument a; a["t"]="toast"; a["m"]="redémarrage de l'ESP…"; String s; serializeJson(a,s); txt(nullptr,s);
     Serial.println("[sys] reboot requested via web"); }
-  else if(!strcmp(cmd,"disp")) {
-    if(!outputs) return; Serial.printf("[diag] disp %d='%s'\n",(int)(d["p"]|0),(const char*)(d["txt"]|""));
-    // TODO: encode text -> SEG_A/B/C (lisyctrl 0x40..0x42)
+  else if(!strcmp(cmd,"exit"))    { exitAt = millis() + 60;           // leave diag: pulse the board reset (S8) line
+    JsonDocument a; a["t"]="toast"; a["m"]="sortie du test — le jeu redémarre…"; String s; serializeJson(a,s); txt(nullptr,s);
+    Serial.println("[diag] exit-diag requested via web"); }
+  else if(!strcmp(cmd,"disp")) {   // 80B display text: {c:'disp',p:0|1,txt:'...'} -> lisyctrl 0x50..0x77
+    if(!outputs) return;           // row p = 20 chars (space-padded, uppercased); the disp80b_diag FSM
+    int p = d["p"] | 0;            // streams the 10941 latch protocol to the glass (~10 Hz restream)
+    const char* txt = d["txt"] | "";
+    if (p < 0 || p > 1) return;
+    Serial.printf("[diag] disp %d='%s'\n", p, txt);
+    bool end = false;
+    for (int i = 0; i < 20; i++) {
+      char ch = ' ';
+      if (!end) { if (txt[i]) ch = toupper((unsigned char)txt[i]); else end = true; }
+      bridgeWrite(0x50 + p*20 + i, (uint8_t)ch);
+    }
+  }
+  else if(!strcmp(cmd,"seg")) {        // raw display test: {c:'seg',v:[a,b,c]} -> SEG_A/B/C (+ optional u5)
+    if(!outputs) return;               // FPGA auto-scans the digit strobes -> one pattern shows on every digit
+    for(int k=0;k<3;k++) bridgeWrite(REG_SEG_A+k, (uint8_t)(d["v"][k]|0));
+    if(d["u5"].is<int>()) bridgeWrite(REG_U5, (uint8_t)(d["u5"]|0));
+    Serial.printf("[diag] seg %02X %02X %02X\n",(int)(d["v"][0]|0),(int)(d["v"][1]|0),(int)(d["v"][2]|0));
   }
   else if(!strcmp(cmd,"dip")) {
     int i=d["i"]|0, v=(int)d["v"];
@@ -310,21 +478,17 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
 void diag::tick(){
   if(rebootAt && (int32_t)(millis()-rebootAt) > 0){ Serial.println("[sys] restarting"); delay(50); ESP.restart(); }
 
-  // tournament time-attack auto-timer: the FPGA game-state edge starts/stops the clock for the
-  // armed player (no manual start/stop). game_running comes on the link (0xF3/0xF2 -> fpgalink).
-  { static bool lastGr=false; bool gr=fpgalink::gameRunning();
-    if(gr!=lastGr){ lastGr=gr;
-      if(tourney::curMode()==1 && tourney::armed()>0){
-        if(gr){ tourney::startGame(tourney::armed(), millis());
-          JsonDocument a; a["t"]="timer"; a["id"]=tourney::activePlayer(); String s; serializeJson(a,s); txt(nullptr,s); }
-        else  { uint32_t sc=tourney::stopGame(millis());
-          JsonDocument a; a["t"]="timer"; a["id"]=0; a["score"]=sc; String s; serializeJson(a,s); txt(nullptr,s);
-          sendTourney(nullptr); } } } }
-  // option B: stream the live time-attack countdown to the FPGA (separate UART pin) so it shows on
-  // the machine display during gameplay — works while the ESP is OFF the SPI bus. FPGA arm self-
-  // clears when we stop sending (game over). The FPGA injects whatever digits we send (7-seg/16-seg).
-  { static uint32_t lastDisp=0; uint32_t nd=millis();
-    if(tourney::gameActive() && nd-lastDisp>=250){ lastDisp=nd; dispinject::send(tourney::liveScore(nd)); } }
+  if(exitAt && (int32_t)(millis()-exitAt) > 0){ exitAt=0;    // leave diag: brief reset pulse on S8 (GPIO14)
+    Serial.println("[diag] exit -> reset pulse");
+    busRelease();                                            // drop the shared bus first
+    pinMode(PIN_FPGA_RESET, OUTPUT); digitalWrite(PIN_FPGA_RESET, LOW);
+    delay(150);                                              // FPGA sees reset -> lisy_active<='0' + game reloads
+    pinMode(PIN_FPGA_RESET, INPUT); }
+
+  // Time-attack: game start/stop, countdown decay, sound bonuses, the countdown on the machine
+  // display and the FPGA control frames. Deliberately ahead of the bus arbitration below — it
+  // must run while the ESP is OFF the SPI bus, which is the only state a game can be played in.
+  taTick();
 #ifndef BOARD_C3
   // responsive-to-ROM: when the FPGA selects a different game (theme changes), push the new
   // per-ROM sound list to the web UI so the sound pad rebuilds live (no manual refresh).

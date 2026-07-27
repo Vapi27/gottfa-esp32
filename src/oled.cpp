@@ -47,8 +47,10 @@ void tick() {
   disp.display();
 }
 
+bool found() { return present; }
+
 } // namespace oled
 
 #else  // C3: no OLED (no sound-tier pins)
-namespace oled { void begin() {} void tick() {} }
+namespace oled { void begin() {} void tick() {} bool found() { return false; } }
 #endif

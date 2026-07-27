@@ -5,4 +5,5 @@
 namespace oled {
   void begin();   // init I2C + the panel (no-op if absent or on C3)
   void tick();    // refresh ~2 Hz; call from loop()
+  bool found();   // true if a panel answered at begin() — statusled pin-conflict check
 }

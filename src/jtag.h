@@ -18,4 +18,9 @@ namespace jtag {
   uint32_t    shiftIR(uint32_t ir, int nbits);    // Cyclone IV/10 IR length = 10
   uint64_t    shiftDR(uint64_t tdi, int nbits);   // scalar (<=64b); stream version TBD for bitstream
   void        runTest(uint32_t clocks);           // idle clocks in Run-Test/Idle
+
+  // Bulk shift for the XVC server: clock `nbits` TCK toggles, driving TMS/TDI and
+  // capturing TDO from LSB-first byte vectors (tms/tdi/tdo each ceil(nbits/8) bytes).
+  // Does NOT enable/disable the pins — the caller owns enable(true)/enable(false).
+  void        shift(uint32_t nbits, const uint8_t* tms, const uint8_t* tdi, uint8_t* tdo);
 }

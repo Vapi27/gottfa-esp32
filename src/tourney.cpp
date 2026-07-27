@@ -15,8 +15,16 @@ namespace {
   uint8_t  mode = 0;             // 0 = pinball score, 1 = time-attack
   uint32_t startPts = 1000000;   // time-attack: starting points
   uint32_t decayPS  = 10000;     // time-attack: points lost per second
-  int activeId = 0; uint32_t startMs = 0;   // time-attack live timer (transient)
-  int armedId = 0;                          // player armed for FPGA-driven auto-timing
+  uint32_t bonusPts = 25000;     // time-attack: points added per qualifying sound command
+  uint32_t bonusCap = 500000;    // time-attack: max total bonus per game (0 = uncapped)
+  // --- live time-attack countdown (transient, never persisted) ---
+  int      activeId = 0;         // player being timed (0 = idle)
+  uint32_t remain   = 0;         // points left on the clock — THE live score
+  uint32_t accMs    = 0;         // sub-second remainder, so pausing loses no fraction
+  uint32_t lastMs   = 0;         // millis() of the last tickTA
+  bool     taPaused = false;     // frozen (attract gap between auto-restarted games)
+  uint32_t bonusAcc = 0;         // bonus granted so far this game (vs bonusCap)
+  int armedId = 0;                          // player armed for game-start auto-timing
 
   uint32_t ptotal(const Player& p){ uint32_t t = 0; for (int i = 0; i < p.n; i++) t += p.score[i]; return t; }
   uint32_t pbest (const Player& p){ uint32_t b = 0; for (int i = 0; i < p.n; i++) if (p.score[i] > b) b = p.score[i]; return b; }
@@ -25,6 +33,7 @@ namespace {
   void save(){
     JsonDocument d; d["nextId"] = nextId;
     d["mode"] = mode; d["start"] = startPts; d["decay"] = decayPS;   // scoring mode + config
+    d["bonus"] = bonusPts; d["cap"] = bonusCap;                      // time-attack bonus config
     JsonArray a = d["players"].to<JsonArray>();
     for (int i = 0; i < MAXP; i++) if (roster[i].used) {
       JsonObject o = a.add<JsonObject>(); o["id"] = roster[i].id; o["name"] = roster[i].name;
@@ -41,6 +50,7 @@ void begin(){
   JsonDocument d; DeserializationError e = deserializeJson(d, f); f.close(); if (e) return;
   nextId = d["nextId"] | 1;
   mode = d["mode"] | 0; startPts = d["start"] | 1000000u; decayPS = d["decay"] | 10000u;
+  bonusPts = d["bonus"] | 25000u; bonusCap = d["cap"] | 500000u;
   int idx = 0;
   for (JsonObject o : d["players"].as<JsonArray>()) { if (idx >= MAXP) break;
     Player& p = roster[idx]; p.used = true; p.id = o["id"] | 0;
@@ -79,30 +89,78 @@ String roundJson(){
   String r; serializeJson(d, r); return r;
 }
 
-// --- scoring mode + time-attack timer ---
+// --- scoring mode + time-attack countdown ---
 // clamp to 7 decimal digits: the pinball display is 7 chars AND the lisyctrl TA register is 24-bit
 // (<= 16,777,215), so 9,999,999 keeps the ESP-computed score and the FPGA on-display countdown identical.
 void setMode(uint8_t m, uint32_t sp, uint32_t dp){
   mode = m ? 1 : 0;
-  if (sp) startPts = (sp > 9999999u) ? 9999999u : sp;
-  if (dp) decayPS  = (dp > 9999999u) ? 9999999u : dp;
+  if (sp) startPts = (sp > TA_MAX) ? TA_MAX : sp;
+  if (dp) decayPS  = (dp > TA_MAX) ? TA_MAX : dp;
+  save();
+}
+void setBonus(uint32_t bp, uint32_t cap){
+  bonusPts = (bp > TA_MAX) ? TA_MAX : bp;
+  bonusCap = (cap > TA_MAX) ? TA_MAX : cap;                  // 0 = uncapped
   save();
 }
 uint32_t taStart(){ return startPts; }
 uint32_t taDecay(){ return decayPS; }
-void startGame(int id, uint32_t nowMs){ if (find(id)) { activeId = id; startMs = nowMs; } }
+uint32_t taBonus(){ return bonusPts; }
+uint32_t taCap(){ return bonusCap; }
+
+void startGame(int id, uint32_t nowMs){
+  if (!find(id)) return;
+  activeId = id; remain = startPts; accMs = 0; lastMs = nowMs; taPaused = false; bonusAcc = 0;
+}
+// Advance the clock by whole elapsed seconds (the leftover ms are kept in accMs, so pausing and
+// resuming never rounds time away). 64-bit loss: seconds x decay overflows uint32 in ~7 minutes
+// at the maximum decay, which is exactly the old bug that made the score jump back up.
+void tickTA(uint32_t nowMs){
+  if (!activeId) return;
+  uint32_t dt = nowMs - lastMs; lastMs = nowMs;
+  if (taPaused || !dt) return;
+  accMs += dt;
+  uint32_t secs = accMs / 1000; if (!secs) return;
+  accMs -= secs * 1000;
+  uint64_t loss = (uint64_t)secs * (uint64_t)decayPS;
+  remain = (loss >= (uint64_t)remain) ? 0 : (uint32_t)((uint64_t)remain - loss);
+}
+void setPaused(bool p, uint32_t nowMs){
+  if (!activeId || p == taPaused) return;
+  tickTA(nowMs);                                  // bank the time up to the pause point
+  taPaused = p; lastMs = nowMs;
+}
+bool paused(){ return taPaused; }
+// Top up the clock. Cap-limited so a held drone (or any farmable cue) cannot buy infinite time,
+// and clamped to the 7-digit display range.
+uint32_t addBonus(uint32_t pts, uint32_t nowMs){
+  if (!activeId || !pts) return remain;
+  tickTA(nowMs);
+  if (bonusCap) {
+    if (bonusAcc >= bonusCap) return remain;
+    if (bonusAcc + pts > bonusCap) pts = bonusCap - bonusAcc;
+  }
+  bonusAcc += pts;
+  uint64_t v = (uint64_t)remain + (uint64_t)pts;
+  remain = (v > (uint64_t)TA_MAX) ? TA_MAX : (uint32_t)v;
+  return remain;
+}
+uint32_t bonusGiven(){ return bonusAcc; }
 uint32_t stopGame(uint32_t nowMs){
   if (!activeId) return 0;
-  uint32_t secs = (nowMs - startMs) / 1000;
-  uint32_t loss = secs * decayPS;
-  uint32_t sc = (loss >= startPts) ? 0 : (startPts - loss);   // max(0, start - decay*seconds)
-  recordScore(activeId, sc); activeId = 0; return sc;
+  tickTA(nowMs);
+  uint32_t sc = remain;
+  recordScore(activeId, sc);
+  activeId = 0; remain = 0; accMs = 0; taPaused = false; bonusAcc = 0;
+  return sc;
 }
 bool gameActive(){ return activeId != 0; }
-uint32_t liveScore(uint32_t nowMs){               // current countdown (= what the display shows), 0 if idle
+// Current countdown (= what the display shows), 0 if idle. Advance-on-read: any caller, at any
+// rate, sees an up-to-date value without a separate scheduler.
+uint32_t liveScore(uint32_t nowMs){
   if (!activeId) return 0;
-  uint32_t loss = ((nowMs - startMs) / 1000) * decayPS;
-  return (loss >= startPts) ? 0 : (startPts - loss);
+  tickTA(nowMs);
+  return remain;
 }
 int  activePlayer(){ return activeId; }
 void arm(int id){ armedId = find(id) ? id : 0; }
@@ -120,7 +178,8 @@ String json(){
     o["games"] = p.n; o["last"] = p.n ? p.score[p.n - 1] : 0; }
   d["n"] = n;
   d["mode"] = mode; d["start"] = startPts; d["decay"] = decayPS; d["active"] = activeId;  // mode + live timer
-  d["armed"] = armedId;                                                                  // FPGA auto-timer armed player
+  d["bonus"] = bonusPts; d["cap"] = bonusCap;                                            // time-attack bonus config
+  d["armed"] = armedId;                                                                  // auto-timer armed player
   String s; serializeJson(d, s); return s;
 }
 

@@ -12,7 +12,7 @@
 #define CMD_JEDEC  0x9F
 
 static SPIClass nspi(FSPI);
-static const SPISettings CFG(8000000, MSBFIRST, SPI_MODE0);
+static const SPISettings CFG(2000000, MSBFIRST, SPI_MODE0);  // 2 MHz: safe through the 600R series resistors + bus capacitance on the machine build
 
 static inline void csL() { digitalWrite(PIN_SPI_CS_SD, LOW); }
 static inline void csH() { digitalWrite(PIN_SPI_CS_SD, HIGH); }
@@ -46,12 +46,14 @@ static void readData(uint32_t a, uint8_t *d, size_t n) {
 void norprog::begin() {}
 
 bool norprog::enter() {
-  // arbitration: hold the FPGA in reset so it tri-states the shared SPI bus
-  pinMode(PIN_FPGA_RESET, OUTPUT); digitalWrite(PIN_FPGA_RESET, LOW);  // open-drain low
-  delay(50);
+  // Bus grant: pull the board reset line (S8.2) low. With the esp_bus bitstream
+  // patch (2026-07-14) the FPGA then tri-states MOSI/CLK, releases CS_SDcard and
+  // KEEPS the M95256 deselected. NOTE: plain reset never freed the bus on older
+  // bitstreams (the FPGA drove SDcard_*/EEprom_* regardless) — SYS80_bg2+ required.
+  pinMode(PIN_FPGA_RESET, OUTPUT); digitalWrite(PIN_FPGA_RESET, LOW);
+  delay(50);   // 2-FF sync @cpu_clk is us-fast; margin for tri-state + line settle
   pinMode(PIN_SPI_CS_SD, OUTPUT); digitalWrite(PIN_SPI_CS_SD, HIGH);
   nspi.begin(PIN_SPI_SCLK, PIN_SPI_MISO, PIN_SPI_MOSI, PIN_SPI_CS_SD);
-  // TODO: confirm the FPGA released the bus via the Debug-line handshake
   return true;
 }
 

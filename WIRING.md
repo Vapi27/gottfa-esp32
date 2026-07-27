@@ -94,7 +94,35 @@ Card holds: `/config.txt`, `/games.txt`, `/<game>/NNNN-…-snd.wav` (sounds), `/
 | ESP GPIO | → | OLED |
 |---|---|---|
 | **47** `PIN_OLED_SDA` | ↔ | SDA |
-| **48** `PIN_OLED_SCL` | → | SCL |
+| **21** `PIN_OLED_SCL` | → | SCL |
+
+> **SCL moved 48 → 21 (2026-07-09).** GPIO48 is the DevKit's hardwired WS2812 RGB
+> LED: I2C clock traffic on it latched the LED permanently white. GPIO21 is free
+> (the EPROM reader is disabled). One wire to move on an existing build.
+
+## 8b. On-board RGB status LED (WS2812, nothing to wire)
+`PIN_RGB_LED` **48** — soldered on the DevKit. `statusled.cpp` drives it:
+orange breathing = FPGA flash in progress (**do not cut power**), violet = ESP OTA,
+cyan = diag/LISYcontrol, dim green = FPGA link alive, faint red = no link.
+Caveat: the core's `neopixelWrite()` binds its RMT channel to the **first** pin it
+is called with, so `PIN_RGB_LED` must be correct at boot (no runtime pin hunting).
+
+## 8c. SPI NOR game-ROM store — W25Q32 (one-card route A)
+Sits on the **shared bus, on the J3a side of the series resistors** so the FPGA
+reads it directly and the ESP programs it through the 1 kΩ (see §4).
+| W25Q32 6-pin module | → | Bus |
+|---|---|---|
+| VCC | → | **3V3** (2.7–3.6 V; never 5 V) |
+| GND | → | GND |
+| CS | → | J3a.2 (FPGA31) — same /CS as the SD |
+| SLK (=CLK) | → | J3a.5 (FPGA39) |
+| D0 (=DO) | → | J3a.7 (FPGA34) — MISO |
+| D1 (=DI) | → | J3a.3 (FPGA42) — MOSI |
+
+Add a **100 nF** across VCC/GND at the module. `/WP` and `/HOLD` are tied high on
+the 6-pin breakout (a quad-capable module would expose 8 pins). **Remove the FPGA
+microSD when the NOR is in** — same bus, same /CS. Verify with `GET /nor`
+(expects JEDEC **0xEF4016**; auto-detects a swapped D0/D1 silkscreen).
 
 ## 9. Optional coil current-sense
 - **GPIO 1** `PIN_COIL_SENSE` (ADC1_CH0) ← shunt amp/divider (0–3.3 V). Default OFF (`COIL_SENSE_ENABLE 0`).

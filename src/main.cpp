@@ -3,6 +3,7 @@
 #include "board_config.h"
 #include "jtag.h"
 #include "net.h"
+#include "xvc.h"
 #include "wavplayer.h"
 #include "romstore.h"
 #include "epromdump.h"
@@ -12,6 +13,7 @@
 #include "tourney.h"
 #include "dispinject.h"
 #include "oled.h"
+#include "statusled.h"
 
 // In NORMAL mode the FPGA is master of the shared SD/EEPROM SPI bus, so the ESP
 // must present Hi-Z on those lines until it is explicitly granted the bus.
@@ -52,6 +54,7 @@ void setup() {
   netSetFpgaIdcode(id);
 
   netBegin();
+  xvc::begin();                // XVC JTAG-over-WiFi server on :2542 (openFPGALoader --cable xvc-client)
 #ifndef BOARD_C3
   wavplayer::begin();          // SD + PCM5102A I2S polyphonic WAV sound (S3 sound tier)
   romstore::begin();           // game-ROM image store on the SD (/roms/<NN>.img) — one-card foundation
@@ -62,12 +65,15 @@ void setup() {
   fpgalink::begin();           // UART from the FPGA Debug pin: diag-mode token (+ sound on S3)
   dispinject::begin();         // UART TX to FPGA Audio_RX: time-attack display digits (S3; no-op C3)
   oled::begin();               // optional SSD1306 status screen (skipped if absent)
+  statusled::begin();          // WS2812 status beacon (after oled: shares GPIO48 on v1.0 kits)
   Serial.println("[boot] ready.");
 }
 
 void loop() {
   fpgalink::poll();            // refresh diag-mode (+ S3: play sounds) before diag::tick reads it
   netLoop();
+  dispinject::tick();          // repeat the FPGA control frame at 4 Hz (its fail-safe trips at 2 s)
   oled::tick();                // refresh the status screen (~2 Hz)
+  statusled::tick();           // RGB beacon: orange=flash FPGA, violet=OTA, cyan=diag, vert=link OK
   delay(2);
 }
