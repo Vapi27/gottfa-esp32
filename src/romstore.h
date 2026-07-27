@@ -30,6 +30,12 @@ void   begin();                                  // check /roms/ + init romcrypt
 
 // Per-variant access. fp=false -> stock (/roms/NN.img), fp=true -> Free Play (/roms/NNfp.img).
 bool   has(int gameNo, bool fp);                 // present (plaintext 16 KB or PSRC container)?
+// One directory walk over /roms filling stock[]/fpv[] with each slot's file size
+// (-1 = absent).  has()/encrypted() probe ONE slot each with an SD.open(), so
+// listing all 63 slots the naive way costs >120 opens on a 1 MHz SPI card --
+// 0.5-4 s, and /roms did exactly that inside a web handler.  This opens only the
+// files that actually exist.  Both arrays must hold MAX_GAME entries.
+void   scan(long* stock, long* fpv);
 bool   encrypted(int gameNo, bool fp);           // stored as an encrypted PSRC container?
 size_t read(int gameNo, bool fp, uint8_t* buf, size_t bufLen);   // 16 KB plaintext (auto-decrypt); IMG_SIZE or 0
 bool   store(int gameNo, bool fp, const uint8_t* plain);         // encrypt + write the variant; true on success

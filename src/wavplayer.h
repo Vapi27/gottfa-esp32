@@ -26,7 +26,7 @@ namespace wavplayer {
                 uint32_t& periodUs, uint32_t& bufMs);
   void mixStatsReset();
   void stopAll();
-  void testTone(int ms);              // HW test: 440 Hz sine straight to I2S (no SD/WAV)
+  bool requestTestTone(int ms);       // HW test: queue a 440 Hz sine (emitted by the mix task; never blocks the caller)
   bool ready();
   // --- status for the web UI (cached; safe to read from another task for display) ---
   const char* curTheme();             // currently loaded game/theme folder

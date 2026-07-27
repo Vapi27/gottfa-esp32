@@ -6,6 +6,7 @@
 #include "romcrypt.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #ifndef BOARD_C3
 #include <Arduino.h>
 #include <SD.h>
@@ -52,9 +53,35 @@ bool encrypted(int gameNo, bool fp) {
   return fileSize(gameNo, fp) == romcrypt::CONT_SIZE;
 }
 
+void scan(long* stock, long* fpv) {
+  for (int i = 0; i < MAX_GAME; i++) { stock[i] = -1; fpv[i] = -1; }
+  if (!g_ready) return;
+  File d = SD.open("/roms");
+  if (!d) return;
+  if (!d.isDirectory()) { d.close(); return; }
+  for (File e = d.openNextFile(); e; e = d.openNextFile()) {
+    const char* nm = e.name();
+    const char* b  = strrchr(nm, '/');            // core dependent: name() may be a full path
+    b = b ? b + 1 : nm;
+    if (b[0] >= '0' && b[0] <= '9' && b[1] >= '0' && b[1] <= '9') {
+      int n = (b[0] - '0') * 10 + (b[1] - '0');
+      if (n >= 0 && n < MAX_GAME) {
+        if      (strcmp(b + 2, ".img")   == 0) stock[n] = (long)e.size();
+        else if (strcmp(b + 2, "fp.img") == 0) fpv[n]   = (long)e.size();
+      }
+    }
+    e.close();
+  }
+  d.close();
+}
+
 int count() {
+  long st[MAX_GAME], fpv[MAX_GAME];
+  scan(st, fpv);
   int n = 0;
-  for (int i = 0; i < MAX_GAME; i++) if (has(i, false) || has(i, true)) n++;
+  for (int i = 0; i < MAX_GAME; i++)
+    if (st[i]  == IMG_SIZE || st[i]  == romcrypt::CONT_SIZE ||
+        fpv[i] == IMG_SIZE || fpv[i] == romcrypt::CONT_SIZE) n++;
   return n;
 }
 
@@ -151,6 +178,7 @@ size_t read(int, bool, uint8_t*, size_t) { return 0; }
 size_t readActive(int, uint8_t*, size_t) { return 0; }
 bool   store(int, bool, const uint8_t*) { return false; }
 int    count() { return 0; }
+void   scan(long* stock, long* fpv) { for (int i = 0; i < MAX_GAME; i++) { stock[i] = -1; fpv[i] = -1; } }
 bool   freePlay() { return false; }
 void   setFreePlay(bool) {}
 

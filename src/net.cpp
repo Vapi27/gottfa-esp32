@@ -4,6 +4,9 @@
 #include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
 #include <Update.h>
+#include <SPI.h>          // SPIClass/SPISettings: used by /nor, /norloop and /sdprobe.
+                          // It used to arrive only transitively through <SD.h>, which is
+                          // #ifndef BOARD_C3, so the C3 build did not see it at all.
 #include "board_config.h"
 #include "net.h"
 #include "diag.h"
@@ -26,8 +29,55 @@
 // scratch buffer for a /romup POST body (auto-freed by AsyncWebServerRequest::_tempObject)
 struct RomUp { uint32_t cap; uint32_t got; uint8_t data[1]; };
 // /wavup streaming state — tracks bytes written vs received to detect a mid-write SD dropout.
+//
+// NOT stored in AsyncWebServerRequest::_tempObject any more (2026-07-27).
+// ESPAsyncWebServer 3.11.0 frees that pointer with plain free():
+//     ~AsyncWebServerRequest()  -> src/WebRequest.cpp:113-115
+//         if (_tempObject != NULL) { free(_tempObject); }
+// i.e. the library contract is "_tempObject must be malloc-family memory".  This
+// struct is not: `File` holds a std::shared_ptr<VFSFileImpl> and `String` owns a
+// heap buffer, so free()ing it skips both destructors.  The old code did
+// `new WavUp()` and relied on its own completion handler running `delete u`
+// first -- which it does on the happy path, but NOT when the client aborts, the
+// socket drops, or the request is destroyed before completion.  On those paths
+// the String buffer leaked, the shared_ptr control block leaked, and the SD file
+// handle was never closed (a permanently lost FatFS max_files slot) leaving a
+// half-written file on the card.
+//
+// A single module-owned slot instead: /wavup writes to ONE file on ONE SD card,
+// so two concurrent uploads were never going to work anyway, and this also gives
+// somewhere to hang a janitor that cleans up after an abandoned upload -- which
+// nothing did before, because the library gives no "request destroyed" callback
+// on this path.
 struct WavUp { File f; String path; size_t total; size_t written; bool opened; bool failed; };
+static WavUp   s_wav;
+static bool    s_wav_busy = false;      // slot in use by an upload in progress
+static uint32_t s_wav_touch = 0;        // millis() of the last body chunk
+
+// Close the file, drop a partial upload, and release the slot.
+static void wavRelease(bool keepFile) {
+  if (s_wav.f) { s_wav.f.flush(); s_wav.f.close(); }
+  if (!keepFile && s_wav.path.length()) SD.remove(s_wav.path);
+  s_wav.path = String();
+  s_wav.total = s_wav.written = 0;
+  s_wav.opened = s_wav.failed = false;
+  s_wav_busy = false;
+}
+
+// Called from netLoop(): reclaim a slot whose client vanished mid-upload.
+static void wavJanitor() {
+  if (!s_wav_busy) return;
+  if (millis() - s_wav_touch < 20000) return;      // 20 s without a chunk = gone
+  Serial.printf("[wavup] abandoned upload of %s after %u/%u bytes - cleaning up\n",
+                s_wav.path.c_str(), (unsigned)s_wav.written, (unsigned)s_wav.total);
+  wavRelease(false);
+}
 #endif
+
+// /fsup upload slot (see the upload handler): one File, one uploader at a time.
+static bool     s_fsup_busy  = false;
+static uint32_t s_fsup_touch = 0;
+static File    *s_fsup_file  = nullptr;
 
 static AsyncWebServer server(80);
 static AsyncWebSocket ws("/ws");
@@ -36,6 +86,389 @@ static String   s_mode = "init";
 static String   s_ip   = "0.0.0.0";
 
 void netSetFpgaIdcode(uint32_t id) { s_idcode = id; }
+
+// ===========================================================================
+// DEFERRED JOB SLOT   (2026-07-27)
+// ===========================================================================
+// WHY.  Every route handler, body handler, upload handler and WebSocket
+// callback registered on an AsyncWebServer runs on AsyncTCP's single
+// `async_tcp` service task -- priority 10, no core affinity, and it is also the
+// LwIP event pump.  Anything slow in a handler therefore stalls ALL http, ALL
+// websocket traffic and the TCP event queue (64 deep, then events are dropped),
+// at a priority above everything else in this firmware.  If the stall starves
+// IDLE0 for 5 s the task watchdog panics and reboots -- and because the task has
+// no core affinity, whether a given stall lands on the monitored idle task is
+// non-deterministic between runs.  This project has already been bitten once:
+// a 30 kHz bit-bang inside a handler rebooted the ESP mid-request and triggered
+// a silent OTA rollback (see NOR_W25Q32 bring-up notes).
+//
+// The offenders are the NOR programming routes (a 16 KB /norflash or /norbig is
+// 4 sector erases at up to 400 ms each + 64 page programs + a byte-at-a-time
+// verify: 0.5-2 s), /nor (~100 ms of SPI probing), /sdprobe, /grant (410 ms, of
+// which 320 ms is a hard no-yield digitalRead busy-wait) and /verify (CRC32 over
+// a whole file at 1 MHz SPI + a linear CSV scan).
+//
+// THE FIX.  One job slot.  Handlers validate their parameters, claim the slot,
+// and return 202 immediately with a job id; netLoop() -- which runs on the
+// Arduino loopTask at priority 1 -- executes the job and stores its JSON result;
+// GET /jobstatus?id=N polls it.  The URLs are unchanged, so existing scripts and
+// bookmarks still work; only the response shape changes, and every 202 carries
+// the poll URL.
+//
+// A SINGLE slot on purpose: all of these routes drive the same shared SPI bus
+// (PIN_SPI_SCLK/MISO/MOSI/CS + the PIN_FPGA_RESET bus grant), so they were never
+// safe to overlap.  A second request while one is running gets 409 instead of
+// silently corrupting the first.  Running them from loopTask additionally
+// serialises them against diag::tick() and the /norloop burst, which already
+// bit-bang the same pins from that task -- that race is gone too.
+//
+// This mirrors the mechanism the sound path already uses (wavplayer's FreeRTOS
+// request queue drained by mixTask); nothing new is being invented here.
+// ===========================================================================
+enum JobKind : uint8_t {
+  JOB_NONE = 0, JOB_NOR, JOB_NORWRITE, JOB_NORBIG, JOB_NORFLASH,
+  JOB_SDPROBE, JOB_GRANT, JOB_VERIFY
+};
+// JS_CLAIMED = the slot belongs to a handler that is still filling in its
+// arguments; the runner must NOT start it yet.  jobAccepted() flips it to
+// JS_PENDING as the last thing it does, so a job can never be picked up with a
+// half-written payload / path.
+enum JobState : uint8_t { JS_IDLE = 0, JS_CLAIMED, JS_PENDING, JS_RUNNING, JS_DONE };
+
+struct Job {
+  volatile JobState state   = JS_IDLE;
+  JobKind           kind    = JOB_NONE;
+  uint32_t          id      = 0;
+  uint32_t          t_start = 0;
+  uint32_t          ms      = 0;
+  uint32_t          arg     = 0;        // /norflash: target address
+  void             *payload = nullptr;  // /norflash: the RomUp buffer we took ownership of
+  uint32_t          len     = 0;        // /norflash: payload bytes
+  char              path[64];           // /verify: file to check
+  char              result[400];        // JSON produced by the runner
+};
+static Job     s_job;
+static uint32_t s_job_seq = 0;
+static portMUX_TYPE s_job_mux = portMUX_INITIALIZER_UNLOCKED;
+
+static const char *jobKindName(JobKind k) {
+  switch (k) {
+    case JOB_NOR:      return "nor";
+    case JOB_NORWRITE: return "norwrite";
+    case JOB_NORBIG:   return "norbig";
+    case JOB_NORFLASH: return "norflash";
+    case JOB_SDPROBE:  return "sdprobe";
+    case JOB_GRANT:    return "grant";
+    case JOB_VERIFY:   return "verify";
+    default:           return "none";
+  }
+}
+static const char *jobStateName(JobState s) {
+  switch (s) {
+    case JS_CLAIMED: return "pending";
+    case JS_PENDING: return "pending";
+    case JS_RUNNING: return "running";
+    case JS_DONE:    return "done";
+    default:         return "idle";
+  }
+}
+
+// Claim the slot from the async task.  Returns 0 if a job is still pending or
+// running.  A DONE job's result is kept until the next claim overwrites it, so
+// there is always exactly one result to poll.
+static uint32_t jobClaim(JobKind k) {
+  uint32_t id = 0;
+  portENTER_CRITICAL(&s_job_mux);
+  if (s_job.state == JS_IDLE || s_job.state == JS_DONE) {
+    s_job.kind = k;
+    s_job.id   = ++s_job_seq;
+    s_job.ms   = 0;
+    s_job.arg  = 0;
+    s_job.len  = 0;
+    s_job.path[0]   = 0;
+    s_job.result[0] = 0;
+    // the runner always frees and clears payload before it sets JS_DONE, so
+    // nothing can leak here; the assignment is belt and braces.
+    s_job.payload = nullptr;
+    s_job.state   = JS_CLAIMED;      // armed by jobAccepted(), see JS_CLAIMED
+    id = s_job.id;
+  }
+  portEXIT_CRITICAL(&s_job_mux);
+  return id;
+}
+
+static void jobAccepted(AsyncWebServerRequest *r, uint32_t id, const char *what) {
+  char j[240];
+  snprintf(j, sizeof(j),
+    "{\"accepted\":true,\"async\":true,\"job\":%u,\"kind\":\"%s\","
+    "\"poll\":\"/jobstatus?id=%u\","
+    "\"note\":\"runs from the main loop; poll until state==done, then read result\"}",
+    (unsigned)id, what, (unsigned)id);
+  s_job.state = JS_PENDING;          // arm LAST: all arguments are now in place
+  r->send(202, "application/json", j);
+}
+
+static void jobBusy(AsyncWebServerRequest *r) {
+  char j[200];
+  snprintf(j, sizeof(j),
+    "{\"accepted\":false,\"busy\":true,\"job\":%u,\"kind\":\"%s\",\"state\":\"%s\","
+    "\"poll\":\"/jobstatus\"}",
+    (unsigned)s_job.id, jobKindName(s_job.kind), jobStateName(s_job.state));
+  r->send(409, "application/json", j);
+}
+
+// ---------------------------------------------------------------------------
+// The job bodies.  These are the ORIGINAL handler bodies, moved verbatim except
+// for writing their JSON into s_job.result instead of calling r->send().  They
+// now run on loopTask, so a multi-second erase no longer stalls the network.
+// ---------------------------------------------------------------------------
+
+// /norflash — program the uploaded image into the W25Q at s_job.arg
+static void runNorFlash() {
+  bool ok = false;
+  uint32_t got = s_job.len;
+  if (s_job.payload && got > 0 && got <= 0x4000) {
+    const uint8_t *img = (const uint8_t *)s_job.payload;
+    norprog::enter();
+    uint32_t id = norprog::jedecId();
+    ok = (id == 0xEF4016UL) && norprog::program(s_job.arg, img, got, true);
+    norprog::leave();
+  }
+  if (s_job.payload) { free(s_job.payload); s_job.payload = nullptr; }
+  snprintf(s_job.result, sizeof(s_job.result),
+           "{\"ok\":%s,\"addr\":\"0x%06X\",\"bytes\":%u}",
+           ok ? "true" : "false", (unsigned)s_job.arg, (unsigned)got);
+}
+
+// /norbig — 16 KB erase+program+verify at 0x3F0000 (production-size write test)
+static void runNorBig() {
+  const uint32_t A = 0x3F0000UL;
+  const size_t   N = 0x4000;                 // 16 KB
+  uint8_t *buf = (uint8_t *)malloc(N);
+  if (!buf) {
+    snprintf(s_job.result, sizeof(s_job.result),
+             "{\"ok\":false,\"err\":\"out of heap for the 16KB pattern\"}");
+    return;
+  }
+  for (size_t i = 0; i < N; i++) {
+    uint32_t a = A + i;
+    buf[i] = (uint8_t)((a ^ (a >> 5) ^ (a >> 11) ^ 0x5A) & 0xFF);
+  }
+  norprog::enter();
+  uint32_t id = norprog::jedecId();
+  bool ok = (id == 0xEF4016UL) && norprog::program(A, buf, N, true);
+  norprog::leave();
+  free(buf);
+  snprintf(s_job.result, sizeof(s_job.result),
+           "{\"ok\":%s,\"jedec\":\"0x%06X\",\"addr\":\"0x3F0000\",\"bytes\":%u,"
+           "\"sectors\":%u,\"pages\":%u,\"verdict\":\"%s\"}",
+           ok ? "true" : "false", (unsigned)id, (unsigned)N, (unsigned)(N / 0x1000),
+           (unsigned)(N / 256),
+           ok ? "16KB ERASE+PROGRAM+VERIFY OK - production-size write proven"
+              : (id != 0xEF4016UL ? "chip not found" : "verify FAILED at some page"));
+}
+
+// /norwrite — 512 B erase+program+verify in the last 4 KB sector
+static void runNorWrite() {
+  const uint32_t A = 0x3FF000UL;
+  const size_t   N = 512;
+  static uint8_t pat[N];
+  for (size_t i = 0; i < N; i++) {
+    uint32_t a = A + i;
+    pat[i] = (uint8_t)((a ^ (a >> 8) ^ 0xA5) & 0xFF);
+  }
+  norprog::enter();
+  uint32_t id = norprog::jedecId();
+  if (id != 0xEF4016UL) {
+    norprog::leave();
+    snprintf(s_job.result, sizeof(s_job.result),
+             "{\"ok\":false,\"jedec\":\"0x%06X\",\"err\":\"chip not found\"}", (unsigned)id);
+    return;
+  }
+  bool ok = norprog::program(A, pat, N, true);       // erase + program + verify
+  norprog::leave();
+  snprintf(s_job.result, sizeof(s_job.result),
+           "{\"ok\":%s,\"jedec\":\"0x%06X\",\"addr\":\"0x3FF000\",\"bytes\":%u,"
+           "\"verdict\":\"%s\"}",
+           ok ? "true" : "false", (unsigned)id, (unsigned)N,
+           ok ? "ERASE+PROGRAM+VERIFY OK - norprog chain proven"
+              : "verify FAILED - data did not stick");
+}
+
+// /nor — breadboard/machine JEDEC probe, both D0/D1 assignments, 3 clock rates
+static void runNorProbe() {
+  pinMode(PIN_FPGA_RESET, OUTPUT); digitalWrite(PIN_FPGA_RESET, LOW);   // bus grant
+  delay(60);                                                             // tri-state + settle
+  static const uint32_t HZ[] = {1000000, 400000, 100000};
+  uint32_t best = 0; int bestHz = 0; bool bestSwap = false;
+  uint32_t seen[2][3] = {{0}};
+
+  for (int sw = 0; sw < 2 && !bestHz; sw++) {
+    int miso = sw ? PIN_SPI_MOSI : PIN_SPI_MISO;
+    int mosi = sw ? PIN_SPI_MISO : PIN_SPI_MOSI;
+    for (int k = 0; k < 3; k++) {
+      SPIClass s(FSPI);
+      pinMode(PIN_SPI_CS_SD, OUTPUT); digitalWrite(PIN_SPI_CS_SD, HIGH);
+      s.begin(PIN_SPI_SCLK, miso, mosi, PIN_SPI_CS_SD);
+      s.beginTransaction(SPISettings(HZ[k], MSBFIRST, SPI_MODE0));
+      digitalWrite(PIN_SPI_CS_SD, LOW);
+      s.transfer(0x9F);
+      uint32_t v = 0;
+      for (int i = 0; i < 3; i++) v = (v << 8) | s.transfer(0x00);
+      digitalWrite(PIN_SPI_CS_SD, HIGH);
+      s.endTransaction(); s.end();
+      seen[sw][k] = v;
+      if (v == 0xEF4016UL) { best = v; bestHz = HZ[k]; bestSwap = sw; break; }
+      delay(2);
+    }
+  }
+
+  // liveness: with /CS asserted and no clock, a working chip holds DO; nothing
+  // connected leaves the pin floating (reads as whatever the ESP pull gives).
+  pinMode(PIN_SPI_CS_SD, OUTPUT); digitalWrite(PIN_SPI_CS_SD, HIGH);
+  pinMode(PIN_SPI_MISO, INPUT_PULLDOWN); delayMicroseconds(300);
+  uint8_t pd_hi = digitalRead(PIN_SPI_MISO);
+  digitalWrite(PIN_SPI_CS_SD, LOW);      delayMicroseconds(300);
+  uint8_t pd_lo = digitalRead(PIN_SPI_MISO);
+  pinMode(PIN_SPI_MISO, INPUT_PULLUP);   delayMicroseconds(300);
+  uint8_t pu_lo = digitalRead(PIN_SPI_MISO);
+  digitalWrite(PIN_SPI_CS_SD, HIGH);
+  pinMode(PIN_SPI_MISO, INPUT); pinMode(PIN_SPI_CS_SD, INPUT);
+  pinMode(PIN_FPGA_RESET, INPUT);   // release the grant -> FPGA reboots + reloads ROM
+
+  bool floating = (pd_lo == 0) && (pu_lo == 1);
+  const char *verdict =
+    bestHz    ? (bestSwap ? "OK but SWAPPED - D0 to GPIO11, D1 to GPIO13"
+                          : "OK - W25Q32 alive, wiring as documented") :
+    floating  ? "MISO floats even when selected - the module is not driving: dead chip, "
+                "cold joint on its own PCB, or a breadboard contact" :
+                "MISO is driven but the id is wrong - read the marking on the chip";
+  snprintf(s_job.result, sizeof(s_job.result),
+           "{\"expect\":\"0xEF4016\",\"found\":\"0x%06X\",\"okAtHz\":%u,\"swapped\":%s,"
+           "\"normal\":[\"0x%06X\",\"0x%06X\",\"0x%06X\"],"
+           "\"swap\":[\"0x%06X\",\"0x%06X\",\"0x%06X\"],"
+           "\"miso_pulldown_csHigh\":%u,\"miso_pulldown_csLow\":%u,\"miso_pullup_csLow\":%u,"
+           "\"floating\":%s,\"verdict\":\"%s\"}",
+           (unsigned)best, (unsigned)bestHz, bestSwap ? "true" : "false",
+           (unsigned)seen[0][0], (unsigned)seen[0][1], (unsigned)seen[0][2],
+           (unsigned)seen[1][0], (unsigned)seen[1][1], (unsigned)seen[1][2],
+           (unsigned)pd_hi, (unsigned)pd_lo, (unsigned)pu_lo,
+           floating ? "true" : "false", verdict);
+}
+
+// /grant — count CLK/MOSI edges with the bus grant released vs asserted
+static void runGrant() {
+  auto countEdges = [](int pin, uint32_t ms) -> uint32_t {
+    pinMode(pin, INPUT);
+    uint32_t n = 0, t0 = millis();
+    int last = digitalRead(pin);
+    while (millis() - t0 < ms) {
+      int v = digitalRead(pin);
+      if (v != last) { n++; last = v; }
+    }
+    return n;
+  };
+  pinMode(PIN_FPGA_RESET, INPUT);                  // grant released
+  delay(30);
+  uint32_t clk_free  = countEdges(PIN_SPI_SCLK, 80);
+  uint32_t mosi_free = countEdges(PIN_SPI_MOSI, 80);
+  pinMode(PIN_FPGA_RESET, OUTPUT); digitalWrite(PIN_FPGA_RESET, LOW);   // grant asserted
+  delay(60);
+  uint32_t clk_grant  = countEdges(PIN_SPI_SCLK, 80);
+  uint32_t mosi_grant = countEdges(PIN_SPI_MOSI, 80);
+  pinMode(PIN_FPGA_RESET, INPUT);                  // release
+  const char *verdict =
+    (clk_free > 10 && clk_grant <= 2) ? "GRANT WORKS - FPGA traffic stops when asserted" :
+    (clk_free <= 2 && clk_grant <= 2) ? "bus always quiet - FPGA idle (no SD?) or old bitstream in reset-loop" :
+    (clk_grant > 10)                  ? "GRANT FAILS - FPGA still drives CLK while granted (old bitstream?)" :
+                                        "ambiguous - re-run";
+  snprintf(s_job.result, sizeof(s_job.result),
+           "{\"clk_edges_free\":%u,\"mosi_edges_free\":%u,\"clk_edges_granted\":%u,"
+           "\"mosi_edges_granted\":%u,\"verdict\":\"%s\"}",
+           (unsigned)clk_free, (unsigned)mosi_free, (unsigned)clk_grant,
+           (unsigned)mosi_grant, verdict);
+}
+
+#ifndef BOARD_C3
+// /sdprobe — mount the FPGA's own game-ROM card on the shared bus.
+//
+// BUG FIXED 2026-07-27.  This used to call SD.begin(PIN_SPI_CS_SD, bus, ...) on
+// the GLOBAL SD object, which wavplayer::begin() has already mounted on the
+// SOUND card.  Arduino's SDFS::begin() starts with
+//     if (_pdrv != 0xFF) { return true; }
+// (framework-arduinoespressif32 libraries/SD/src/SD.cpp), so the call returned
+// true instantly WITHOUT touching the requested pins: the route reported the
+// sound card's size as if it were the FPGA card -- a false positive every time
+// -- and then SD.end() really did unmount the sound card, so every mixTask read
+// failed until the next reboot.  The probe now refuses to run while the sound
+// card is mounted and says so, instead of lying and breaking the sound.
+static void runSdProbe() {
+  if (wavplayer::ready()) {
+    snprintf(s_job.result, sizeof(s_job.result),
+             "{\"ok\":false,\"err\":\"sound SD is mounted on the global SD object\","
+             "\"why\":\"SDFS::begin() returns true without remounting, so this probe would "
+             "report the SOUND card and SD.end() would unmount it\","
+             "\"do\":\"power up with the sound card removed, or use /nor for a bus check\"}");
+    return;
+  }
+  pinMode(PIN_FPGA_RESET, OUTPUT); digitalWrite(PIN_FPGA_RESET, LOW);   // FPGA held -> bus free
+  delay(50);
+  SPIClass bus(HSPI);
+  bus.begin(PIN_SPI_SCLK, PIN_SPI_MISO, PIN_SPI_MOSI, PIN_SPI_CS_SD);
+  bool ok = SD.begin(PIN_SPI_CS_SD, bus, 400000, "/fpgasd", 2);
+  uint64_t sz = ok ? SD.cardSize() / (1024ULL * 1024ULL) : 0;
+  int type = ok ? (int)SD.cardType() : -1;
+  if (ok) SD.end();
+  bus.end();
+  pinMode(PIN_SPI_SCLK, INPUT); pinMode(PIN_SPI_MOSI, INPUT);           // back to Hi-Z
+  pinMode(PIN_SPI_MISO, INPUT); pinMode(PIN_SPI_CS_SD, INPUT);
+  pinMode(PIN_FPGA_RESET, INPUT);                                       // release the FPGA (reboots)
+  snprintf(s_job.result, sizeof(s_job.result),
+           "{\"ok\":%s,\"type\":%d,\"sizeMB\":%llu}",
+           ok ? "true" : "false", type, (unsigned long long)sz);
+}
+
+// /verify — CRC32 a stored file and look it up in the known-good ROM DB
+static void runVerify() {
+  romdb::Match m;
+  bool ok = romdb::identifyFile(s_job.path, &m);
+  if (!m.crc && !ok) {
+    snprintf(s_job.result, sizeof(s_job.result),
+             "{\"ok\":false,\"err\":\"file not found\",\"path\":\"%s\"}", s_job.path);
+    return;
+  }
+  snprintf(s_job.result, sizeof(s_job.result),
+           "{\"ok\":true,\"crc\":\"%08x\",\"known\":%d,\"game\":\"%s\",\"title\":\"%s\"}",
+           (unsigned)m.crc, m.found ? 1 : 0, m.game, m.title);
+}
+#endif
+
+// Executed from netLoop() on loopTask.  One job at a time, no preemption of the
+// network stack.
+static void jobRun() {
+  if (s_job.state != JS_PENDING) return;
+  s_job.state   = JS_RUNNING;
+  s_job.t_start = millis();
+  switch (s_job.kind) {
+    case JOB_NOR:      runNorProbe(); break;
+    case JOB_NORWRITE: runNorWrite(); break;
+    case JOB_NORBIG:   runNorBig();   break;
+    case JOB_NORFLASH: runNorFlash(); break;
+    case JOB_GRANT:    runGrant();    break;
+#ifndef BOARD_C3
+    case JOB_SDPROBE:  runSdProbe();  break;
+    case JOB_VERIFY:   runVerify();   break;
+#endif
+    default:
+      snprintf(s_job.result, sizeof(s_job.result), "{\"ok\":false,\"err\":\"unknown job\"}");
+      break;
+  }
+  if (s_job.payload) { free(s_job.payload); s_job.payload = nullptr; }   // never leak
+  s_job.ms    = millis() - s_job.t_start;
+  s_job.state = JS_DONE;
+  Serial.printf("[job] #%u %s done in %u ms\n",
+                (unsigned)s_job.id, jobKindName(s_job.kind), (unsigned)s_job.ms);
+}
 
 static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
                       AwsEventType type, void *arg, uint8_t *data, size_t len) {
@@ -278,12 +711,19 @@ void netBegin() {
 
   // --- HARDWARE TEST: /beep -> 440 Hz sine straight to the PCM5102A, no SD/WAV ---
   //   Isolates the DAC. If you hear this, I2S+DAC+wiring are good; any WAV silence is the SD.
+  //   FIXED 2026-07-27: this used to call wavplayer::testTone(ms) inline, which
+  //   blocks in i2s_write(..., portMAX_DELAY) for the whole tone -- up to 3 s on
+  //   the AsyncTCP task -- AND wrote I2S_NUM_0 concurrently with mixTask, which
+  //   is the only other writer.  It now goes through the same FreeRTOS request
+  //   queue as /snd, so the tone is generated by mixTask: no blocking, one writer.
   server.on("/beep", HTTP_GET, [](AsyncWebServerRequest *r) {
 #ifndef BOARD_C3
     int ms = r->hasParam("ms") ? r->getParam("ms")->value().toInt() : 800;
     if (ms < 50) ms = 50; if (ms > 3000) ms = 3000;
-    wavplayer::testTone(ms);
-    r->send(200, "text/plain", "beep " + String(ms) + "ms (I2S sine, no SD)");
+    bool ok = wavplayer::requestTestTone(ms);
+    r->send(ok ? 200 : 503, "text/plain",
+            ok ? ("beep " + String(ms) + "ms queued (I2S sine on the mix task, no SD)")
+               : "sound not ready");
 #else
     r->send(501, "text/plain", "no sound tier on C3");
 #endif
@@ -348,15 +788,19 @@ void netBegin() {
 
   // --- verify a stored file against the known-good ROM DB (PinMAME CRCs) ---
   //   GET /verify?path=/dumps/foo.bin   -> {"crc":"...","known":0|1,"game":"...","title":"..."}
+  //   DEFERRED (2026-07-27): a bitwise CRC32 over the whole file in 512-byte reads
+  //   from a 1 MHz SPI card, then a linear scan of /db/roms.csv building a String
+  //   per line -- hundreds of ms to seconds. -> job queue.
   server.on("/verify", HTTP_GET, [](AsyncWebServerRequest *r) {
 #ifndef BOARD_C3
     if (!r->hasParam("path")) { r->send(400, "text/plain", "usage: /verify?path=/dumps/foo.bin"); return; }
-    romdb::Match m;
-    bool ok = romdb::identifyFile(r->getParam("path")->value().c_str(), &m);
-    if (!m.crc && !ok) { r->send(404, "text/plain", "file not found"); return; }
-    String j = "{\"crc\":\"" + String(m.crc, HEX) + "\",\"known\":" + (m.found ? "1" : "0") +
-               ",\"game\":\"" + String(m.game) + "\",\"title\":\"" + String(m.title) + "\"}";
-    r->send(200, "application/json", j);
+    String path = r->getParam("path")->value();
+    if (path.length() >= (int)sizeof(s_job.path)) { r->send(400, "text/plain", "path too long"); return; }
+    uint32_t id = jobClaim(JOB_VERIFY);
+    if (!id) { jobBusy(r); return; }
+    strncpy(s_job.path, path.c_str(), sizeof(s_job.path) - 1);
+    s_job.path[sizeof(s_job.path) - 1] = 0;
+    jobAccepted(r, id, "verify");
 #else
     r->send(501, "text/plain", "no SD on C3");
 #endif
@@ -366,17 +810,25 @@ void netBegin() {
   //   GET /roms -> {"key":"<hex>","fp":0|1,"games":[{"n":N,"s":stock,"se":stockEnc,"f":fp,"fe":fpEnc}]}
   server.on("/roms", HTTP_GET, [](AsyncWebServerRequest *r) {
 #ifndef BOARD_C3
+    // One directory walk (romstore::scan) instead of has()+encrypted() per slot:
+    // the old loop did up to 6 SD.open() per game x 63 games = ~380 opens on a
+    // 1 MHz SPI card, i.e. 0.5-4 s of blocking inside the AsyncTCP handler. The
+    // web UI fetches this route, so it stays SYNCHRONOUS -- it is just fast now.
+    static long st[romstore::MAX_GAME], fpv[romstore::MAX_GAME];
+    romstore::scan(st, fpv);
+    auto present = [](long sz) { return sz == romstore::IMG_SIZE || sz == romcrypt::CONT_SIZE; };
+    auto enc     = [](long sz) { return sz == romcrypt::CONT_SIZE; };
     String j = "{\"key\":\"" + String(romcrypt::keyId(), HEX) + "\",\"fp\":" +
                (romstore::freePlay() ? "1" : "0") + ",\"games\":[";
     bool first = true;
     for (int i = 0; i < romstore::MAX_GAME; i++) {
-      bool s = romstore::has(i, false), f = romstore::has(i, true);
-      if (!s && !f) continue;
+      bool sv = present(st[i]), f = present(fpv[i]);
+      if (!sv && !f) continue;
       if (!first) j += ',';
       first = false;
       j += "{\"n\":" + String(i) +
-           ",\"s\":"  + (s ? "1" : "0") + ",\"se\":" + (romstore::encrypted(i, false) ? "1" : "0") +
-           ",\"f\":"  + (f ? "1" : "0") + ",\"fe\":" + (romstore::encrypted(i, true)  ? "1" : "0") + "}";
+           ",\"s\":"  + (sv ? "1" : "0") + ",\"se\":" + (enc(st[i])  ? "1" : "0") +
+           ",\"f\":"  + (f  ? "1" : "0") + ",\"fe\":" + (enc(fpv[i]) ? "1" : "0") + "}";
     }
     j += "]}";
     r->send(200, "application/json", j);
@@ -418,18 +870,16 @@ void netBegin() {
   server.on("/wavup", HTTP_POST,
     [](AsyncWebServerRequest *r) {
 #ifndef BOARD_C3
-      WavUp *u = (WavUp *)r->_tempObject;
       bool ok = false;
-      if (u) {
-        if (u->f) { u->f.flush(); u->f.close(); }        // commit to the card
+      if (s_wav_busy) {
         // Success only if the file opened, every byte was written, and the final
         // on-card size matches what was received (catches a mid-write SD dropout).
-        if (u->opened && !u->failed && u->written == u->total) {
-          File chk = SD.open(u->path, FILE_READ);
-          if (chk) { ok = (chk.size() == u->total); chk.close(); }
+        if (s_wav.f) { s_wav.f.flush(); s_wav.f.close(); }
+        if (s_wav.opened && !s_wav.failed && s_wav.written == s_wav.total) {
+          File chk = SD.open(s_wav.path, FILE_READ);
+          if (chk) { ok = (chk.size() == s_wav.total); chk.close(); }
         }
-        if (!ok) SD.remove(u->path);                     // don't leave a half file
-        delete u; r->_tempObject = nullptr;
+        wavRelease(ok);                                  // keeps the file only if ok
       }
       r->send(ok ? 200 : 500, "text/plain", ok ? "ok" : "write failed (SD?)");
 #else
@@ -441,22 +891,24 @@ void netBegin() {
 #ifndef BOARD_C3
       if (index == 0) {
         if (!r->hasParam("dir") || !r->hasParam("name")) return;
+        if (s_wav_busy) return;                          // another upload owns the slot
         String dir = "/" + r->getParam("dir")->value();
         if (!SD.exists(dir)) SD.mkdir(dir);
-        WavUp *u = new WavUp();
-        u->path = dir + "/" + r->getParam("name")->value();
-        u->total = total; u->written = 0; u->opened = false; u->failed = false;
-        SD.remove(u->path);
-        u->f = SD.open(u->path, FILE_WRITE);
-        u->opened = (bool)u->f;
-        if (!u->opened) u->failed = true;
-        r->_tempObject = u;
+        s_wav_busy   = true;
+        s_wav.path   = dir + "/" + r->getParam("name")->value();
+        s_wav.total  = total; s_wav.written = 0;
+        s_wav.opened = false; s_wav.failed  = false;
+        SD.remove(s_wav.path);
+        s_wav.f      = SD.open(s_wav.path, FILE_WRITE);
+        s_wav.opened = (bool)s_wav.f;
+        if (!s_wav.opened) s_wav.failed = true;
       }
-      WavUp *u = (WavUp *)r->_tempObject;
-      if (u && u->f && !u->failed) {
-        size_t w = u->f.write(data, len);               // may short-write on a flaky SD
-        u->written += w;
-        if (w != len) u->failed = true;                 // detected a partial write
+      if (!s_wav_busy) return;
+      s_wav_touch = millis();
+      if (s_wav.f && !s_wav.failed) {
+        size_t w = s_wav.f.write(data, len);             // may short-write on a flaky SD
+        s_wav.written += w;
+        if (w != len) s_wav.failed = true;               // detected a partial write
       }
 #endif
     });
@@ -548,140 +1000,93 @@ void netBegin() {
   //     with the grant RELEASED vs ASSERTED. On the bg2+ bitstream the FPGA's
   //     SD/EEPROM traffic must vanish when GPIO14 pulls S8.2 low. Proves the
   //     esp_bus patch end-to-end without needing the NOR at all.
+  //     DEFERRED (2026-07-27): 410 ms wall, 320 ms of it a hard no-yield
+  //     digitalRead busy-wait -- the single worst idle-starvation offender in the
+  //     firmware.  Now runs from the main loop.
   server.on("/grant", HTTP_GET, [](AsyncWebServerRequest *r) {
-    auto countEdges = [](int pin, uint32_t ms) -> uint32_t {
-      pinMode(pin, INPUT);
-      uint32_t n = 0, t0 = millis();
-      int last = digitalRead(pin);
-      while (millis() - t0 < ms) {
-        int v = digitalRead(pin);
-        if (v != last) { n++; last = v; }
-      }
-      return n;
-    };
-    pinMode(PIN_FPGA_RESET, INPUT);                  // grant released
-    delay(30);
-    uint32_t clk_free = countEdges(PIN_SPI_SCLK, 80);
-    uint32_t mosi_free = countEdges(PIN_SPI_MOSI, 80);
-    pinMode(PIN_FPGA_RESET, OUTPUT); digitalWrite(PIN_FPGA_RESET, LOW);   // grant asserted
-    delay(60);
-    uint32_t clk_grant = countEdges(PIN_SPI_SCLK, 80);
-    uint32_t mosi_grant = countEdges(PIN_SPI_MOSI, 80);
-    pinMode(PIN_FPGA_RESET, INPUT);                  // release
-    const char *verdict =
-      (clk_free > 10 && clk_grant <= 2) ? "GRANT WORKS - FPGA traffic stops when asserted" :
-      (clk_free <= 2 && clk_grant <= 2) ? "bus always quiet - FPGA idle (no SD?) or old bitstream in reset-loop" :
-      (clk_grant > 10)                  ? "GRANT FAILS - FPGA still drives CLK while granted (old bitstream?)" :
-                                          "ambiguous - re-run";
-    char j[220];
-    snprintf(j, sizeof(j),
-             "{\"clk_edges_free\":%u,\"mosi_edges_free\":%u,\"clk_edges_granted\":%u,"
-             "\"mosi_edges_granted\":%u,\"verdict\":\"%s\"}",
-             (unsigned)clk_free, (unsigned)mosi_free, (unsigned)clk_grant, (unsigned)mosi_grant, verdict);
-    r->send(200, "application/json", j);
+    uint32_t id = jobClaim(JOB_GRANT);
+    if (!id) { jobBusy(r); return; }
+    jobAccepted(r, id, "grant");
   });
 
   // --- Full per-game write test: programs a real 16 KB region (one game slot:
   //     4x 4KB sector erase + 64 page programs + address-derived verify). Proves
   //     norprog::program on production volume. Pattern is (addr^rot^0x5A) so a
   //     misplaced page fails verify. Default slot 0x3F0000 (high, clobbers nothing).
+  //     DEFERRED (2026-07-27): 0.5-2 s of erase/program/verify -> job queue.
+  //     The 16 KB pattern buffer is malloc'd by the runner instead of living in
+  //     BSS for ever (it was 16 KB of permanently resident RAM for a test route).
   server.on("/norbig", HTTP_GET, [](AsyncWebServerRequest *r) {
-    const uint32_t A = 0x3F0000UL;
-    const size_t   N = 0x4000;                 // 16 KB
-    static uint8_t buf[N];
-    for (size_t i = 0; i < N; i++) {
-      uint32_t a = A + i;
-      buf[i] = (uint8_t)((a ^ (a >> 5) ^ (a >> 11) ^ 0x5A) & 0xFF);
-    }
-    uint32_t t0 = millis();
-    norprog::enter();
-    uint32_t id = norprog::jedecId();
-    bool ok = (id == 0xEF4016UL) && norprog::program(A, buf, N, true);   // erase+program+verify
-    norprog::leave();
-    uint32_t dt = millis() - t0;
-    char j[220];
-    snprintf(j, sizeof(j),
-             "{\"ok\":%s,\"jedec\":\"0x%06X\",\"addr\":\"0x3F0000\",\"bytes\":%u,"
-             "\"sectors\":%u,\"pages\":%u,\"ms\":%u,\"verdict\":\"%s\"}",
-             ok ? "true" : "false", (unsigned)id, (unsigned)N, (unsigned)(N/0x1000),
-             (unsigned)(N/256), (unsigned)dt,
-             ok ? "16KB ERASE+PROGRAM+VERIFY OK - production-size write proven"
-                : (id != 0xEF4016UL ? "chip not found" : "verify FAILED at some page"));
-    r->send(200, "application/json", j);
+    uint32_t id = jobClaim(JOB_NORBIG);
+    if (!id) { jobBusy(r); return; }
+    jobAccepted(r, id, "norbig");
   });
 
   // --- W25Q NOR write test: exercises the real norprog path end-to-end on the
   //     LAST 4 KB sector (0x3FF000 — far from any game image at N*0x4000). The
   //     pattern is address-derived, so a page landing at the wrong address fails
-  //     the verify (a constant pattern would not catch that). Reports erase state,
-  //     program+verify result, an independent 16-byte readback, and timings.
+  //     the verify (a constant pattern would not catch that).
+  //     DEFERRED (2026-07-27): 100-500 ms of erase/program/verify -> job queue.
+  //     The comment used to promise "an independent 16-byte readback"; the code
+  //     for it was a `bool rb_ok = true;` and an empty block declaring a function
+  //     that was never called, and rb_ok was never read.  Removed rather than
+  //     left as a claim the code does not honour -- norprog::program(verify=true)
+  //     already reads every byte back and compares it.
   server.on("/norwrite", HTTP_GET, [](AsyncWebServerRequest *r) {
-    const uint32_t A = 0x3FF000UL;
-    const size_t   N = 512;
-    static uint8_t pat[N], back[16];
-    for (size_t i = 0; i < N; i++) {
-      uint32_t a = A + i;
-      pat[i] = (uint8_t)((a ^ (a >> 8) ^ 0xA5) & 0xFF);
-    }
-    uint32_t t0 = millis();
-    norprog::enter();
-    uint32_t id = norprog::jedecId();
-    if (id != 0xEF4016UL) {
-      norprog::leave();
-      char e[96];
-      snprintf(e, sizeof(e), "{\"ok\":false,\"jedec\":\"0x%06X\",\"err\":\"chip not found\"}", (unsigned)id);
-      r->send(200, "application/json", e);
-      return;
-    }
-    bool ok = norprog::program(A, pat, N, true);       // erase + program + verify
-    // independent readback of the first 16 bytes (belt and braces)
-    bool rb_ok = true;
-    {
-      extern void norprog_read(uint32_t, uint8_t*, size_t);   // not exported; do it inline:
-    }
-    norprog::leave();
-    uint32_t dt = millis() - t0;
-    char j[200];
-    snprintf(j, sizeof(j),
-             "{\"ok\":%s,\"jedec\":\"0x%06X\",\"addr\":\"0x3FF000\",\"bytes\":%u,"
-             "\"ms\":%u,\"verdict\":\"%s\"}",
-             ok ? "true" : "false", (unsigned)id, (unsigned)N, (unsigned)dt,
-             ok ? "ERASE+PROGRAM+VERIFY OK - norprog chain proven"
-                : "verify FAILED - data did not stick");
-    r->send(200, "application/json", j);
+    uint32_t id = jobClaim(JOB_NORWRITE);
+    if (!id) { jobBusy(r); return; }
+    jobAccepted(r, id, "norwrite");
   });
 
   // --- NOR image upload: POST /norflash?addr=0xNNNNNN with a raw <=16 KB image
   //     body -> programs it into the W25Q at addr (erase+program+verify) via the
   //     esp_bus grant. Used to load a game ROM the FPGA's nor_flash.vhd then reads.
+  //     DEFERRED (2026-07-27): the body is still buffered here (a memcpy per TCP
+  //     chunk, microseconds), but the 0.5-2 s erase+program+verify now runs from
+  //     the main loop.  Same URL, 202 + job id, poll /jobstatus.
+  //     Also guarded for BOARD_C3: RomUp only exists in the S3 build, so the C3
+  //     build did not compile this file at all.
   server.on("/norflash", HTTP_POST,
     [](AsyncWebServerRequest *r){
-      // completion handler (body already consumed below)
+#ifndef BOARD_C3
       RomUp *u = (RomUp*)r->_tempObject;
-      bool ok = false; uint32_t addr = 0;
+      uint32_t addr = 0;
       if (r->hasParam("addr")) addr = strtoul(r->getParam("addr")->value().c_str(), nullptr, 0);
-      if (u && u->got > 0 && u->got <= 0x4000) {
-        norprog::enter();
-        uint32_t id = norprog::jedecId();
-        ok = (id == 0xEF4016UL) && norprog::program(addr, u->data, u->got, true);
-        norprog::leave();
+      if (!u || u->got == 0) {
+        r->send(400, "application/json",
+                "{\"ok\":false,\"err\":\"empty body, or more than 16384 bytes\"}");
+        return;
       }
-      char j[140];
-      snprintf(j, sizeof(j), "{\"ok\":%s,\"addr\":\"0x%06X\",\"bytes\":%u}",
-               ok ? "true":"false", (unsigned)addr, (unsigned)(u ? u->got : 0));
-      r->send(200, "application/json", j);
+      uint32_t id = jobClaim(JOB_NORFLASH);
+      if (!id) { jobBusy(r); return; }   // slot busy: the library frees _tempObject as usual
+      // OWNERSHIP TRANSFER.  The job now owns the malloc'd RomUp and frees it when
+      // it finishes.  Clearing _tempObject is what stops ~AsyncWebServerRequest()
+      // free()ing the buffer out from under the runner when this response completes.
+      s_job.arg      = addr;
+      s_job.payload  = u;
+      s_job.len      = u->got;
+      r->_tempObject = nullptr;
+      jobAccepted(r, id, "norflash");
+#else
+      r->send(501, "text/plain", "no NOR image upload on C3");
+#endif
     },
     nullptr,   // no multipart
     [](AsyncWebServerRequest *r, uint8_t *data, size_t len, size_t idx, size_t total){
+#ifndef BOARD_C3
       if (idx == 0) {
         if (total == 0 || total > 0x4000) { return; }
-        RomUp *u = (RomUp*)malloc(sizeof(RomUp) + total);
+        // sizeof(RomUp)-1+total, matching /romup: RomUp ends in data[1], so the
+        // -1 is the byte already counted in the struct.  (The two sites used to
+        // disagree by one byte for no reason.)
+        RomUp *u = (RomUp*)malloc(sizeof(RomUp) - 1 + total);
         if (!u) return;
         u->cap = total; u->got = 0;
         r->_tempObject = u;
       }
       RomUp *u = (RomUp*)r->_tempObject;
       if (u && u->got + len <= u->cap) { memcpy(u->data + u->got, data, len); u->got += len; }
+#endif
     });
 
   // --- W25Q NOR probe  // --- W25Q NOR probe, BREADBOARD mode: ESP + module only, direct wires, no series
@@ -694,92 +1099,26 @@ void netBegin() {
   //     SYS80_bg2+ bitstream the FPGA then tri-states MOSI/CLK, releases the NOR's
   //     CS net and keeps the M95256 deselected. On older bitstreams the FPGA keeps
   //     driving the bus and this probe reads garbage — load bg2 first.
+  //     DEFERRED (2026-07-27): ~100 ms of SPI probing + delays -> job queue.
   server.on("/nor", HTTP_GET, [](AsyncWebServerRequest *r) {
-    pinMode(PIN_FPGA_RESET, OUTPUT); digitalWrite(PIN_FPGA_RESET, LOW);   // bus grant
-    delay(60);                                                             // tri-state + settle
-    // Drive strength: default. On the machine bus the 600R series resistors already
-    // damp the edges, so the weakest-drive trick (needed on bare direct wires) would
-    // now be TOO weak to swing the NOR's inputs through 600R + bus capacitance.
-    static const uint32_t HZ[] = {1000000, 400000, 100000};
-    uint32_t best = 0; int bestHz = 0; bool bestSwap = false;
-    uint32_t seen[2][3] = {{0}};
-
-    for (int sw = 0; sw < 2 && !bestHz; sw++) {
-      int miso = sw ? PIN_SPI_MOSI : PIN_SPI_MISO;
-      int mosi = sw ? PIN_SPI_MISO : PIN_SPI_MOSI;
-      for (int k = 0; k < 3; k++) {
-        SPIClass s(FSPI);
-        pinMode(PIN_SPI_CS_SD, OUTPUT); digitalWrite(PIN_SPI_CS_SD, HIGH);
-        s.begin(PIN_SPI_SCLK, miso, mosi, PIN_SPI_CS_SD);
-        s.beginTransaction(SPISettings(HZ[k], MSBFIRST, SPI_MODE0));
-        digitalWrite(PIN_SPI_CS_SD, LOW);
-        s.transfer(0x9F);
-        uint32_t v = 0;
-        for (int i = 0; i < 3; i++) v = (v << 8) | s.transfer(0x00);
-        digitalWrite(PIN_SPI_CS_SD, HIGH);
-        s.endTransaction(); s.end();
-        seen[sw][k] = v;
-        if (v == 0xEF4016UL) { best = v; bestHz = HZ[k]; bestSwap = sw; break; }
-        delay(2);
-      }
-    }
-
-    // liveness: with /CS asserted and no clock, a working chip holds DO; nothing
-    // connected leaves the pin floating (reads as whatever the ESP pull gives).
-    pinMode(PIN_SPI_CS_SD, OUTPUT); digitalWrite(PIN_SPI_CS_SD, HIGH);
-    pinMode(PIN_SPI_MISO, INPUT_PULLDOWN); delayMicroseconds(300);
-    uint8_t pd_hi = digitalRead(PIN_SPI_MISO);
-    digitalWrite(PIN_SPI_CS_SD, LOW);      delayMicroseconds(300);
-    uint8_t pd_lo = digitalRead(PIN_SPI_MISO);
-    pinMode(PIN_SPI_MISO, INPUT_PULLUP);   delayMicroseconds(300);
-    uint8_t pu_lo = digitalRead(PIN_SPI_MISO);
-    digitalWrite(PIN_SPI_CS_SD, HIGH);
-    pinMode(PIN_SPI_MISO, INPUT); pinMode(PIN_SPI_CS_SD, INPUT);
-    pinMode(PIN_FPGA_RESET, INPUT);   // release the grant -> FPGA reboots + reloads ROM
-
-    // A pin that follows the ESP's own pull in both directions is NOT being driven.
-    bool floating = (pd_lo == 0) && (pu_lo == 1);
-    const char *verdict =
-      bestHz    ? (bestSwap ? "OK but SWAPPED - D0 to GPIO11, D1 to GPIO13"
-                            : "OK - W25Q32 alive, wiring as documented") :
-      floating  ? "MISO floats even when selected - the module is not driving: dead chip, "
-                  "cold joint on its own PCB, or a breadboard contact" :
-                  "MISO is driven but the id is wrong - read the marking on the chip";
-    char j[340];
-    snprintf(j, sizeof(j),
-             "{\"expect\":\"0xEF4016\",\"found\":\"0x%06X\",\"okAtHz\":%u,\"swapped\":%s,"
-             "\"normal\":[\"0x%06X\",\"0x%06X\",\"0x%06X\"],"
-             "\"swap\":[\"0x%06X\",\"0x%06X\",\"0x%06X\"],"
-             "\"miso_pulldown_csHigh\":%u,\"miso_pulldown_csLow\":%u,\"miso_pullup_csLow\":%u,"
-             "\"floating\":%s,\"verdict\":\"%s\"}",
-             (unsigned)best, (unsigned)bestHz, bestSwap ? "true" : "false",
-             (unsigned)seen[0][0], (unsigned)seen[0][1], (unsigned)seen[0][2],
-             (unsigned)seen[1][0], (unsigned)seen[1][1], (unsigned)seen[1][2],
-             (unsigned)pd_hi, (unsigned)pd_lo, (unsigned)pu_lo,
-             floating ? "true" : "false", verdict);
-    r->send(200, "application/json", j);
+    uint32_t id = jobClaim(JOB_NOR);
+    if (!id) { jobBusy(r); return; }
+    jobAccepted(r, id, "nor");
   });
 
   // --- FPGA-SD direct probe (bring-up): hold the FPGA in reset, master the
   //     shared J3a bus, and run a full SD init on the FPGA's game-ROM card.
   //     Answers "is the card/socket alive" independently of any bitstream.
+  //     DEFERRED (2026-07-27) and FIXED: see runSdProbe() -- it used to report the
+  //     SOUND card by mistake and then unmount it, killing sound until reboot.
   server.on("/sdprobe", HTTP_GET, [](AsyncWebServerRequest *r) {
-    pinMode(PIN_FPGA_RESET, OUTPUT); digitalWrite(PIN_FPGA_RESET, LOW);   // FPGA held -> bus free
-    delay(50);
-    SPIClass bus(HSPI);
-    bus.begin(PIN_SPI_SCLK, PIN_SPI_MISO, PIN_SPI_MOSI, PIN_SPI_CS_SD);
-    bool ok = SD.begin(PIN_SPI_CS_SD, bus, 400000, "/fpgasd", 2);
-    uint64_t sz = ok ? SD.cardSize() / (1024ULL*1024ULL) : 0;
-    int type = ok ? (int)SD.cardType() : -1;
-    if (ok) SD.end();
-    bus.end();
-    pinMode(PIN_SPI_SCLK, INPUT); pinMode(PIN_SPI_MOSI, INPUT);           // back to Hi-Z
-    pinMode(PIN_SPI_MISO, INPUT); pinMode(PIN_SPI_CS_SD, INPUT);
-    pinMode(PIN_FPGA_RESET, INPUT);                                       // release the FPGA (reboots)
-    char j[96];
-    snprintf(j, sizeof(j), "{\"ok\":%s,\"type\":%d,\"sizeMB\":%llu}",
-             ok ? "true" : "false", type, (unsigned long long)sz);
-    r->send(200, "application/json", j);
+#ifndef BOARD_C3
+    uint32_t id = jobClaim(JOB_SDPROBE);
+    if (!id) { jobBusy(r); return; }
+    jobAccepted(r, id, "sdprobe");
+#else
+    r->send(501, "text/plain", "no SD on C3");
+#endif
   });
 
   // --- raw pin peek (bring-up): read a wired-to-machine line's level ---
@@ -801,16 +1140,57 @@ void netBegin() {
       r->send(200, "text/plain", "OK — fichier écrit");
     },
     [](AsyncWebServerRequest *r, String fn, size_t idx, uint8_t *data, size_t len, bool done){
+      // `f` is FUNCTION-static, i.e. ONE slot shared by every request -- two
+      // overlapping uploads used to interleave into a single file handle and
+      // corrupt each other silently.  s_busy makes the second one a no-op (the
+      // completion handler reports it); it is also released on `done`, and by the
+      // netLoop janitor if the client vanishes mid-upload.
       static File f;
       if (!idx) {
+        if (s_fsup_busy) { Serial.println("[fsup] refused: another upload is in progress"); return; }
         String path = r->hasParam("path") ? r->getParam("path")->value() : ("/" + fn);
         if (!path.startsWith("/")) path = "/" + path;
         f = LittleFS.open(path, "w");
+        s_fsup_busy = (bool)f;
+        s_fsup_file = &f;
         Serial.printf("[fsup] begin %s\n", path.c_str());
       }
+      if (!s_fsup_busy) return;
+      s_fsup_touch = millis();
       if (f) f.write(data, len);
-      if (done && f) { f.close(); Serial.printf("[fsup] ok %u bytes\n", (unsigned)(idx+len)); }
+      if (done) {
+        if (f) { f.close(); Serial.printf("[fsup] ok %u bytes\n", (unsigned)(idx+len)); }
+        s_fsup_busy = false; s_fsup_file = nullptr;
+      }
     });
+
+  // --- deferred-job status (see the DEFERRED JOB SLOT block at the top) ---
+  //   GET /jobstatus            -> the current/last job
+  //   GET /jobstatus?id=N       -> that job, or 404 once a newer one replaced it
+  // The routes that used to block (/nor /norbig /norwrite /norflash /sdprobe
+  // /grant /verify) now answer 202 with {"job":N,"poll":"/jobstatus?id=N"}.
+  // Poll until "state":"done", then read "result".
+  //   curl -s esp/norbig ; sleep 3 ; curl -s 'esp/jobstatus'
+  server.on("/jobstatus", HTTP_GET, [](AsyncWebServerRequest *r) {
+    uint32_t want = r->hasParam("id") ? strtoul(r->getParam("id")->value().c_str(), nullptr, 0) : 0;
+    if (want && want != s_job.id) {
+      char j[160];
+      snprintf(j, sizeof(j),
+               "{\"job\":%u,\"state\":\"unknown\",\"current\":%u,"
+               "\"note\":\"only the most recent job is remembered\"}",
+               (unsigned)want, (unsigned)s_job.id);
+      r->send(404, "application/json", j);
+      return;
+    }
+    JobState st = s_job.state;
+    char j[560];
+    snprintf(j, sizeof(j),
+             "{\"job\":%u,\"kind\":\"%s\",\"state\":\"%s\",\"ms\":%u,\"result\":%s}",
+             (unsigned)s_job.id, jobKindName(s_job.kind), jobStateName(st),
+             (unsigned)s_job.ms,
+             (st == JS_DONE && s_job.result[0]) ? s_job.result : "null");
+    r->send(200, "application/json", j);
+  });
 
   server.serveStatic("/", LittleFS, "/").setDefaultFile("index.html");
   server.onNotFound([](AsyncWebServerRequest *r){ r->send(404, "text/plain", "404"); });
@@ -821,6 +1201,19 @@ void netBegin() {
 volatile bool g_norloop = false;
 void netLoop() {
   ws.cleanupClients(); diag::tick();
+  // Deferred work, on loopTask (priority 1) instead of the AsyncTCP service task
+  // (priority 10, also the LwIP event pump).  Running it HERE also serialises it
+  // against diag::tick() and the /norloop burst below, which bit-bang the same
+  // SPI pins from this same task -- they can no longer collide.
+  jobRun();
+#ifndef BOARD_C3
+  wavJanitor();                                  // reclaim an abandoned /wavup (SD)
+#endif
+  if (s_fsup_busy && millis() - s_fsup_touch > 20000) {   // ... and an abandoned /fsup (LittleFS)
+    Serial.println("[fsup] abandoned upload - releasing the slot");
+    if (s_fsup_file && *s_fsup_file) s_fsup_file->close();
+    s_fsup_busy = false; s_fsup_file = nullptr;
+  }
   static uint32_t nl_last = 0;
   if (g_norloop && millis() - nl_last > 100) {
     nl_last = millis();

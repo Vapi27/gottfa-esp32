@@ -83,8 +83,17 @@ namespace {
   };
   Slot slot[wavmix::MAX_VOICES];
 
-  struct Req { uint8_t type; int sound; char theme[24]; };   // 0=play id, 1=set-theme
+  struct Req { uint8_t type; int sound; char theme[24]; };   // 0=play id, 1=set-theme, 2=stop all, 3=test tone (sound=ms)
   QueueHandle_t reqQ = nullptr;
+
+  // /beep test tone.  Generated INSIDE the mix pass (see mixTask) rather than by a
+  // blocking i2s_write loop: the old testTone() ran on whatever task called it --
+  // in practice the AsyncTCP task -- so it (a) stalled the whole web server for up
+  // to 3 s and (b) wrote I2S_NUM_0 concurrently with mixTask, the only other writer
+  // of that channel.  Now the tone is just another thing the single I2S writer emits.
+  volatile int  g_toneFrames = 0;    // frames of tone still to emit
+  double        g_tonePh     = 0.0;
+  double        g_toneStep   = 0.0;
 
   size_t file_read(void* ctx, uint8_t* d, size_t n) { return ((File*)ctx)->read(d, n); }
   // voice adapters: ctx = &Slot, so loop can re-seek the file
@@ -283,6 +292,12 @@ namespace {
   void handleReq(const Req& r) {
     if (r.type == 1) { loadTheme(r.theme); return; }
     if (r.type == 2) { mixer.stopAll(); reapSlots(); return; }   // stop all voices (web UI)
+    if (r.type == 3) {                                          // /beep: arm the 440 Hz test tone
+      g_tonePh   = 0.0;
+      g_toneStep = 2.0 * 3.14159265 * 440.0 / RATE;
+      g_toneFrames = (int)(((long)RATE * r.sound) / 1000);
+      return;
+    }
     int id = S().pick(r.sound, esp_random());             // resolve random/sequential group
     const wavset::Entry* e = S().find(id);
     if (e) startVoice(e);
@@ -312,6 +327,15 @@ namespace {
         int32_t m = ((int32_t)buf[2 * i] + buf[2 * i + 1]) >> 1;
         if (m > 32767) m = 32767; else if (m < -32768) m = -32768;
         out[2 * i] = (int16_t)m; out[2 * i + 1] = (int16_t)m;
+      }
+      if (g_toneFrames > 0) {          // /beep: replace this pass with the synth tone
+        for (int i = 0; i < FRAMES; i++) {
+          int16_t sv = (int16_t)(9000.0 * sin(g_tonePh));   // ~0.27 full-scale, comfortable
+          g_tonePh += g_toneStep; if (g_tonePh > 6.2831853) g_tonePh -= 6.2831853;
+          out[2 * i] = sv; out[2 * i + 1] = sv;
+        }
+        g_toneFrames -= FRAMES;
+        if (g_toneFrames < 0) g_toneFrames = 0;
       }
       reapSlots();
       // Everything above is the pass's REAL work; i2s_write below is pure waiting (it returns
@@ -468,26 +492,21 @@ void stopAll() {
 }
 bool ready()   { return g_ready; }
 
-// --- HARDWARE TEST: synth a 440 Hz sine straight to I2S, no SD/mixer/WAV needed. ---
-// Isolates the PCM5102A DAC from every software path: if you hear this beep, the
-// I2S + DAC + wiring are all good and any silence is a SD/WAV problem instead.
-void testTone(int ms) {
-  if (!g_ready) return;
-  const int freq = 440;
-  const int total = (RATE * ms) / 1000;
-  static int16_t blk[FRAMES * 2];
-  double ph = 0.0, step = 2.0 * 3.14159265 * freq / RATE;
-  int sent = 0;
-  while (sent < total) {
-    for (int i = 0; i < FRAMES; i++) {
-      int16_t s = (int16_t)(9000.0 * sin(ph));     // ~0.27 full-scale, comfortable level
-      ph += step; if (ph > 6.2831853) ph -= 6.2831853;
-      blk[2 * i] = s; blk[2 * i + 1] = s;          // both channels
-    }
-    size_t wrote;
-    i2s_write(I2S_NUM_0, blk, sizeof(blk), &wrote, portMAX_DELAY);
-    sent += FRAMES;
-  }
+// --- HARDWARE TEST: 440 Hz sine straight to the PCM5102A, no SD/mixer/WAV. ---
+// Isolates the DAC from every software path: if you hear this beep, I2S + DAC +
+// wiring are all good and any silence is a SD/WAV problem instead.
+//
+// This used to synthesise AND i2s_write() the whole tone on the CALLER's task,
+// which for the /beep route is AsyncTCP's service task: it blocked every HTTP
+// and WebSocket request for up to 3 s and wrote I2S_NUM_0 at the same time as
+// mixTask.  It is now a queue request like play()/setTheme(); mixTask emits the
+// tone one mix pass at a time, so there is exactly one I2S writer and nothing
+// blocks.  Returns false if the sound tier is not up.
+bool requestTestTone(int ms) {
+  if (!g_ready || !reqQ) return false;
+  if (ms < 50) ms = 50; if (ms > 3000) ms = 3000;
+  Req r; r.type = 3; r.sound = ms; r.theme[0] = 0;
+  return xQueueSend(reqQ, &r, 0) == pdTRUE;
 }
 
 // --- cached status for the web UI (benign cross-task reads, display only) ---
