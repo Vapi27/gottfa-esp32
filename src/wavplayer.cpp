@@ -15,6 +15,7 @@
 #include "wavsrc.h"
 #include "wavfile.h"
 #include "wavset.h"
+#include "sndmap.h"
 #include "sndroute.h"
 #include "board_config.h"
 #include <Arduino.h>
@@ -31,7 +32,24 @@ namespace {
   constexpr int FRAMES = 256;                  // stereo frames mixed per I2S block
 
   wavmix::Mixer  mixer;                         // mix task only
-  wavset::Set    sndset;                        // mix task only (theme index)
+  // --- theme index, DOUBLE BUFFERED (non-destructive load) ---------------------------
+  // loadTheme() scans into the slot that is NOT live and only flips g_setPub once the scan
+  // produced something. A transient SD dropout while re-scanning the SAME theme therefore
+  // leaves the machine playing instead of going permanently silent (the old code called
+  // sndset.reset() FIRST and lost the live set whatever happened next).
+  wavset::Set    g_set[2];                      // mix task writes [pub^1], everyone reads [pub]
+  volatile uint8_t g_setPub = 0;
+  inline wavset::Set& S()  { return g_set[g_setPub]; }       // live set
+  inline wavset::Set& Sx() { return g_set[g_setPub ^ 1]; }   // scratch set
+  // --- per-title command map, DOUBLE BUFFERED for the same reason --------------------
+  // Written by the mix task in loadTheme(), read by playLive() on the LOOP task, so it gets
+  // the ramSnapCopy treatment: publish by flipping an index, plus a generation counter so a
+  // reload into the same slot still re-binds the decoder (an armed bank never crosses themes).
+  sndmap::Map    g_map[2];
+  volatile uint8_t g_mapPub = 0;
+  volatile uint32_t g_mapGen = 0;
+  sndmap::Decoder  g_dec = { nullptr, 0, false, 0, -1, 0 };   // loop task only
+  uint32_t         g_decGen = 0xFFFFFFFFu;                    // loop task only
   wavset::Config cfg;                           // global config.txt (loaded once)
   SPIClass       sdspi(HSPI);                   // SD only (the DAC is now I2S/DMA, no SPI)
   char           theme[24] = "orgsnd";          // mix task only
@@ -47,6 +65,16 @@ namespace {
   volatile int   curGameNo = -1;                   // FPGA game No of the loaded set (for hybrid routing)
   bool           g_hybrid = false;                 // config.txt sndmode=hybrid -> GOSOF80 does part of the sound
   bool           g_hasBanks = false;               // loaded set has banked sounds (id>=32) -> 80B bank/stop semantics
+  // Why the last load ended the way it did — shown by the UI so "no sound" is never a mystery.
+  // "ok" | "empty" (folder there, no usable WAV) | "nofolder" | "locked" (ownership gate).
+  volatile const char* g_setStatus = "boot";
+  volatile bool  g_silent = true;                  // no usable set -> play nothing, but NEVER wedge
+  // --- mix-loop instrument (see the I2S latency note in begin()) ---------------------
+  // busyUs = time a pass spends OUTSIDE i2s_write (mix + SD). When that approaches the audio
+  // period the DMA queue is draining and the next hiccup is an underrun. This is the meter
+  // the buffer size has to be chosen against — measured on the real card, not estimated.
+  volatile uint32_t g_busyMaxUs = 0, g_busyLastUs = 0, g_lateN = 0, g_passN = 0;
+  int            g_dmaCount = 8, g_dmaLen = 256;   // actual installed I2S geometry
 
   struct Slot {
     File f; wavsrc::Source src;
@@ -149,47 +177,114 @@ namespace {
     slot[si].vid = vid; slot[si].used = true;
   }
 
+  // Read "/<theme>/sound.map" into the scratch map slot. Absent file = the safe defaults
+  // (identity mapping, command 0 ignored) PLUS, only when the set has banked samples, the
+  // legacy 29/30/31 rule — so every set that works today keeps working byte-for-byte, while
+  // any title can override the guess with a file instead of a firmware change. See SOUND_MAP.md.
+  void loadMap(const char* name, bool hasBanks) {
+    sndmap::Map& m = g_map[g_mapPub ^ 1];
+    sndmap::defaults(m);
+    char path[64]; snprintf(path, sizeof(path), "/%s/sound.map", name);
+    File f = SD.open(path, FILE_READ);
+    if (f) {
+      static char txt[1024];                       // static: 1 KB off the mix task's stack
+      size_t n = f.read((uint8_t*)txt, sizeof(txt) - 1); txt[n] = 0; f.close();
+      sndmap::parse(txt, m);
+      log_i("[snd] sound.map '%s': gen=%d hdrs=0x%08X stop=0x%08X ignore=0x%08X",
+            name, (int)m.gen, (unsigned)m.hdrMask, (unsigned)m.stopMask, (unsigned)m.ignoreMask);
+    } else if (hasBanks) {
+      sndmap::legacy80b(m);                        // exactly the pre-sndmap firmware behaviour
+      log_w("[snd] '%s': no sound.map, set has banked ids -> LEGACY 80B rule (29/30/31) — "
+            "unverified, prove it with /sndtrace", name);
+    }
+    g_mapPub ^= 1; g_mapGen++;                     // publish (loop task re-binds on the gen change)
+  }
+
+  // Load a theme WITHOUT destroying the live one until the new one is known good.
+  //   same theme + failed re-scan  -> keep playing what we have (SD glitch tolerance)
+  //   new theme  + failed scan     -> go SILENT with a status (playing the previous game's
+  //                                   samples would be worse than silence), never wedge
   void loadTheme(const char* name) {
-    mixer.stopAll(); reapSlots();
-    strncpy(theme, name, sizeof(theme) - 1); theme[sizeof(theme) - 1] = 0;
-    sndset.reset();
-    if (!ownership::allowed(theme)) {                 // proof-of-ownership gate: locked until a
-      g_hasBanks = false; sndMask = loopM = voiceM = 0; nSnd = 0;   // verified dump of this game
+    char want[24]; strncpy(want, name, sizeof(want) - 1); want[sizeof(want) - 1] = 0;
+    bool sameTheme = (strcmp(want, theme) == 0);
+
+    if (!ownership::allowed(want)) {                   // proof-of-ownership gate: locked until a
+      mixer.stopAll(); reapSlots();                    // verified dump of this game
+      strncpy(theme, want, sizeof(theme) - 1); theme[sizeof(theme) - 1] = 0;
+      Sx().reset(); g_setPub ^= 1;                     // publish an EMPTY set: nothing can play
+      g_hasBanks = false; sndMask = loopM = voiceM = 0; nSnd = 0;
+      g_silent = true; g_setStatus = "locked";
+      loadMap(theme, false);
       log_w("[snd] '%s' LOCKED (ownership gate) — dump this game's CPU ROM to unlock", theme);
       return;
     }
-    char dirpath[32]; snprintf(dirpath, sizeof(dirpath), "/%s", theme);
+
+    wavset::Set& scratch = Sx();                       // scan HERE; the live set keeps playing
+    scratch.reset();
+    bool haveDir = false;
+    char dirpath[32]; snprintf(dirpath, sizeof(dirpath), "/%s", want);
     File dir = SD.open(dirpath);
     if (dir && dir.isDirectory()) {
+      haveDir = true;
       for (File f = dir.openNextFile(); f; f = dir.openNextFile()) {
         if (!f.isDirectory()) {
           const char* nm = f.name(); const char* base = strrchr(nm, '/');
-          sndset.addName(base ? base + 1 : nm);
+          scratch.addName(base ? base + 1 : nm);
         }
         f.close();
       }
-    } else {
-      log_w("[snd] theme dir missing: %s", dirpath);
     }
     if (dir) dir.close();
-    mixer.setMix(cfg.mix);
+
+    if (scratch.nEntry == 0) {                         // nothing usable in there
+      const char* why = haveDir ? "empty" : "nofolder";
+      log_w("[snd] theme '%s': %s", want, why);
+      if (sameTheme) { g_setStatus = why; return; }    // keep the live set: a re-scan glitch
+      mixer.stopAll(); reapSlots();                    // different game: silence beats wrong sound
+      strncpy(theme, want, sizeof(theme) - 1); theme[sizeof(theme) - 1] = 0;
+      g_setPub ^= 1;                                   // publish the empty scratch set
+      g_hasBanks = false; sndMask = loopM = voiceM = 0; nSnd = 0;
+      g_silent = true; g_setStatus = why;
+      loadMap(theme, false);
+      return;
+    }
+
+    // --- the new set is good: switch to it -------------------------------------------
+    mixer.stopAll(); reapSlots();
+    strncpy(theme, want, sizeof(theme) - 1); theme[sizeof(theme) - 1] = 0;
     g_hasBanks = false;
-    { uint32_t m = 0, lm = 0, vm = 0; for (int i = 0; i < sndset.nEntry; i++) {
-        const wavset::Entry& e = sndset.entry[i]; if (e.id >= 32) g_hasBanks = true; if (e.id < 0 || e.id >= 32) continue;
+    for (int i = 0; i < scratch.nEntry; i++) if (scratch.entry[i].id >= 32) g_hasBanks = true;
+    loadMap(theme, g_hasBanks);
+
+    // sound.map voice=/loop= are an OVERLAY on the filename attributes: the file name still
+    // wins where it already says 'l'/'v', the map can only ADD. Applied to the scratch set
+    // before it goes live, so no entry is ever half-patched while it is playable.
+    { const sndmap::Map& mp = g_map[g_mapPub];
+      for (int i = 0; i < scratch.nEntry; i++) {
+        wavset::Entry& e = scratch.entry[i];
+        if (sndmap::bitGet(mp.voice, e.id)) e.attr |= wavset::A_VOICE;
+        if (sndmap::bitGet(mp.loop,  e.id)) e.attr |= wavset::A_LOOP;
+      } }
+
+    g_setPub ^= 1;                                     // PUBLISH: scratch becomes live
+    mixer.setMix(cfg.mix);
+    { uint32_t m = 0, lm = 0, vm = 0; for (int i = 0; i < S().nEntry; i++) {
+        const wavset::Entry& e = S().entry[i]; if (e.id < 0 || e.id >= 32) continue;
         m |= (1u << e.id);
         if (e.attr & wavset::A_LOOP)  lm |= (1u << e.id);
         if (e.attr & wavset::A_VOICE) vm |= (1u << e.id); }            // cache set status for web UI
-      sndMask = m; loopM = lm; voiceM = vm; nSnd = sndset.nEntry; }
-    log_i("[snd] theme '%s': %d sounds, %d groups", theme, sndset.nEntry, sndset.nGroup);
-    for (int i = 0; i < sndset.nEntry; i++)               // autoplay init/background sounds
-      if (sndset.entry[i].attr & wavset::A_INIT) startVoice(&sndset.entry[i]);
+      sndMask = m; loopM = lm; voiceM = vm; nSnd = S().nEntry; }
+    g_silent = false; g_setStatus = "ok";
+    log_i("[snd] theme '%s': %d sounds, %d groups", theme, S().nEntry, S().nGroup);
+    for (int i = 0; i < S().nEntry; i++)               // autoplay init/background sounds
+      if (S().entry[i].attr & wavset::A_INIT) startVoice(&S().entry[i]);
   }
 
   void handleReq(const Req& r) {
     if (r.type == 1) { loadTheme(r.theme); return; }
     if (r.type == 2) { mixer.stopAll(); reapSlots(); return; }   // stop all voices (web UI)
-    int id = sndset.pick(r.sound, esp_random());          // resolve random/sequential group
-    const wavset::Entry* e = sndset.find(id);
+    int id = S().pick(r.sound, esp_random());             // resolve random/sequential group
+    const wavset::Entry* e = S().find(id);
     if (e) startVoice(e);
     else   log_w("[snd] no sound %d in theme '%s'", r.sound, theme);
   }
@@ -203,17 +298,32 @@ namespace {
     static int16_t out[FRAMES * 2];   // mono down-mix duplicated to L/R for the I2S frame
     esp_task_wdt_add(nullptr);
     Req req;
+    const uint32_t periodUs = (uint32_t)((1000000ull * FRAMES) / RATE);   // audio per pass
     for (;;) {
-      if (xQueueReceive(reqQ, &req, 0) == pdTRUE) handleReq(req);   // one set/play op per pass
+      uint32_t tA = micros();
+      // Drain up to REQ_PER_PASS requests instead of one: a burst of cues used to start one
+      // per pass = one every FRAMES/RATE (5.8 ms), so eight queued sounds took ~46 ms to even
+      // begin. Bounded, because each start does an SD open (tens of ms on a 1 MHz bus) and the
+      // DMA queue is the only thing between this loop and an underrun.
+      const int REQ_PER_PASS = 2;
+      for (int k = 0; k < REQ_PER_PASS && xQueueReceive(reqQ, &req, 0) == pdTRUE; k++) handleReq(req);
       mixer.mix(buf, FRAMES);
       for (int i = 0; i < FRAMES; i++) {                            // down-mix to mono (clip), duplicate L/R
         int32_t m = ((int32_t)buf[2 * i] + buf[2 * i + 1]) >> 1;
         if (m > 32767) m = 32767; else if (m < -32768) m = -32768;
         out[2 * i] = (int16_t)m; out[2 * i + 1] = (int16_t)m;
       }
+      reapSlots();
+      // Everything above is the pass's REAL work; i2s_write below is pure waiting (it returns
+      // immediately while the DMA queue has room). busy >= periodUs means this pass consumed
+      // more wall time than the audio it produced -> the queue is draining. See mixStats().
+      uint32_t busy = micros() - tA;
+      g_busyLastUs = busy;
+      if (busy > g_busyMaxUs) g_busyMaxUs = busy;
+      if (busy >= periodUs) g_lateN++;
+      g_passN++;
       size_t wrote;
       i2s_write(I2S_NUM_0, out, sizeof(out), &wrote, portMAX_DELAY); // blocks only when DMA full -> paces to RATE
-      reapSlots();
       esp_task_wdt_reset();
     }
   }
@@ -258,10 +368,30 @@ bool begin() {
   reqQ = xQueueCreate(8, sizeof(Req));
   if (!reqQ) return false;
 
-  // --- I2S FIRST, independent of the SD ---
-  // The DAC/I2S must come up even if the SD fails to mount, so audio hardware can
+  // --- SD + config FIRST, but STRICTLY non-fatal ---
+  // The invariant that matters is "a flaky SD never silences the sound tier", not the order:
+  // every call below tolerates a missing card (SD.begin returns false, the config falls back
+  // to defaults) and I2S is installed unconditionally right after. Reading /config.txt first
+  // is what lets the DMA geometry — i.e. the output latency — be tuned without a reflash.
+  sdspi.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
+  // 1 MHz is the most tolerant of long leads / weak 3.3V. NOTE: it is also the sound tier's
+  // real bottleneck — one 44.1 kHz mono voice is 88 kB/s and this bus tops out near 125 kB/s.
+  // The real fix is a clean, decoupled board (add a 10-100uF cap across the card's 3V3/GND);
+  // raise this before shortening the DMA queue (see the latency note below).
+  if (!SD.begin(PIN_SD_CS, sdspi, 1000000)) log_e("[snd] SD mount failed (audio still up)");
+  loadConfig();
+
+  // --- I2S, unconditional ---
+  // The DAC/I2S must come up even if the SD failed to mount, so audio hardware can
   // be tested (testTone) and a flaky SD never silences the whole sound tier.
   // I2S TX -> PCM5102A (16-bit, DMA). Mono is sent on both L/R. SCK->GND on the module (no MCLK).
+  //
+  // LATENCY. dma_buf_count * dma_buf_len frames sit ahead of the DAC: the stock 8 x 256 is
+  // 2048 frames = 46 ms before a new cue is audible. That queue is ALSO the only elasticity
+  // covering an SD read: wavsrc tops up 1024 bytes at a time, which at 1 MHz SPI is ~8.2 ms of
+  // bus time per voice, so two voices topping up in the same pass already burn ~17 ms. Halving
+  // the queue halves the latency AND the margin — so it is a config knob (i2sn/i2slen in
+  // /config.txt) checked against mixStats(), not a number changed on a hunch. Default unchanged.
   i2s_config_t i2scfg = {};
   i2scfg.mode = (i2s_mode_t)(I2S_MODE_MASTER | I2S_MODE_TX);
   i2scfg.sample_rate = RATE;
@@ -269,8 +399,9 @@ bool begin() {
   i2scfg.channel_format = I2S_CHANNEL_FMT_RIGHT_LEFT;
   i2scfg.communication_format = I2S_COMM_FORMAT_STAND_I2S;
   i2scfg.intr_alloc_flags = ESP_INTR_FLAG_LEVEL1;
-  i2scfg.dma_buf_count = 8;
-  i2scfg.dma_buf_len = 256;
+  g_dmaCount = cfg.i2sn; g_dmaLen = cfg.i2slen;   // clamped by wavset::parseConfig
+  i2scfg.dma_buf_count = g_dmaCount;
+  i2scfg.dma_buf_len = g_dmaLen;
   i2scfg.use_apll = false;           // APLL can fail to generate the I2S clock on some S3 -> silence
   i2scfg.tx_desc_auto_clear = true;  // output silence on underrun (no click/repeat)
   if (i2s_driver_install(I2S_NUM_0, &i2scfg, 0, nullptr) != ESP_OK) { log_e("[snd] I2S install failed"); return false; }
@@ -282,13 +413,9 @@ bool begin() {
   i2spin.data_in_num  = I2S_PIN_NO_CHANGE;
   i2s_set_pin(I2S_NUM_0, &i2spin);
 
-  // --- SD SECOND (non-fatal): flying-wire SD drops out; audio still works without it ---
-  sdspi.begin(PIN_SD_SCK, PIN_SD_MISO, PIN_SD_MOSI, PIN_SD_CS);
-  // 1 MHz is the most tolerant of long leads / weak 3.3V. The real fix is a clean,
-  // decoupled board (add a 10-100uF cap across the card's 3V3/GND); raise then.
-  if (!SD.begin(PIN_SD_CS, sdspi, 1000000)) log_e("[snd] SD mount failed (audio still up)");
-
   mixer.reset();
+  g_set[0].reset(); g_set[1].reset();
+  sndmap::defaults(g_map[0]); sndmap::defaults(g_map[1]);
 
   // cache the game folders on the SD root for the web UI (now, before the tasks touch SD)
   nThemes = 0;
@@ -301,15 +428,17 @@ bool begin() {
         f.close(); }
     if (root) root.close(); }
 
-  loadConfig();
-  loadGames();                                    // /games.txt FPGA game-select map
+  loadGames();                                    // /games.txt FPGA game-select map (config: above)
+  theme[0] = 0;                                   // no theme yet -> the first load is never a "re-scan"
   loadTheme(cfg.stheme);                          // index + autoplay init sounds
 
   // I2S DMA clocks the output -> no core-0 busy-loop. One mix task (core 1); core 0 is free.
   xTaskCreatePinnedToCore(mixTask, "mix", 8192, nullptr, 3, nullptr, 1);
 
   g_ready = true;
-  log_i("[snd] wavplayer ready (PCM5102A I2S, %d Hz, mono->L/R)", RATE);
+  log_i("[snd] wavplayer ready (PCM5102A I2S, %d Hz, mono->L/R, dma %dx%d = %u ms, set '%s' %s)",
+        RATE, g_dmaCount, g_dmaLen,
+        (unsigned)((1000u * g_dmaCount * g_dmaLen) / RATE), theme, (const char*)g_setStatus);
   return true;
 }
 
@@ -366,8 +495,9 @@ const char* curTheme()        { return theme; }
 uint32_t    soundMask()       { return sndMask; }
 int soundList(uint16_t* out, int max) {           // present sounds (incl. banked 32..95) for the web UI
   int n = 0;
-  for (int i = 0; i < sndset.nEntry && n < max; i++) {
-    const wavset::Entry& e = sndset.entry[i];
+  const wavset::Set& s = g_set[g_setPub];
+  for (int i = 0; i < s.nEntry && n < max; i++) {
+    const wavset::Entry& e = s.entry[i];
     if (e.id < 0 || e.id > 95) continue;
     uint8_t f = 0;
     if (e.attr & wavset::A_LOOP)  f |= 1;
@@ -389,25 +519,58 @@ void selectGame(int no) {                         // FPGA game No -> load that g
   setTheme(gameMap[no]);
 }
 
-// FPGA live sound path: in hybrid mode, skip the commands GOSOF80 already synthesises (per sndroute);
-// in full mode, play everything. play() stays unconditional so the web/diag sound test can play any id.
-bool playLive(int soundId) {
-  // Gottlieb System 80B command semantics (verified by ROM 6502 disasm + PinMAME renders),
-  // auto-enabled ONLY when the loaded set has banked sounds (id>=32) so 80/80A & non-banking
-  // sets are unaffected. The 5-bit cmd space is extended by PREFIX commands: cmd 30 arms
-  // bank 1 (next cmd plays id N+32), cmd 29 arms bank 2 (N+64); cmd 31 (0x1F) = native STOP.
-  // 29/30 are silent prefixes on the real board, so they trigger nothing themselves.
-  if (g_hasBanks) {
-    static uint8_t pendBank = 0;
-    if (soundId == 31) { pendBank = 0; stopAll(); return true; }   // 0x1F native stop
-    if (soundId == 30) { pendBank = 32; return true; }             // bank 1 prefix
-    if (soundId == 29) { pendBank = 64; return true; }             // bank 2 prefix
-    soundId += pendBank; pendBank = 0;                             // apply armed bank to this cmd
-  }
-  if (g_hybrid && !sndroute::espPlays(curGameNo, soundId)) return false;  // GOSOF80 handles it
-  return play(soundId);
+// Re-bind the loop task's decoder when the mix task has published a new map. The generation
+// counter (not the pointer) is the test: reloading into the same slot must still reset an
+// armed bank, or a header from the previous title could land on the first command of the new one.
+static const sndmap::Map* liveMap() {
+  const sndmap::Map* m = &g_map[g_mapPub];
+  uint32_t gen = g_mapGen;
+  if (g_decGen != gen || g_dec.m != m) { sndmap::bind(g_dec, m); g_decGen = gen; }
+  return m;
 }
+
+// FPGA live sound path. What a command MEANS is now data (the title's sound.map, see
+// SOUND_MAP.md) instead of a hardcoded 80B guess: sndmap resolves headers/banks, stop-all,
+// ignored values and remaps. Hybrid routing still applies afterwards, and play() stays
+// unconditional so the web/diag sound test can fire any id.
+bool playLive(int soundId) {
+  if (soundId < 0 || soundId > 31) return false;
+  liveMap();
+  sndmap::Out o = sndmap::feed(g_dec, (uint8_t)soundId, millis());
+  if (o.act == sndmap::ACT_STOPALL) { stopAll(); return true; }
+  if (o.act != sndmap::ACT_PLAY) return false;                            // ignored / header only
+  if (g_silent) return false;                                             // no usable set: stay quiet
+  if (g_hybrid && !sndroute::espPlays(curGameNo, o.id)) return false;     // GOSOF80 handles it
+  return play(o.id);
+}
+
+// The sound bus went idle (wire byte 0x30, SOUND_WIRE.md). On System 80/80A the tone plays
+// only WHILE a code is presented, so this is a real "stop"; on 80B the command was latched on
+// the strobe and the release means nothing. sound.map decides (release=stop|ignore).
+void soundRelease() {
+  liveMap();
+  sndmap::Out o = sndmap::release(g_dec, millis());
+  if (o.act == sndmap::ACT_STOPALL) stopAll();
+}
+
 bool soundHybrid() { return g_hybrid; }
+
+// --- status / instrument for the UI -----------------------------------------------------
+const char* setStatus() { return (const char*)g_setStatus; }
+bool        silent()    { return g_silent; }
+
+// Mix-loop health. `busyMax`/`busyLast` = microseconds a pass spent doing real work (mix + SD)
+// outside the paced i2s_write; `period` = the microseconds of audio one pass produces. Once
+// busy approaches period the DMA queue stops refilling and the next SD hiccup is an audible
+// underrun, so `late` (passes where busy >= period) is the number to watch when shortening
+// the queue with i2sn/i2slen. bufMs = the current output latency.
+void mixStats(uint32_t& busyMaxUs, uint32_t& busyLastUs, uint32_t& lateN, uint32_t& passN,
+              uint32_t& periodUs, uint32_t& bufMs) {
+  busyMaxUs = g_busyMaxUs; busyLastUs = g_busyLastUs; lateN = g_lateN; passN = g_passN;
+  periodUs  = (uint32_t)((1000000ull * FRAMES) / RATE);
+  bufMs     = (uint32_t)((1000u * g_dmaCount * g_dmaLen) / RATE);
+}
+void mixStatsReset() { g_busyMaxUs = 0; g_lateN = 0; g_passN = 0; }
 
 } // namespace wavplayer
 #endif // !BOARD_C3

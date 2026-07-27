@@ -175,6 +175,57 @@ void netBegin() {
     r->send(200, "application/json", j);
   });
 
+  // --- SOUND TRACE: what did the bus ACTUALLY send? (see SOUND_WIRE.md) -------------
+  // The instrument for reverse-engineering a title's sound commands: clear the ring, press ONE
+  // playfield target, read the ring. Every link byte is timestamped as it arrives (fpgalink.h);
+  // this route only formats what is already captured — no work on the hot path, no SD, no
+  // blocking call, so it is safe in the AsyncWebServer task (same discipline as /ramsnap:
+  // the frame lands in a STATIC buffer, never on the async task's stack).
+  //   /sndtrace              CSV: idx,ms,dms,hex,class,value   (dms = ms since the previous row)
+  //   /sndtrace?fmt=json     same data as JSON
+  //   /sndtrace?n=64         only the newest 64 entries
+  //   /sndtrace?clear=1      empty the ring (do this right before the target hit)
+  //   /sndtrace?raw=1        capture EVERY byte incl. the 769 B/s RAM snapshot (~0.6 s of ring!)
+  //   /sndtrace?raw=0        back to filtered (default): no snapshot payload, no level repeats
+  server.on("/sndtrace", HTTP_GET, [](AsyncWebServerRequest *r) {
+    if (r->hasParam("raw"))   fpgalink::traceMode(r->getParam("raw")->value().toInt() != 0);
+    if (r->hasParam("clear")) fpgalink::traceClear();
+    uint16_t want = fpgalink::TRACE_N;
+    if (r->hasParam("n")) { long v = r->getParam("n")->value().toInt();
+                            if (v > 0 && v < (long)fpgalink::TRACE_N) want = (uint16_t)v; }
+    static fpgalink::TraceEv ev[fpgalink::TRACE_N];      // static: 4 KB off the async stack
+    uint16_t n = fpgalink::traceCopy(ev, want);
+    uint32_t kept, elided, payload, rel, lost;
+    fpgalink::traceStats(kept, elided, payload);
+    fpgalink::soundMetaStats(rel, lost);
+    bool json = r->hasParam("fmt") && r->getParam("fmt")->value() == "json";
+    // Chunk-free but incremental: the stream grows as we print, so no single 15 KB alloc.
+    AsyncResponseStream *res = r->beginResponseStream(json ? "application/json" : "text/csv");
+    if (json) {
+      res->printf("{\"n\":%u,\"raw\":%s,\"kept\":%u,\"elided\":%u,\"payload\":%u,"
+                  "\"rel\":%u,\"lost\":%u,\"now\":%u,\"ev\":[",
+                  (unsigned)n, fpgalink::traceRaw() ? "true" : "false",
+                  (unsigned)kept, (unsigned)elided, (unsigned)payload,
+                  (unsigned)rel, (unsigned)lost, (unsigned)millis());
+    } else {
+      res->printf("# sndtrace n=%u raw=%d kept=%u elided=%u payload=%u rel=%u lost=%u now=%u\n"
+                  "idx,ms,dms,hex,class,value\n",
+                  (unsigned)n, fpgalink::traceRaw() ? 1 : 0, (unsigned)kept, (unsigned)elided,
+                  (unsigned)payload, (unsigned)rel, (unsigned)lost, (unsigned)millis());
+    }
+    uint32_t prev = n ? ev[0].ms : 0;
+    for (uint16_t i = 0; i < n; i++) {
+      int v; const char* cls = fpgalink::traceDecode(ev[i].b, v);
+      uint32_t d = ev[i].ms - prev; prev = ev[i].ms;
+      if (json) res->printf("%s[%u,%u,%u,\"%s\",%d]", i ? "," : "",
+                            (unsigned)i, (unsigned)ev[i].ms, (unsigned)d, cls, v);
+      else      res->printf("%u,%u,%u,0x%02X,%s,%d\n",
+                            (unsigned)i, (unsigned)ev[i].ms, (unsigned)d, ev[i].b, cls, v);
+    }
+    if (json) res->print("]}");
+    r->send(res);
+  });
+
   // --- WS2812 pin hunt (bring-up): drive a candidate RGB-LED pin live, no reflash ---
   //   /led?pin=38&r=255&g=0&b=0   — whitelisted pins only (38/47/48: SD-SCK & OLED,
   //   both unused right now); lets us find which GPIO the on-board LED really is.
@@ -207,9 +258,19 @@ void netBegin() {
       return;
     }
     if (r->hasParam("stop")) { wavplayer::stopAll(); r->send(200, "text/plain", "stopped"); return; }
+    if (r->hasParam("mixreset")) { wavplayer::mixStatsReset(); r->send(200, "text/plain", "mix stats reset"); return; }
+    uint32_t bmax, blast, late, pass, period, bufms;
+    wavplayer::mixStats(bmax, blast, late, pass, period, bufms);
     r->send(200, "text/plain", String("PSOWAV ") + (wavplayer::ready() ? "ready" : "NOT ready") +
-            " theme='" + wavplayer::curTheme() + "' sounds=" + String(wavplayer::soundCount()) +
-            "\nusage: /snd?id=N (0..95) | /snd?theme=NAME | /snd?stop=1 | /beep");
+            " theme='" + wavplayer::curTheme() + "' status=" + wavplayer::setStatus() +
+            (wavplayer::silent() ? " SILENT" : "") +
+            " sounds=" + String(wavplayer::soundCount()) +
+            "\nmix: buf=" + String(bufms) + "ms period=" + String(period) + "us busyMax=" +
+            String(bmax) + "us busyLast=" + String(blast) + "us late=" + String(late) +
+            "/" + String(pass) + " passes  (late>0 => the DMA queue is draining: raise i2sn/i2slen"
+            " in /config.txt, or the SD clock)\n"
+            "usage: /snd?id=N (0..95) | /snd?theme=NAME | /snd?stop=1 | /snd?mixreset=1 | /beep"
+            " | /sndtrace");
 #else
     r->send(501, "text/plain", "no sound tier on C3");
 #endif

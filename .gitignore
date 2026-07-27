@@ -3,6 +3,8 @@
 *.bin
 *.elf
 *.map
+# per-title sound-command maps are content, not linker output (see SOUND_MAP.md)
+!sound.map
 fpga_bitstream/
 __pycache__/
 *.pyc

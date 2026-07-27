@@ -31,7 +31,13 @@ enum Attr : uint8_t {
 
 struct Entry { int id; uint8_t attr; uint8_t vol; char file[64]; };
 struct Group { int id; bool random; uint8_t n; int member[8]; uint16_t seq; };
-struct Config { uint8_t volv; uint8_t vols; uint8_t mix; char stheme[24]; };  // mix 0=sum 1=div2 2=sqrt
+// mix 0=sum 1=div2 2=sqrt.
+// i2sn/i2slen = the I2S DMA geometry (buffer count x frames). Their PRODUCT is the audio
+// buffered ahead of the DAC, i.e. the output latency: 8 x 256 @ 44.1 kHz = 46 ms. It is also
+// the only elasticity absorbing SD read jitter, so it is a tunable and not a constant — see
+// SOUND_WIRE.md and wavplayer::mixStats().
+struct Config { uint8_t volv; uint8_t vols; uint8_t mix; char stheme[24];
+                uint16_t i2sn; uint16_t i2slen; };
 
 // --- pure parsers (host-testable) ---
 bool parseName (const char* fname, Entry& e);    // returns false if not "NNNN...".wav

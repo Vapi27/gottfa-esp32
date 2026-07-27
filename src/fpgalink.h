@@ -2,6 +2,24 @@
 // (PIN_FPGA_LINK, = FPGA PIN_11 / K2, right next to the FPGA). One self-describing
 // byte (see sound_link.vhd): 0xF0|diag (mode token), 0x80|sound[4:0], 0x40|game[5:0],
 // 0xA0|value[3:0], emitted when RIOT RAM $0072 changes. That byte is NOT the ball counter
+//
+// FULL BYTE MAP (authoritative copy; the FPGA side is sound_link.vhd, the rationale and
+// the FPGA-side obligations are SOUND_WIRE.md):
+//   0x00-0x2F  free / reserved — MUST stay a no-op (a line break or a floating pin during
+//              FPGA reconfiguration decodes as 0x00, so 0x00 can never be a token)
+//   0x30-0x3F  SOUND META (claimed by SOUND_WIRE.md, decoded below, not yet emitted):
+//              0x30 = sound bus RELEASED (no command selected) · 0x31 = sound events LOST
+//              (FPGA FIFO overflow) · 0x32-0x3F reserved
+//   0x40-0x7F  game number 0x40|game[5:0]            [LEVEL]
+//   0x80-0x9F  sound command 0x80|cmd[4:0]           [EVENT]
+//   0xA0-0xAF  RIOT $0072 (game in progress)         [LEVEL]
+//   0xB0-0xBE  disp_inject deframed-byte count       [LEVEL]
+//   0xBF       RAM-snapshot frame marker
+//   0xC0-0xDF  RAM-snapshot payload (hi/lo nibble)
+//   0xE0-0xEF  disp_inject state                     [LEVEL]
+//   0xF0-0xF3  diag mode / game-state                [LEVEL]
+//   0xF4-0xFF  free / reserved
+//
 // (the ball in play is $0109): $0072 is the GAME-IN-PROGRESS flag, 0 = attract / 1 = playing,
 // proven twice on hardware. The token name stayed "ball" for wire compatibility.
 // Diag and gameplay sound never overlap, so one wire carries both. Compiled on both
@@ -35,6 +53,40 @@ namespace fpgalink {
   // Live sound commands (token 0x80|cmd), FIFO, for the time-attack bonus. Returns false when
   // empty. Independent of the WAV player: the caller decides what a command is worth.
   bool popSound(uint8_t& cmd);
+
+  // --- SOUND TRACE RING (the instrument, see SOUND_WIRE.md) -------------------------
+  // Every byte the link delivers, timestamped, so one playfield target can be pressed and
+  // the EXACT bus traffic it produced read back over HTTP (GET /sndtrace). This is the same
+  // method that ground-truthed $0072, $0109 and the Arena command map: capture first, decide
+  // after. Filling costs one compare + one 8-byte store per byte; nothing is decoded here.
+  //
+  // Two capture modes:
+  //   FILTERED (default) — records every byte EXCEPT (a) the 0xC0..0xDF RAM-snapshot payload
+  //     (769 bytes/s of bulk that would overwrite the whole ring in 0.6 s) and (b) a LEVEL
+  //     token repeating a value already recorded for its class. Level tokens carry the current
+  //     value by construction (sound_link.vhd calls them LEVEL and coalesces them freely), so
+  //     a repeat carries zero information — but the 50 ms heartbeat re-sends mode+state+dinj
+  //     ~60 times/s, which would also flush the ring. EVENT bytes (sound) and unknown bytes
+  //     are NEVER elided.
+  //   RAW — records literally every byte, snapshot payload included. ~830 bytes/s, so the ring
+  //     holds ~0.6 s: arm it, do the one action, read it back immediately.
+  constexpr uint16_t TRACE_N = 512;                    // ring entries (4 KB static)
+  struct TraceEv { uint32_t ms; uint8_t b; };
+  void traceMode(bool raw);                            // true = record everything
+  bool traceRaw();
+  void traceClear();
+  // Copy up to `max` entries, OLDEST FIRST, into out[]. Returns how many were written.
+  // Safe from the async HTTP task (taken under a spinlock; poll() writes under the same one).
+  uint16_t traceCopy(TraceEv* out, uint16_t max);
+  // kept = entries stored ever; elided = level repeats dropped; payload = snapshot bytes dropped.
+  void traceStats(uint32_t& kept, uint32_t& elided, uint32_t& payload);
+  // Decode a raw byte for display: returns the token-class name and, via `value`, the decoded
+  // payload (-1 when the token has none). Lives here so the byte map has ONE owner.
+  const char* traceDecode(uint8_t b, int& value);
+  // Sound-meta counters: 0x30 bus-release events and 0x31 "FPGA dropped a cue" reports.
+  // Both stay 0 until the FPGA implements SOUND_WIRE.md — which is itself the signal that
+  // the wire is still the old lossy one.
+  void soundMetaStats(uint32_t& rel, uint32_t& lost);
   void stats(uint32_t& total, uint8_t& last, uint32_t& ageMs);  // bring-up telemetry
   // ball-in-play telemetry (token 0xA0|value): last value, how many tokens seen,
   // ms since the last one (0xFFFFFFFF = jamais recu). Compiled on both tiers.

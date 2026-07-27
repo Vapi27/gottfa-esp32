@@ -34,6 +34,8 @@ namespace {
   const uint8_t SND_Q = 16;           // power of two; overwrite-oldest (a stalled reader
   uint8_t  g_sndQ[SND_Q] = {0};       // must not stall the link)
   uint8_t  g_sndW = 0, g_sndR = 0;
+  uint32_t g_relCount = 0, g_relMs = 0;   // 0x30 sound-bus-release events
+  uint32_t g_lostCount = 0;               // 0x31 "FPGA sound FIFO overflowed" reports
   // --- RAM snapshot: 0xBF marker then 768 payload bytes (384 values x hi/lo nibble) ---
   const uint16_t SNAP_BYTES = 2 * fpgalink::RAMSNAP_N;   // 768 payload bytes per frame
   // Double buffer: poll() fills [g_snapPub ^ 1] and only flips g_snapPub once the frame
@@ -47,6 +49,60 @@ namespace {
   uint32_t g_snapFrames = 0;          // complete frames stored
   uint32_t g_snapBad = 0;             // frames aborted mid-capture (nibble-class desync)
   uint32_t g_snapMs = 0;              // millis() of the most recent complete frame
+
+  // --- sound trace ring (see fpgalink.h + SOUND_WIRE.md) -----------------------------
+  // Written by poll() (loop task), read by traceCopy() (async HTTP task). A spinlock, not a
+  // double buffer: entries are 8 bytes and the writer holds the lock for a single store, so
+  // the copy can never see a torn entry and the 128-byte UART hardware FIFO (11 ms at 115200)
+  // absorbs the ~40 us the 4 KB copy holds it.
+  portMUX_TYPE g_trMux = portMUX_INITIALIZER_UNLOCKED;
+  fpgalink::TraceEv g_tr[fpgalink::TRACE_N];
+  uint16_t g_trW = 0;                 // next write slot
+  uint16_t g_trN = 0;                 // entries currently held (<= TRACE_N)
+  bool     g_trRaw = false;           // false = filtered (default), true = every byte
+  uint32_t g_trKept = 0, g_trElided = 0, g_trPayload = 0;
+  // token classes, for the level-repeat filter and for traceDecode()
+  enum TrCls : uint8_t { CL_UNK = 0, CL_SMETA, CL_GAME, CL_SND, CL_BALL, CL_RXC,
+                         CL_SNAP, CL_SNAPD, CL_DINJ, CL_MODE, CL_STATE, CL_N };
+  uint8_t g_trLast[CL_N] = {0};       // last byte recorded per class
+  bool    g_trSeen[CL_N] = {false};
+
+  // Classify a raw byte. Order matters exactly as on the wire: the snapshot marker 0xBF is
+  // an EXACT byte and must be tested before (b & 0xF0) == 0xB0 (rx count), else rx_cnt 15
+  // would shadow it — which is why disp_inject wraps its counter at 14 (sound_link.vhd).
+  inline TrCls trClass(uint8_t b) {
+    if (b == 0xBF)              return CL_SNAP;
+    if ((b & 0xE0) == 0xC0)     return CL_SNAPD;      // 0xC0..0xDF payload
+    if ((b & 0xFE) == 0xF0)     return CL_MODE;
+    if ((b & 0xFE) == 0xF2)     return CL_STATE;
+    if ((b & 0xF0) == 0xE0)     return CL_DINJ;
+    if ((b & 0xF0) == 0xB0)     return CL_RXC;        // 0xB0..0xBE (0xBF taken above)
+    if ((b & 0xF0) == 0xA0)     return CL_BALL;
+    if ((b & 0xE0) == 0x80)     return CL_SND;
+    if ((b & 0xC0) == 0x40)     return CL_GAME;
+    if ((b & 0xF0) == 0x30)     return CL_SMETA;      // 0x30..0x3F sound meta
+    return CL_UNK;
+  }
+  // Is this class a LEVEL report (carries its current value, so a repeat says nothing new)?
+  inline bool trIsLevel(TrCls c) {
+    return c == CL_MODE || c == CL_STATE || c == CL_DINJ || c == CL_RXC ||
+           c == CL_BALL || c == CL_GAME;
+  }
+
+  inline void traceByte(uint8_t b, uint32_t now) {
+    TrCls c = trClass(b);
+    if (!g_trRaw) {
+      if (c == CL_SNAPD) { g_trPayload++; return; }           // 769 bytes/s of bulk
+      if (trIsLevel(c) && g_trSeen[c] && g_trLast[c] == b) { g_trElided++; return; }
+    }
+    g_trLast[c] = b; g_trSeen[c] = true;
+    portENTER_CRITICAL(&g_trMux);
+    g_tr[g_trW].ms = now; g_tr[g_trW].b = b;
+    g_trW = (uint16_t)((g_trW + 1) % fpgalink::TRACE_N);
+    if (g_trN < fpgalink::TRACE_N) g_trN++;
+    portEXIT_CRITICAL(&g_trMux);
+    g_trKept++;
+  }
 
   inline void gipObserve(bool raw, uint32_t now) {      // a fresh $0072 reading
     if (raw != g_gipRaw) { g_gipRaw = raw; g_gipRawMs = now; }
@@ -109,6 +165,7 @@ void poll() {
   while (port.available()) {
     uint8_t b = (uint8_t)port.read();
     g_rxCount++; g_lastByte = b; g_lastMs = millis();   // bring-up telemetry
+    traceByte(b, g_lastMs);                             // instrument: one compare + one store
 
     // --- RAM snapshot capture ------------------------------------------------------
     // Payload bytes (0xC0..0xDF) are consumed HERE and never reach the token decoder
@@ -166,6 +223,20 @@ void poll() {
       wavplayer::playLive(c);                 // hybrid-aware: skips cmds GOSOF80 synthesises
 #endif
     }
+    // --- sound META 0x30..0x3F (SOUND_WIRE.md). Not emitted by today's sound_link.vhd; decoded
+    // now so the FPGA side can be upgraded without a firmware change, and so a stray 0x3x can
+    // never be mistaken for a playable command. Disjoint from every test above: (0x3x & 0xC0)
+    // = 0x00, so it reaches this branch only.
+    else if ((b & 0xF0) == 0x30) {
+      if (b == 0x30) {                        // sound bus released: no command selected
+        g_relCount++; g_relMs = millis();
+#ifndef BOARD_C3
+        wavplayer::soundRelease();            // sound.map decides: ignore (80B) or stop (System 80)
+#endif
+      } else if (b == 0x31) {                 // the FPGA sound FIFO overflowed: >=1 cue lost
+        g_lostCount++;
+      }
+    }
     else if ((b & 0xC0) == 0x40) {            // game number 0x40..0x7F -> games.txt -> set
 #ifndef BOARD_C3
       wavplayer::selectGame(b & 0x3F);        // No = GottFA80_PLuS gamelist index
@@ -197,6 +268,57 @@ void stats(uint32_t& total, uint8_t& last, uint32_t& ageMs) {
 void ballStats(uint8_t& value, uint32_t& count, uint32_t& ageMs) {
   value = g_ball; count = g_ballCount;
   ageMs = g_ballCount ? (millis() - g_ballMs) : 0xFFFFFFFF;
+}
+
+// --- sound trace ring -------------------------------------------------------------------
+void traceMode(bool raw) { g_trRaw = raw; }
+bool traceRaw()          { return g_trRaw; }
+
+void traceClear() {
+  portENTER_CRITICAL(&g_trMux);
+  g_trW = 0; g_trN = 0;
+  portEXIT_CRITICAL(&g_trMux);
+  g_trKept = g_trElided = g_trPayload = 0;
+  for (int i = 0; i < CL_N; i++) g_trSeen[i] = false;
+}
+
+// Oldest-first copy. The ring is (g_trW - g_trN) .. (g_trW - 1) modulo TRACE_N.
+uint16_t traceCopy(TraceEv* out, uint16_t max) {
+  if (!out || !max) return 0;
+  portENTER_CRITICAL(&g_trMux);
+  uint16_t n = g_trN, w = g_trW;
+  if (n > max) n = max;                                   // keep the NEWEST `max` entries
+  uint16_t start = (uint16_t)((w + TRACE_N - n) % TRACE_N);
+  for (uint16_t i = 0; i < n; i++) out[i] = g_tr[(start + i) % TRACE_N];
+  portEXIT_CRITICAL(&g_trMux);
+  return n;
+}
+
+void traceStats(uint32_t& kept, uint32_t& elided, uint32_t& payload) {
+  kept = g_trKept; elided = g_trElided; payload = g_trPayload;
+}
+
+// Sound-meta telemetry: 0x30 releases seen, 0x31 "cue lost" reports seen.
+void soundMetaStats(uint32_t& rel, uint32_t& lost) { rel = g_relCount; lost = g_lostCount; }
+
+// Human-readable decode of one raw byte, for the trace dump. `value` = the token payload,
+// or -1 when the token carries none.
+const char* traceDecode(uint8_t b, int& value) {
+  value = -1;
+  switch (trClass(b)) {
+    case CL_SNAP:  return "snap";                                     // 0xBF frame marker
+    case CL_SNAPD: value = b & 0x0F; return (b & 0x10) ? "snapLo" : "snapHi";
+    case CL_MODE:  value = b & 0x01; return "mode";                   // 1 = diag
+    case CL_STATE: value = b & 0x01; return "state";                  // 1 = 6502 booted
+    case CL_DINJ:  value = b & 0x0F; return "dinj";
+    case CL_RXC:   value = b & 0x0F; return "rxc";
+    case CL_BALL:  value = b & 0x0F; return "gip";                    // RIOT $0072
+    case CL_SND:   value = b & 0x1F; return "snd";                    // THE sound command
+    case CL_GAME:  value = b & 0x3F; return "game";
+    case CL_SMETA: value = b & 0x0F;
+                   return (b == 0x30) ? "rel" : (b == 0x31) ? "lost" : "smeta?";
+    default:       value = b; return "?";                             // unclaimed byte space
+  }
 }
 
 // RAM snapshot: frames stored, frames aborted, millis() of the last one, ms since it.

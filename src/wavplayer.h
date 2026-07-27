@@ -16,8 +16,15 @@ namespace wavplayer {
   bool begin();                       // mount SD, init the MCP4921 DAC, start the tasks
   void setTheme(const char* theme);   // per-game folder under the SD root (e.g. "747")
   bool play(int soundId);             // play "<theme>/<id>.wav" on a free voice (unconditional — web/diag test)
-  bool playLive(int soundId);         // FPGA live path: applies hybrid routing (skips GOSOF80-handled cmds)
+  bool playLive(int soundId);         // FPGA live path: sound.map decode + hybrid routing
+  void soundRelease();                // FPGA live path: the sound bus went idle (wire byte 0x30)
   bool soundHybrid();                 // true if sndmode=hybrid (config.txt) — GOSOF80 does part of the sound
+  const char* setStatus();            // why the last theme load ended: ok|empty|nofolder|locked|boot
+  bool        silent();               // true = no usable sample set; live commands play nothing
+  // Mix-loop health — the meter the I2S buffer size must be chosen against (see SOUND_WIRE.md).
+  void mixStats(uint32_t& busyMaxUs, uint32_t& busyLastUs, uint32_t& lateN, uint32_t& passN,
+                uint32_t& periodUs, uint32_t& bufMs);
+  void mixStatsReset();
   void stopAll();
   void testTone(int ms);              // HW test: 440 Hz sine straight to I2S (no SD/WAV)
   bool ready();

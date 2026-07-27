@@ -68,6 +68,7 @@ bool parseGroup(const char* fname, Group& g) {
 
 void defaultConfig(Config& c) {
   c.volv = 100; c.vols = 100; c.mix = 1;                     // div2
+  c.i2sn = 8; c.i2slen = 256;                                // 2048 frames = 46 ms @ 44.1 kHz
   strncpy(c.stheme, "orgsnd", sizeof(c.stheme) - 1); c.stheme[sizeof(c.stheme) - 1] = 0;
 }
 
@@ -87,9 +88,16 @@ void parseConfig(const char* text, Config& c) {
     else if (!strcmp(key, "vols"))   c.vols = (uint8_t)atoi(val);
     else if (!strcmp(key, "stheme")) { strncpy(c.stheme, val, sizeof(c.stheme) - 1); c.stheme[sizeof(c.stheme) - 1] = 0; }
     else if (!strcmp(key, "mix"))    c.mix = !strcmp(val, "sum") ? 0 : !strcmp(val, "sqrt") ? 2 : 1;
+    else if (!strcmp(key, "i2sn"))   c.i2sn   = (uint16_t)atoi(val);
+    else if (!strcmp(key, "i2slen")) c.i2slen = (uint16_t)atoi(val);
   }
   if (c.volv > 100) c.volv = 100;
   if (c.vols > 100) c.vols = 100;
+  // Clamp to what the IDF driver accepts (count 2..128, len 8..1024) and refuse a geometry
+  // so shallow it cannot survive one SD read: 512 frames = 11.6 ms is the floor.
+  if (c.i2sn   < 2)   c.i2sn   = 2;     if (c.i2sn   > 32)   c.i2sn   = 32;
+  if (c.i2slen < 64)  c.i2slen = 64;    if (c.i2slen > 1024) c.i2slen = 1024;
+  if ((uint32_t)c.i2sn * c.i2slen < 512) { c.i2sn = 8; c.i2slen = 256; }
 }
 
 void Set::reset() { nEntry = 0; nGroup = 0; }

@@ -1,0 +1,22 @@
+# Arena — Gottlieb System 80B, sound board Gen1 (gl_mGTS80BS1).
+# Example per-title sound map: copy this file into /arena/ on the ESP's microSD,
+# next to the game's WAV samples. Format + worked example: SOUND_MAP.md
+name=Arena
+gen=80b1
+
+# Gen1 latches the 5-bit value STRAIGHT into the sound CPU: no bank protocol at all
+# (PinMAME gts80s.c s80bs_sh_w = soundlatch_w + IRQ, nothing else). So: no header= lines.
+# Do NOT add header=30:32 here — command 30 is the wall drone, not a bank prefix; the old
+# hardcoded firmware rule swallowed it and the wall went quiet.
+
+# Command 0 is the sound-bus release artefact, never a sample (SOUND_WIRE.md §1c).
+# Command 16 has been seen as a constant background token on this title — most likely the
+# same artefact with the S16 lamp bit latched high. NOT confirmed: re-check it against a
+# fresh /sndtrace capture before adding it to this line.
+ignore=0
+
+# Ground-truthed on the machine, one action at a time:
+#   spinner = cmd 21 (one-shot whoosh, ~680 ms)
+#   wall    = cmd 14 (rumble) + cmd 30 (drone, loops) + cmd 28 (the "bibibip" beep)
+loop=30
+voice=14
