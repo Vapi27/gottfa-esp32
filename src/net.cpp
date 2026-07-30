@@ -16,6 +16,7 @@
 #include "norprog.h"
 #include "fpgalink.h"
 #include "dispinject.h"
+#include "coiltest.h"
 #include "wifiprov.h"
 #ifndef BOARD_C3
 #include <SD.h>
@@ -524,6 +525,7 @@ static const RouteDoc ROUTES[] = {
   { "/sndtrace",      "diagnostic", "sound-command capture ring (CSV/JSON) -- map a title's cues" },
   { "/ramsnap",       "diagnostic", "640-byte game RAM snapshot over the FPGA link" },
   { "/dispinj",       "diagnostic", "drive the score glass by hand (time-attack must be disarmed)" },
+  { "/coiltest",      "diagnostic", "solenoid test by switch feedback: learn/replay a signature" },
   { "/jtag",          "diagnostic", "re-read the FPGA JTAG IDCODE" },
   { "/pin",           "diagnostic", "read the level of a machine-wired input (GPIO 14 or 8)" },
   { "/led",           "diagnostic", "force the status LED to a colour -- identify this board" },
@@ -1142,6 +1144,44 @@ void netBegin() {
       if (done) { if (Update.end(true)) Serial.printf("[ota] ok %u bytes\n", (unsigned)(idx+len));
                   else Update.printError(Serial); }
     });
+
+  // --- Coil test (see coiltest.h). The web UI drives this over the WebSocket; this
+  //     route is the curl/script face of the same state machine.
+  //       GET /coiltest                -> live status + last results (JSON)
+  //       GET /coiltest?do=learn[&ms=] -> build the per-coil switch signature, save it
+  //       GET /coiltest?do=test[&ms=]  -> replay it and report per coil
+  //       GET /coiltest?do=abort       -> stop the run in progress
+  //       GET /coiltest?key=NN         -> load another game's saved signature
+  //     Like the deferred-job routes, the handler only validates and arms: it answers
+  //     202 immediately and the pulsing happens on loopTask. Unlike them it is NOT a
+  //     jobRun() body -- a job body runs to completion inside netLoop(), and a ~25 s
+  //     LEARN there would stall diag::tick(), wifiprov::tick() and the WS pings just as
+  //     badly as blocking the async task. Poll this same URL instead of /jobstatus.
+  server.on("/coiltest", HTTP_GET, [](AsyncWebServerRequest *r) {
+    String act = r->hasParam("do") ? r->getParam("do")->value() : "";
+    if (act == "abort") { coiltest::abort(); r->send(200, "application/json", "{\"abort\":true}"); return; }
+    if (act == "learn" || act == "test") {
+      int key = r->hasParam("key") ? atoi(r->getParam("key")->value().c_str()) : coiltest::keyFor();
+      uint8_t ms = r->hasParam("ms") ? (uint8_t)atoi(r->getParam("ms")->value().c_str()) : 0;
+      const char *err = coiltest::start(act == "learn", key, ms);
+      char j[320];
+      if (err) {
+        snprintf(j, sizeof(j), "{\"accepted\":false,\"err\":\"%s\"}", err);
+        r->send(409, "application/json", j);
+      } else {
+        snprintf(j, sizeof(j),
+                 "{\"accepted\":true,\"async\":true,\"mode\":\"%s\",\"key\":%d,"
+                 "\"poll\":\"/coiltest\","
+                 "\"note\":\"runs from the main loop; poll until run==0, then read c[]\"}",
+                 act.c_str(), key);
+        r->send(202, "application/json", j);
+      }
+      return;
+    }
+    if (r->hasParam("key") && !coiltest::busy())
+      coiltest::load(atoi(r->getParam("key")->value().c_str()));
+    r->send(200, "application/json", coiltest::statusJson());
+  });
 
   // --- Scope helper: /norloop?on=1 repeats the JEDEC read (400 kHz, one burst
   //     every ~100 ms, from netLoop, not the handler) so an oscilloscope can

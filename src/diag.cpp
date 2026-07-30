@@ -8,6 +8,7 @@
 #include "fpgalink.h"
 #include "tourney.h"
 #include "dispinject.h"
+#include "coiltest.h"
 
 // ===========================================================================
 //  LISYcontrol backend.  Browser <--WebSocket(JSON)--> here <--SPI--> lisyctrl.
@@ -89,6 +90,20 @@ namespace {
   }
 
   void txt(AsyncWebSocketClient*c, const String&s){ if(c) c->text(s); else if(g_ws) g_ws->textAll(s); }
+
+  // --- coiltest bus lending -------------------------------------------------
+  // coiltest owns no hardware; it borrows this file's shared-bus bridge through three
+  // function pointers. ctReady() is the single source of truth for "may a coil fire":
+  // the FPGA must have granted the bus (diag mode) AND the outputs must be armed. It is
+  // re-read by coiltest on every tick, so dropping either one stops a run in progress.
+  uint8_t ctRead (uint8_t r)            { return bridgeRead(r); }
+  void    ctWrite(uint8_t r, uint8_t v) { bridgeWrite(r, v); }
+  // fpgalink::diagActive() is tested on top of busOwned on purpose: bus arbitration below
+  // needs 3 confirming ticks before it releases, and firing a solenoid into a bus the FPGA
+  // has already taken back is not something to do for even one pass.
+  bool    ctReady() { return busOwned && outputs && fpgalink::diagActive(); }
+
+  void sendCoilTest(AsyncWebSocketClient*c){ txt(c, coiltest::statusJson()); }
 
   void sendInfo(AsyncWebSocketClient*c){
     JsonDocument d; d["t"]="info"; d["fw"]=fw; d["idcode"]=idcode; d["ip"]=ip; d["mode"]=mode;
@@ -282,6 +297,7 @@ namespace {
 
   // ---- bus arbitration: follow the FPGA Debug handshake (= lisy_active) -----
   void busRelease(){
+    coiltest::abort();                 // before the bus goes: a run cannot outlive diag mode
     if(busOwned) SPI.end();
     busOwned=false;
     pinMode(PIN_SPI_SCLK,INPUT); pinMode(PIN_SPI_MOSI,INPUT); pinMode(PIN_SPI_MISO,INPUT);
@@ -327,6 +343,7 @@ void diag::begin() {
   pinMode(PIN_SPI_SCLK, INPUT);                // Group-A stays Hi-Z until the bus is granted
   pinMode(PIN_SPI_MOSI, INPUT);
   pinMode(PIN_SPI_MISO, INPUT);
+  coiltest::begin({ ctRead, ctWrite, ctReady });   // LittleFS is already mounted (setup())
 }
 void diag::attach(AsyncWebSocket *ws){ g_ws = ws; }
 void diag::setInfo(const char*f,uint32_t id,const char*m,const char*i){
@@ -339,6 +356,7 @@ void diag::setInfo(const char*f,uint32_t id,const char*m,const char*i){
 void diag::onConnect(AsyncWebSocketClient*c){
   sendInfo(c); sendArr("lamps",lamps,6,c); sendArr("sw",sw,8,c);
   sendArr("sound",snd,4,c); sendArr("dip",dipv,4,c); sendSndInfo(c); sendSysInfo(c); sendTourney(c);
+  sendCoilTest(c);                             // learned signatures + last run's verdicts
   sendTa();                                    // live time-attack state (countdown, arm, FPGA flags)
   JsonDocument d; d["t"]="status"; d["outputs"]=outputs?1:0; d["wd"]=wd_tripped?1:0;
   addBall(d);
@@ -354,6 +372,7 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
   else if(!strcmp(cmd,"outputs")) {
     if(!busOwned) return;                       // can only arm outputs while we own the bus
     outputs = (int)d["v"]!=0;
+    if(!outputs) coiltest::abort();             // disarming mid-run stops it, loudly
     bridgeWrite(REG_CTRL, (outputs?0x01:0x00) | (blink?0x02:0x00));   // lisyctrl CTRL
     if(!outputs){ memset(lamps,0,6); memset(sw,0,8); sendArr("lamps",lamps,6,nullptr); sendArr("sw",sw,8,nullptr); }
     Serial.printf("[diag] outputs=%d\n", outputs); sendStatus();
@@ -387,6 +406,26 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
     String s; serializeJson(cs,s); txt(nullptr,s);
     Serial.printf("[coil] sense i=%d peak=%d amp=%d -> %s\n", i, peak, amp, vd);
 #endif
+  }
+  // --- coil test: learn / replay a switch signature per solenoid ---------------------
+  // These three handlers run on the AsyncTCP task, so they do NOTHING but validate and
+  // arm: the pulse-and-watch work is an incremental state machine ticked from loopTask
+  // (see coiltest.h for why it is not a net.cpp jobRun() body). Every refusal is
+  // reported -- the silent no-op that "if(!outputs) return;" above performs is exactly
+  // the failure mode this feature exists to avoid.
+  else if(!strcmp(cmd,"ct_learn") || !strcmp(cmd,"ct_test")) {
+    bool learn = (cmd[3]=='l');
+    int  key   = d["key"].is<int>() ? (int)d["key"] : coiltest::keyFor();
+    const char* err = coiltest::start(learn, key, (uint8_t)(d["ms"] | 0));
+    JsonDocument a; a["t"]="ctstart"; a["ok"]=err?0:1; a["learn"]=learn?1:0;
+    a["key"]=key; a["err"]=err?err:"";
+    String s; serializeJson(a,s); txt(nullptr,s);
+    sendCoilTest(nullptr);
+  }
+  else if(!strcmp(cmd,"ct_abort")) { coiltest::abort(); sendCoilTest(nullptr); }
+  else if(!strcmp(cmd,"ct_get"))   {                       // also: switch the loaded slot
+    if(d["key"].is<int>() && !coiltest::busy()) coiltest::load((int)d["key"]);
+    sendCoilTest(c);
   }
   else if(!strcmp(cmd,"sound")) {
     if(!outputs) return; int n=d["n"]|0;
@@ -531,6 +570,19 @@ void diag::tick(){
   bool dbg = fpgalink::diagActive();
   if(dbg!=busOwned){ if(++dbgConfirm>=3){ dbgConfirm=0; if(dbg) busAcquire(); else busRelease(); } }
   else dbgConfirm=0;
+
+  // Coil test: a few hundred microseconds of SPI per pass, ahead of the 25 Hz gate below
+  // because its sampling window needs ~4 ms resolution, not 40. While it runs it owns the
+  // switch/fault reads (it clears COIL_FAULT around every pulse), so the periodic scan
+  // below stands down rather than fighting it for the bus and mis-attributing faults.
+  coiltest::tick();          // unconditional: losing the bus must ABORT a run, not freeze it
+  { static bool ctWas=false; static uint32_t ctPush=0;
+    bool ctNow=coiltest::busy();
+    if(ctNow && millis()-ctPush>=250){ ctPush=millis(); sendCoilTest(nullptr); }
+    if(ctWas && !ctNow){ sendCoilTest(nullptr); sendArr("sw",sw,8,nullptr); }   // final report
+    ctWas=ctNow;
+    if(ctNow) return;
+  }
 
   uint32_t now=millis();
   if(now-lastTick<40) return; lastTick=now;              // ~25 Hz

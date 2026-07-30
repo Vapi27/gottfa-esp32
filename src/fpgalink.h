@@ -50,6 +50,13 @@ namespace fpgalink {
   // (sub-100 ms latency) and index 0x72 of every RAM snapshot (~1 Hz re-sync) — then debounced,
   // so a single glitched byte cannot start or end a tournament game.
   bool gameInProgress();
+  // Selected game number (token 0x40|game[5:0]), or -1 if the FPGA has never sent one.
+  // ⚠ NOT a heartbeat. sound_link.vhd latches game_r from the live input at reset and only
+  // emits the token on a LATER change, so a board whose game_select never moves after reset
+  // legitimately reports -1 for ever. Callers keying persistent per-title data off this must
+  // handle -1 (ask the operator) rather than silently folding every title into slot 0.
+  int      gameNo();
+  uint32_t gameAgeMs();   // ms since that token, 0xFFFFFFFF = jamais recu
   // Live sound commands (token 0x80|cmd), FIFO, for the time-attack bonus. Returns false when
   // empty. Independent of the WAV player: the caller decides what a command is worth.
   bool popSound(uint8_t& cmd);

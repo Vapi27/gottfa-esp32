@@ -63,6 +63,38 @@ Bench instruments. Read-only or momentary — but read the FPGA-reset warning be
 | `/led?r=..&g=..&b=..` | force the status LED to a colour — *which board in the rack is this?* The beacon takes the LED back on its next state change. |
 | `/verify?path=…` | CRC32 a stored dump and look it up in the known-good ROM DB. |
 | `/dump?type=…` | EPROM-reader daughterboard. Returns 503 unless `EPROM_READER_ENABLE` is set. |
+| `/coiltest` | solenoid test by switch feedback — see below. `?do=learn`, `?do=test`, `?do=abort`, `?key=NN`. |
+
+### `/coiltest` — which solenoid did not fire
+
+A healthy solenoid **moves** something, and nearly everything that moves is watched by a
+switch: the outhole kicker *opens* the outhole switch, a drop-target reset *closes* a whole
+bank. So no current sensor is needed — only a per-machine table of which switch each of the
+nine CPU-driven coils is supposed to disturb. Nobody has that table, so the machine builds
+it once and replays it afterwards.
+
+**On the machine, in this order.** Long-press the door TEST button (diag mode) → open the web
+UI → **Bobines** tab → arm *mode contrôle* at the top → **Apprendre** (~25 s, once per title;
+the ball tray should be in its normal resting state and nobody should touch the playfield) →
+afterwards **Tester** (~5 s) any time. Signatures are saved to LittleFS as `/coilsig-NN.json`,
+keyed by the FPGA game number; re-running *Apprendre* overwrites.
+
+Per coil the test reports `ok`, `partiel`, `aucune réaction`, `non testable` (learn found no
+switch that moves — knocker, chimes, coin lockout) or `contact inattendu`, plus any
+`COIL_FAULT` the FPGA latched. **Coils marked "non testable" are a real blind spot, not a
+pass** — check those by ear.
+
+Learn pulses each coil three times and keeps a switch only if it reacted in at least two of
+them, and each repetition is preceded by an idle control window of the same length so that a
+direct-wired pop bumper firing on its own leaf switch is measured and subtracted instead of
+being written into the signature. Flippers, bumpers and slingshots are wired direct on this
+machine: they are never *tested*, but they can fire at any time and the control window is what
+keeps them out of the results.
+
+Both the route and the WebSocket commands return immediately; the pulsing runs as an
+incremental state machine on the main loop (`coiltest.cpp`), so it never blocks AsyncTCP.
+Poll `GET /coiltest` until `run` is 0. It refuses — out loud — unless diag mode is active
+**and** the outputs are armed, and it aborts if either is lost mid-run.
 
 ### ⚠ These take the shared SPI bus — **they reset the FPGA**
 

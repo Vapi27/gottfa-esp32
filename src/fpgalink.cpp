@@ -17,6 +17,15 @@ namespace {
   uint32_t g_rxCount = 0;             // total bytes ever received on the link
   uint8_t  g_lastByte = 0;            // most recent raw byte
   uint32_t g_lastMs = 0;             // millis() of the most recent byte
+  // --- selected game number (token 0x40|game[5:0]) ---------------------------------
+  // CHANGE-DRIVEN, NOT a heartbeat: sound_link.vhd loads game_r from the live `game` input
+  // on reset and only queues a token when `game /= game_r` afterwards (the 50 ms heartbeat
+  // re-announces the mode and game-state tokens ONLY). So this can legitimately stay -1 for
+  // ever on a board whose game_select was already stable when reset was released. Anything
+  // keying persistent per-title data off it MUST handle -1 instead of assuming a game 0.
+  int8_t   g_gameNo = -1;             // last 0x40|game token, -1 = never received
+  uint32_t g_gameMs = 0;              // millis() of that token
+
   // --- game in progress: the FPGA watches RIOT RAM $0072 and emits 0xA0|value on change ---
   uint8_t  g_ball = 0;                // last $0072 value received (0..15)
   uint32_t g_ballCount = 0;           // how many 0xA0 tokens have been seen
@@ -238,6 +247,8 @@ void poll() {
       }
     }
     else if ((b & 0xC0) == 0x40) {            // game number 0x40..0x7F -> games.txt -> set
+      g_gameNo = (int8_t)(b & 0x3F);          // both tiers: keyed per-title data needs it too
+      g_gameMs = millis();
 #ifndef BOARD_C3
       wavplayer::selectGame(b & 0x3F);        // No = GottFA80_PLuS gamelist index
 #endif
@@ -263,6 +274,10 @@ void stats(uint32_t& total, uint8_t& last, uint32_t& ageMs) {
   total = g_rxCount; last = g_lastByte;
   ageMs = g_rxCount ? (millis() - g_lastMs) : 0xFFFFFFFF;
 }
+
+// Selected game number, or -1 if the FPGA has never announced one (see g_gameNo).
+int  gameNo()      { return g_gameNo; }
+uint32_t gameAgeMs(){ return (g_gameNo < 0) ? 0xFFFFFFFFu : (millis() - g_gameMs); }
 
 // Ball in play: last value, number of 0xA0|value tokens seen, ms since the last one.
 void ballStats(uint8_t& value, uint32_t& count, uint32_t& ageMs) {

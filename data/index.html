@@ -69,6 +69,21 @@
   .coil .n{font-size:1.05rem;font-weight:700}.coil .t{font-size:.62rem;color:var(--muted)}.coil.fire .t{color:#04243a}
   .coil.cshort{background:#3a0d12;border-color:var(--bad);color:var(--bad)}
   .coil.copen{background:#3a2a0d;border-color:var(--warn);color:var(--warn)}
+  /* coil diagnostic (learn / test by switch feedback) */
+  .ctbar{height:8px;background:var(--panel2);border:1px solid var(--line);border-radius:6px;overflow:hidden;margin:.6rem 0 .45rem}
+  .ctbar i{display:block;height:100%;background:var(--accent);width:0;transition:width .3s}
+  .ctrow{display:grid;grid-template-columns:2rem 1fr auto;gap:.55rem;align-items:center;
+    background:var(--panel2);border:1px solid var(--line);border-radius:9px;padding:.45rem .6rem;margin-bottom:.35rem;font-size:.8rem}
+  .ctrow.cur{border-color:var(--accent);box-shadow:0 0 9px #39b6ff44}
+  .ctrow .cn{font-weight:700;text-align:center;font-size:.95rem}
+  .ctrow .cd{color:var(--muted);font-size:.7rem;line-height:1.4}
+  .bdg{font-size:.68rem;padding:.15rem .5rem;border-radius:20px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
+  .bdg.ok{border-color:var(--ok);color:var(--ok)} .bdg.warn{border-color:var(--warn);color:var(--warn)}
+  .bdg.bad{border-color:var(--bad);color:var(--bad)}
+  .swchip{display:inline-block;border:1px solid var(--line);border-radius:5px;padding:0 .28rem;
+    margin:0 .2rem .14rem 0;font-variant-numeric:tabular-nums;color:var(--txt);font-size:.74rem}
+  .swchip i{color:var(--muted);font-style:normal;font-size:.86em}
+  .swchip.miss{border-color:var(--bad);color:var(--bad)} .swchip.xtra{border-color:var(--warn);color:var(--warn)}
   .snds{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:6px}
   .psbank{grid-column:1/-1;font-size:.72rem;color:var(--accent);font-weight:700;margin:.55rem 0 .15rem;letter-spacing:.02em}
   .psbank span{color:var(--muted);font-weight:400}
@@ -172,6 +187,33 @@
       <input type="range" id="pw" min="10" max="150" value="60" step="5" oninput="pwv.textContent=this.value">
       <div class="coils" id="coils" style="margin-top:.7rem"></div>
       <div class="note warn">Impulsion momentanée (watchdog FPGA). Pas de maintien = pas de bobine collée.</div>
+    </div>
+
+    <div class="panel">
+      <h2>Diagnostic — quelle bobine n'a pas tiré ?</h2>
+      <div class="row" style="align-items:center;margin-bottom:.5rem">
+        <span class="pill" id="ct_key">jeu —</span>
+        <span class="pill" id="ct_state">—</span>
+        <span class="grow"></span>
+        <button class="btn accent" id="ct_bl" onclick="ctRun('learn')">Apprendre</button>
+        <button class="btn accent" id="ct_bt" onclick="ctRun('test')">Tester</button>
+        <button class="btn danger" id="ct_bs" onclick="ctAbort()">Arrêter</button>
+      </div>
+      <div class="ctbar"><i id="ct_fill"></i></div>
+      <div class="note" id="ct_msg">—</div>
+      <div id="ct_tbl" style="margin-top:.6rem"></div>
+      <div class="note">
+        Une bobine saine <b>déplace</b> quelque chose, et presque tout ce qui bouge est vu par un contact
+        (l'éjecteur d'outhole <b>ouvre</b> le contact d'outhole, un relève-cibles en <b>ferme</b> plusieurs…).
+        <b>Apprendre</b> pulse chaque bobine plusieurs fois et retient les contacts qui réagissent à chaque
+        fois : c'est sa <b>signature</b>, enregistrée pour ce jeu. <b>Tester</b> rejoue la signature et dit
+        laquelle ne répond plus.
+      </div>
+      <div class="note warn">
+        Knocker, carillons, verrou de monnayeur… ne bougent aucun contact : ils sont marqués
+        <b>« non testable »</b> plutôt que déclarés bons à tort. Détection électrique (coupée / en court-circuit)
+        = shunt de courant, pas encore installé.
+      </div>
     </div>
   </section>
 
@@ -504,6 +546,9 @@ const st={ws:null,connected:false,demo:false,outputs:false,is80B:false,blink:fal
   ta:{mode:0,start:600000,decay:15000,bonus:3000,cap:30000,      // config (persisted on the ESP)
       running:0,rem:0,pause:0,bgot:0,gip:0,ctrl:0,t0:0},          // live sample from the ESP + its date
   tfpga:0, tfpgaBus:0, armed:0,
+  /* coil diagnostic: last {t:'coiltest'} sample from the ESP (see coiltest.h) */
+  ct:{run:0,mode:'test',key:99,live:99,gen:1,sigk:-1,coil:0,rep:0,reps:1,pulse:60,win:400,
+      lreps:3,lmin:2,sreps:3,ms:0,pct:0,err:'',ready:0,c:[]},
   names:{sw:{},lamp:{},coil:{},snd:{}}, romHas:{}};
 
 /* ---------- build ---------- */
@@ -547,6 +592,60 @@ function lampBlink(){if(!gate())return need();st.blink=!st.blink;document.getEle
 function coil(i){if(!gate())return need();const ms=+pw.value,e=document.getElementById('k'+i);
   e.classList.add('fire');setTimeout(()=>e.classList.remove('fire'),Math.max(120,ms));send({c:'coil',i,ms});}
 function sound(i){if(!gate())return need();st.snd[i]^=1;if(st.snd[i])st.snd.forEach((v,j)=>{if(j!=i)st.snd[j]=0});renderSnd();send({c:'sound',n:i});}
+/* ---- coil diagnostic: learn / replay a switch signature per solenoid ---- */
+function ctRun(mode){
+  /* The ESP is authoritative on whether this is allowed; we only pre-warn so the
+     operator is not left guessing why nothing happened. */
+  if(!gate()){document.getElementById('ct_msg').textContent=
+    'Mode diag + « mode contrôle » requis : appui long sur le bouton TEST de la portière, puis le bouton en haut.';return need();}
+  if(mode==='learn'&&!confirm('Apprentissage : chaque bobine va être pulsée '+st.ct.lreps+
+    ' fois (~'+ctEta()+' s). La signature enregistrée pour ce jeu sera remplacée. Continuer ?'))return;
+  document.getElementById('ct_msg').textContent=(mode==='learn'?'Apprentissage':'Test')+' demandé…';
+  send({c:mode==='learn'?'ct_learn':'ct_test',ms:+pw.value});
+}
+function ctAbort(){send({c:'ct_abort'});}
+function ctEta(){const t=st.ct;/* per rep: idle window (learn only) + pulse + watch + cooldown */
+  const per=(t.win|0)+(t.pulse|0)+65+(t.mode==='learn'?(t.win|0):0);
+  return Math.round(9*(t.lreps||3)*per/1000);}
+const CT_V={ok:['OK','ok'],partiel:['partiel','warn'],muet:['aucune réaction','bad'],
+            nonteste:['non testable','' ],abandon:['abandonné','']};
+/* denominator = the rep count the LOADED signature was built with (sreps), not today's
+   constant: a file learned by an older firmware must not be re-labelled "2/3". */
+function ctChip(s,cls){return '<span class="swchip '+(cls||'')+'">'+s.i+(s.h?(' <i>'+s.h+'/'+(st.ct.sreps||st.ct.lreps||3)+'</i>'):'')+'</span>';}
+function renderCt(){
+  const t=st.ct,run=!!t.run;
+  const bl=document.getElementById('ct_bl'),bt=document.getElementById('ct_bt'),bs=document.getElementById('ct_bs');
+  if(!bl)return;
+  bl.classList.toggle('disabled',run); bt.classList.toggle('disabled',run); bs.classList.toggle('disabled',!run);
+  document.getElementById('ct_key').textContent =
+    'jeu '+(t.gen?'inconnu (profil générique)':('#'+t.key))+(t.sigk>=0?'':' · jamais appris');
+  document.getElementById('ct_state').textContent =
+    run?((t.mode==='learn'?'apprentissage':'test')+' — bobine '+t.coil+(t.reps>1?(' ('+t.rep+'/'+t.reps+')'):'')):
+        (t.ms?('terminé en '+(t.ms/1000).toFixed(1)+' s'):'prêt');
+  document.getElementById('ct_fill').style.width=(t.pct|0)+'%';
+  const msg=document.getElementById('ct_msg');
+  if(t.err)msg.innerHTML='<b style="color:var(--warn)">'+esc(t.err)+'</b>';
+  else if(run)msg.textContent='Ne touche pas au plateau pendant la mesure.';
+  else if(!(st.demo||gate()))msg.textContent='Mode diag + sorties armées requis avant de lancer (bouton en haut de page).';
+  else msg.textContent='Impulsion '+t.pulse+' ms · fenêtre d’observation '+t.win+' ms · '+
+    'apprentissage '+t.lreps+' répétitions, contact retenu à partir de '+t.lmin+'.';
+  const g=document.getElementById('ct_tbl');g.innerHTML='';
+  (t.c||[]).forEach(c=>{
+    const v=CT_V[c.v]||['—',''];
+    let d='';
+    if(!c.l)d='jamais appris';
+    else if(!(c.sig||[]).length)d='aucun contact ne réagit — non testable';
+    else d='signature : '+c.sig.map(s=>ctChip(s)).join('');
+    if((c.miss||[]).length)d+='<br>sans réaction : '+c.miss.map(s=>ctChip(s,'miss')).join('');
+    if((c.xtra||[]).length)d+='<br>contact inattendu : '+c.xtra.map(s=>ctChip(s,'xtra')).join('');
+    if(c.f)d+='<br><b style="color:var(--warn)">défaut FPGA : '+
+      (c.f.clamp?'impulsion écrêtée':c.f.refire?'tir trop rapproché (refusé)':c.f.wd?'watchdog — bobine restée ON':'0x'+c.f.raw.toString(16))+'</b>';
+    g.insertAdjacentHTML('beforeend','<div class="ctrow'+(run&&c.n===t.coil?' cur':'')+'">'+
+      '<div class="cn">'+c.n+'</div>'+
+      '<div><div>'+esc(st.names.coil[c.n]||COIL_DEF[c.n]||('Coil '+c.n))+'</div><div class="cd">'+d+'</div></div>'+
+      '<span class="bdg '+v[1]+'">'+v[0]+'</span></div>');
+  });
+}
 /* ---- PSOWAV (ESP WAV engine — independent of diag mode) ---- */
 function psPlay(i,e){if(e){e.classList.add('play');setTimeout(()=>e.classList.remove('play'),350);}send({c:'snd',n:i});}
 function psStop(){send({c:'sndstop'});}
@@ -792,7 +891,8 @@ function ownFetch(){if(st.demo){document.getElementById('own_list').textContent=
 function ownGate(on){if(st.demo){setOwnPill(on);return;}
   fetch('/owned?gate='+(on?1:0)).then(r=>r.json()).then(d=>{setOwnPill(!!d.gate);toast('garde de possession '+(d.gate?'ON':'OFF'));}).catch(()=>{});}
 function renderGate(){document.querySelectorAll('#lamp .grid,#lamp .row,#coil .coils,#snd .snds,#dispFields,#disp80b')
-  .forEach(e=>e.classList.toggle('disabled',!gate()));}
+  .forEach(e=>e.classList.toggle('disabled',!gate()));
+  renderCt();}   /* the coil-diagnostic panel stays clickable on purpose: it must SAY why it refuses */
 function renderNames(){
   for(const k in st.names.sw){const e=document.getElementById('swn'+k);if(e)e.textContent=st.names.sw[k];}
   for(const k in st.names.lamp){const e=document.getElementById('ln'+k);if(e)e.textContent=st.names.lamp[k];}
@@ -866,6 +966,10 @@ function handle(m){
       const e=document.getElementById('k'+m.coil); if(e){e.classList.add('cshort');setTimeout(()=>e.classList.remove('cshort'),2500);} }
     else i_cf.textContent='—';
   }
+  else if(m.t==='coiltest'){st.ct=Object.assign(st.ct,m);renderCt();}
+  else if(m.t==='ctstart'){
+    if(!m.ok){st.ct.err=m.err||'refusé';renderCt();toast('⚠ '+(m.err||'refusé'));}
+    else{st.ct.err='';toast((m.learn?'Apprentissage':'Test')+' des bobines lancé');}}
   else if(m.t==='coilsense'){
     const e=document.getElementById('k'+m.i), cls=m.v==='short'?'cshort':m.v==='open'?'copen':'';
     if(e&&cls){e.classList.add(cls);setTimeout(()=>e.classList.remove(cls),2500);}
@@ -896,8 +1000,34 @@ function mock(o){if(o.c==='coil')console.log('demo pulse coil',o.i,o.ms+'ms');if
   if(o.c==='sysinfo')handle({t:'sysinfo',fw:'demo',idcode:'0x020F10DD',ip:'192.168.4.1',mode:'SoftAP',
     heap:212000,up:(Date.now()/1000|0)%100000,sets:Object.keys(DEMO_N).length,sd:1,c3:0});
   if(o.c==='reboot')toast('(démo) redémarrage');
+  if(/^ct_/.test(o.c))return demoCt(o);
   if(o.c==='t_fpga'){st.tfpga=o.on?1:0;renderTfpga();toast('mode tournoi FPGA '+(o.on?'armé':'désarmé'));return;}
   if(o.c==='tourney'||/^t_/.test(o.c))demoTourney(o);}
+/* Offline preview of the coil diagnostic. Deliberately shows the FOUR outcomes the real
+   thing produces — ok / aucune réaction / non testable / contact inattendu — so the page
+   can be reviewed without a machine. Nothing here runs on hardware. */
+let _ctT=null;
+function demoCt(o){
+  if(o.c==='ct_abort'){clearInterval(_ctT);_ctT=null;st.ct.run=0;st.ct.err='interrompu par l’opérateur';renderCt();return;}
+  if(o.c==='ct_get'){renderCt();return;}
+  const learn=o.c==='ct_learn';
+  const SIG={1:[],2:[{i:12,h:3}],3:[{i:35,h:3},{i:36,h:2}],4:[{i:7,h:3}],5:[],
+             6:[{i:41,h:3}],7:[{i:52,h:3}],8:[{i:60,h:3}],9:[{i:3,h:3}]};
+  st.ct=Object.assign(st.ct,{run:1,mode:learn?'learn':'test',key:51,gen:0,sigk:51,coil:1,rep:1,
+    reps:learn?3:1,pct:0,err:'',ready:1,ms:0,
+    c:[1,2,3,4,5,6,7,8,9].map(n=>({n,l:1,sig:SIG[n],v:''}))});
+  handle({t:'ctstart',ok:1,learn:learn?1:0,key:51});
+  clearInterval(_ctT);let k=0;
+  _ctT=setInterval(()=>{
+    k++;st.ct.coil=Math.min(9,k);st.ct.pct=Math.round(100*k/9);
+    const c=st.ct.c[k-1];
+    if(c){c.v=!c.sig.length?'nonteste':learn?'ok':(c.n===7?'muet':'ok');
+      if(!learn&&c.n===7)c.miss=c.sig.slice();
+      if(!learn&&c.n===3){c.v='partiel';c.miss=[c.sig[1]];}
+      if(!learn&&c.n===9)c.xtra=[{i:44}];}
+    if(k>=9){clearInterval(_ctT);_ctT=null;st.ct.run=0;st.ct.pct=100;st.ct.ms=learn?24800:5200;}
+    renderCt();},400);
+}
 function demoTourney(o){
   const t=st.ta;
   if(o.c==='t_mode'){t.mode=o.mode;t.start=o.start;t.decay=o.decay;if(t.mode!==1)st.armed=0;renderMode();return;}
@@ -954,7 +1084,7 @@ let tT;function toast(msg){const c=document.getElementById('conn'),o=c.textConte
 
 /* ---------- boot ---------- */
 buildMatrix();buildLamps();buildCoils();buildSnd();buildPsPad();buildDisp();buildDips();buildRomGames();
-applySys();applyBus();renderGate();renderPs();renderTourney();renderMode();renderTfpga();setConn('');connect();
+applySys();applyBus();renderGate();renderPs();renderTourney();renderMode();renderTfpga();renderCt();setConn('');connect();
 </script>
 </body>
 </html>
