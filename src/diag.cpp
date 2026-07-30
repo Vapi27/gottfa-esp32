@@ -221,7 +221,16 @@ namespace {
       }
     }
 
-    if(!tourney::gameActive()) return;
+    // Armed but idle: keep the UI's arm hint fresh. It reads `gip` to say "lance une partie" vs
+    // "la manche démarrera à la prochaine partie", and a missed gip edge would otherwise leave
+    // the operator staring at the wrong sentence. 0.5 Hz, one small frame — free.
+    if(!tourney::gameActive()){
+      if(tourney::curMode()==1 && tourney::armed()>0){
+        static uint32_t lastIdle=0;
+        if(now-lastIdle >= 2000){ lastIdle=now; sendTa(); }
+      }
+      return;
+    }
     uint32_t rem = tourney::liveScore(now);              // advances the countdown
 
     // Stream the countdown to the machine display. DIGITS AND BLANK ONLY — the System-80 glass
@@ -424,11 +433,28 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
     JsonDocument a; a["t"]="tfpga"; a["on"]=tourneyFpga?1:0; a["bus"]=busOwned?1:0;
     String s; serializeJson(a,s); txt(nullptr,s); }
   // Arm a player: from now on the FPGA auto-restarts games (ctrl bit0) and shows our countdown
-  // (bit1), and the countdown starts by itself at the next $0072 game start. id 0 = disarm.
-  else if(!strcmp(cmd,"t_arm"))    { int id=d["id"]|0; tourney::arm(id);
+  // (bit1), and the countdown starts by itself at the next RISING edge of $0072 — so arming while
+  // a game is already running does nothing visible until the NEXT game. NO diag / no SPI here:
+  // everything goes out on the one-wire control UART, which is live in normal play.
+  //
+  // Arming used to be able to fail in total silence: an unknown id makes tourney::arm() latch 0,
+  // and arming outside time-attack mode latches the id but leaves taTick() inert. The reply now
+  // states the outcome so the UI can verify instead of assuming. id 0 = disarm.
+  else if(!strcmp(cmd,"t_arm"))    { int id=d["id"]|0;
+    const char* err = nullptr;
+    if(id>0 && tourney::curMode()!=1) err = "mode time-attack non actif";
+    else { tourney::arm(id); if(id>0 && tourney::armed()!=id) err = "joueur inconnu"; }
     if(tourney::armed()>0 && tourney::curMode()==1)
       dispinject::setCtrl(dispinject::CTRL_AUTORESTART|dispinject::CTRL_TA_DISPLAY);
     else if(!tourney::gameActive()) dispinject::setCtrl(0);
+    sendTourney(nullptr); sendTa();
+    JsonDocument a; a["t"]="armres"; a["ok"]=err?0:1; a["id"]=tourney::armed();
+    a["err"]=err?err:""; a["gip"]=fpgalink::gameInProgress()?1:0;   // gip=1 -> the NEXT game, not this one
+    a["ctrl"]=dispinject::ctrl(); String s; serializeJson(a,s); txt(nullptr,s); }
+  // Restore the ground-truthed time-attack tuning. A saved /tourney.json outranks the firmware
+  // defaults, so changing them in code alone never reaches a board that has already run.
+  else if(!strcmp(cmd,"t_defaults")) { tourney::resetTaDefaults();
+    pushTaConfig(tourney::taStart(), tourney::taDecay());
     sendTourney(nullptr); sendTa(); }
   else if(!strcmp(cmd,"t_disarm")) { tourney::arm(0);                          // disarm, keep any running game
     if(!tourney::gameActive()) dispinject::setCtrl(0); sendTourney(nullptr); sendTa(); }

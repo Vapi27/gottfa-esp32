@@ -344,11 +344,9 @@
         <button class="btn modebtn" id="mb0" onclick="tSetMode(0)">Score flipper</button>
         <button class="btn modebtn" id="mb1" onclick="tSetMode(1)">⏱ Time-attack</button>
       </div>
-      <div class="row" style="margin-top:.7rem;align-items:center">
-        <span class="grow" style="font-size:.84rem">Mode tournoi <b>FPGA</b> <span id="tfpgaSt" class="pill">—</span></span>
-        <label class="switch"><input type="checkbox" id="tfpga" onchange="tFpga(this.checked)"><span class="slide"></span></label>
-      </div>
-      <div class="note">Décompte sur l'afficheur de la machine + anti free-game. À armer en <b>mode diag</b> ; persiste en jeu.</div>
+      <div class="note"><b>Score flipper</b> = tu relèves le score affiché et tu le saisis.
+        <b>⏱ Time-attack</b> = l'ESP tient un compte à rebours, l'affiche sur la machine et coupe la
+        partie à zéro. Les deux se pilotent <b>en jeu normal</b> — le mode test/diag n'est jamais nécessaire.</div>
     </div>
 
     <div class="panel" id="taCfg" style="display:none">
@@ -360,18 +358,22 @@
         <b>Aucun besoin du mode diag</b> — le diag garde le 6502 en reset, donc on ne peut pas y jouer.</div>
 
       <div class="row" style="margin-top:.7rem;align-items:flex-end">
-        <label class="fld" style="flex:1;margin:0">Départ (pts)<input type="number" id="taStart" value="1000000" min="1" max="9999999" step="1000"></label>
-        <label class="fld" style="flex:1;margin:0">Perte / sec<input type="number" id="taDecay" value="10000" min="1" max="9999999" step="1000"></label>
+        <label class="fld" style="flex:1;margin:0">Départ (pts)<input type="number" id="taStart" value="600000" min="1" max="9999999" step="1000"></label>
+        <label class="fld" style="flex:1;margin:0">Perte / sec<input type="number" id="taDecay" value="15000" min="1" max="9999999" step="1000"></label>
         <button class="btn" onclick="tCfg()">OK</button>
       </div>
       <div class="row" style="margin-top:.5rem;align-items:flex-end">
-        <label class="fld" style="flex:1;margin:0">Bonus / son<input type="number" id="taBonus" value="25000" min="0" max="9999999" step="1000"></label>
-        <label class="fld" style="flex:1;margin:0">Bonus max / partie<input type="number" id="taCap" value="500000" min="0" max="9999999" step="10000"></label>
+        <label class="fld" style="flex:1;margin:0">Bonus / son<input type="number" id="taBonus" value="3000" min="0" max="9999999" step="500"></label>
+        <label class="fld" style="flex:1;margin:0">Bonus max / partie<input type="number" id="taCap" value="30000" min="0" max="9999999" step="5000"></label>
         <button class="btn" onclick="tBonusCfg()">OK</button>
+      </div>
+      <div class="row" style="margin-top:.5rem;align-items:center">
+        <span class="grow note" style="margin:0">Base actuelle : <b id="taBase">—</b> de jeu avant le zéro (départ ÷ perte/sec).</span>
+        <button class="btn" onclick="tDefaults()" title="600 000 pts, −15 000/s, +3 000/son, +30 000 max">↺ Réglages conseillés</button>
       </div>
 
       <div class="taLive" id="taLive" style="display:none">
-        <div class="taScore" id="taScore">1 000 000</div>
+        <div class="taScore" id="taScore">600 000</div>
         <div class="taWho" id="taWho">—</div>
         <div class="taSub" id="taSub">—</div>
         <div class="row" style="justify-content:center">
@@ -383,15 +385,18 @@
 
       <div class="row" id="taArmRow" style="margin-top:.7rem">
         <select id="taPlayer" style="flex:1"></select>
-        <button class="btn accent" onclick="tArm()">🎯 Armer</button>
+        <button class="btn accent" id="taArmBtn" onclick="tArm()">🎯 Armer</button>
         <button class="btn" onclick="tStartGame()">▶ Manuel</button>
       </div>
       <div class="row" id="taDisarmRow" style="display:none;margin-top:.7rem;align-items:center">
-        <span class="grow" style="font-size:.84rem">Armé : <b id="taArmed">—</b> — lance une partie sur le flipper</span>
+        <span class="grow" style="font-size:.84rem">🎯 Armé : <b id="taArmed">—</b><br><span id="taArmHint" class="note" style="margin:0">—</span></span>
         <button class="btn" onclick="tDisarm()">Désarmer</button>
       </div>
-      <div class="note"><b>Armer</b> = le chrono démarre tout seul à la prochaine partie ($0072) et le FPGA relance
-        les parties. <b>Manuel</b> = tu démarres le chrono maintenant, sans attendre la machine.</div>
+      <div class="note" id="taArmMsg" style="display:none"></div>
+      <div class="note"><b>Armer</b> = le chrono démarre tout seul au <b>démarrage de la prochaine partie</b>, et le
+        FPGA relance les parties tout seul. ⚠ Si une partie est <b>déjà en cours</b> au moment où tu armes, il ne se
+        passe rien tant qu'elle n'est pas finie : le chrono s'accroche au <i>démarrage</i> d'une partie, pas à une
+        partie en cours. <b>Manuel</b> = tu démarres le chrono maintenant, sans attendre la machine.</div>
       <div class="kv" style="margin-top:.5rem"><span class="k">Partie en cours ($0072)</span><span id="taGip">—</span></div>
       <div class="kv"><span class="k">Drapeaux FPGA</span><span id="taCtrl">—</span></div>
     </div>
@@ -405,6 +410,22 @@
         <button class="btn" onclick="tReset()">Scores → 0</button>
         <button class="btn danger" onclick="tClear()">Tout effacer</button>
       </div>
+    </div>
+
+    <!-- Expert. The ONLY tournament control that needs diag mode, kept out of the time-attack
+         flow on purpose: it writes lisyctrl CTRL2 over the shared SPI bus, which the FPGA only
+         releases while diag is active. It has nothing to do with the countdown. -->
+    <div class="panel">
+      <h2>Avancé — expert</h2>
+      <div class="row" style="align-items:center">
+        <span class="grow" style="font-size:.84rem">Bloquer le <b>knocker</b> / parties gratuites <span id="tfpgaSt" class="pill">—</span></span>
+        <label class="switch"><input type="checkbox" id="tfpga" onchange="tFpga(this.checked)"><span class="slide"></span></label>
+      </div>
+      <div class="note">Neutralise dans le FPGA la bobine de <b>knocker</b> (replay / match) : en tournoi « officiel »,
+        personne ne gagne de partie gratuite. Le bit reste verrouillé et <b>persiste en jeu</b> une fois posé.</div>
+      <div class="note warn">⚠ Ce seul réglage passe par le <b>bus SPI partagé</b>, que le FPGA ne libère qu'en
+        <b>mode test/diag</b> : bascule-le depuis l'onglet Test, puis sors du diag. Il n'est
+        <b>pas</b> nécessaire au time-attack (chrono, armement, relance auto) — ceux-là marchent en jeu normal.</div>
     </div>
   </section>
 
@@ -432,7 +453,9 @@ const N_LAMP=48, N_COIL=9, N_SND=32, N_DIP=32;
 const st={ws:null,connected:false,demo:false,outputs:false,is80B:false,blink:false,bus:'normal',lisy:'—',
   sw:Array(8).fill(0), lamps:Array(N_LAMP).fill(0), snd:Array(N_SND).fill(0), dip:Array(N_DIP).fill(0),
   ps:{ready:false,theme:'',mask:0,loop:0,voice:0,n:0,themes:[],snds:[]}, games:[], tourney:[],
-  ta:{mode:0,start:1000000,decay:10000,bonus:25000,cap:500000,   // config (persisted on the ESP)
+  /* time-attack config — same shipped defaults as tourney.h TA_DEF_* (600000/15000 = 40 s de base;
+     bonus 3000 plafonné à 30000 reste très en dessous de la perte, sinon la manche ne finit jamais) */
+  ta:{mode:0,start:600000,decay:15000,bonus:3000,cap:30000,      // config (persisted on the ESP)
       running:0,rem:0,pause:0,bgot:0,gip:0,ctrl:0,t0:0},          // live sample from the ESP + its date
   tfpga:0, tfpgaBus:0, armed:0,
   names:{sw:{},lamp:{},coil:{},snd:{}}, romHas:{}};
@@ -573,14 +596,25 @@ function renderMode(){const t=st.ta;
   if(dis)dis.style.display=(!run&&st.armed)?'flex':'none';
   const who=document.getElementById('taWho'); if(who)who.textContent=run?pname(t.running):'';
   const ar=document.getElementById('taArmed'); if(ar)ar.textContent=st.armed?pname(st.armed):'—';
+  const hi=document.getElementById('taArmHint'); if(hi)hi.innerHTML=taArmHint();
   const pb=document.getElementById('taPauseBtn'); if(pb)pb.textContent=t.pause?'▶ Reprendre':'⏸ Pause';
   const gp=document.getElementById('taGip'); if(gp)gp.textContent=t.gip?'oui — partie en cours':'non (attract)';
   const ct=document.getElementById('taCtrl'); if(ct)ct.textContent=t.ctrl?
     (((t.ctrl&1)?'relance auto ':'')+((t.ctrl&2)?'afficheur ':'')).trim()+' (0x'+t.ctrl.toString(16)+')':'—';
+  const bs=document.getElementById('taBase'); if(bs)bs.textContent=t.decay>0?fmtDur(t.start/t.decay):'∞';
   const stp=document.getElementById('taSt'); if(stp){
-    stp.textContent=run?(t.pause?'en pause':'en cours'):(st.armed?'armé':'inactif');
+    stp.textContent=run?(t.pause?'en pause':'en cours'):
+      (st.armed?(t.gip?'armé — partie suivante':'armé — lance une partie'):'inactif');
     stp.classList.toggle('on',run&&!t.pause);}
   taUpdate();}
+/* The countdown hooks onto the RISING edge of "game in progress" ($0072), so arming DURING a game
+   does nothing until the next one starts. Say so, plainly — that one behaviour cost an hour. */
+function taArmHint(){const t=st.ta;
+  if(!st.armed||t.running)return '';
+  return t.gip
+    ? '⚠ une partie est <b>déjà en cours</b> — la manche démarrera à la <b>partie suivante</b>'
+    : '<b>lance une partie</b> sur le flipper : le chrono démarre tout seul';}
+function fmtDur(s){s=Math.round(s);if(s<60)return s+' s';return ((s/60)|0)+' min '+(s%60)+' s';}
 /* live value = last ESP sample, minus the decay since it (only while actually running) */
 function taLiveVal(){const t=st.ta; if(!t.running)return t.start;
   if(t.pause)return t.rem;
@@ -598,20 +632,36 @@ let taTimer=null;
 function startTaTick(){stopTaTick();taTimer=setInterval(taUpdate,200);}
 function stopTaTick(){if(taTimer){clearInterval(taTimer);taTimer=null;}}
 function taNum(id,dflt){return +document.getElementById(id).value||dflt;}
-function tSetMode(m){send({c:'t_mode',mode:m,start:taNum('taStart',1000000),decay:taNum('taDecay',10000)});}
-function tCfg(){send({c:'t_mode',mode:1,start:taNum('taStart',1000000),decay:taNum('taDecay',10000)});}
+function tSetMode(m){send({c:'t_mode',mode:m,start:taNum('taStart',600000),decay:taNum('taDecay',15000)});}
+function tCfg(){send({c:'t_mode',mode:1,start:taNum('taStart',600000),decay:taNum('taDecay',15000)});}
 function tBonusCfg(){send({c:'t_bonus',v:taNum('taBonus',0),cap:taNum('taCap',0)});}
+function tDefaults(){send({c:'t_defaults'});}
 function tStartGame(){const id=+document.getElementById('taPlayer').value;if(id>0)send({c:'t_start',id});}
-function tArm(){const id=+document.getElementById('taPlayer').value;if(id>0)send({c:'t_arm',id});}
-function tDisarm(){send({c:'t_disarm'});}
+/* Arming is VERIFIED, never assumed: the page shows nothing as armed until the ESP's own 'ta'
+   sample comes back with armed===id (or 'armres' says why not). Without this an arm that the
+   firmware silently refused — unknown player, wrong mode — looked exactly like a successful one. */
+let armPend=null, armTimer=null;
+function armMsg(html,cls){const e=document.getElementById('taArmMsg');if(!e)return;
+  e.style.display=html?'block':'none';e.innerHTML=html||'';
+  e.style.color=cls==='bad'?'var(--bad)':(cls==='ok'?'var(--ok)':'');}
+function armClear(){clearTimeout(armTimer);armTimer=null;armPend=null;}
+function tArm(){const id=+document.getElementById('taPlayer').value;
+  if(!(id>0)){armMsg('⚠ choisis d’abord un joueur.','bad');return;}
+  if(st.ta.mode!==1){armMsg('⚠ active d’abord le mode <b>⏱ Time-attack</b>.','bad');return;}
+  armClear();armPend=id;armMsg('armement…','');
+  armTimer=setTimeout(()=>{if(armPend===null)return;armPend=null;
+    armMsg('⚠ <b>échec</b> : l’ESP n’a pas confirmé l’armement. Vérifie la connexion (point en haut) et réessaie.','bad');
+    renderMode();},3000);
+  send({c:'t_arm',id});}
+function tDisarm(){armClear();armMsg('','');send({c:'t_disarm'});}
 function tPause(){send({c:'t_pause',v:st.ta.pause?0:1});}
-function tTop(){send({c:'t_top',v:taNum('taBonus',25000)});}
+function tTop(){send({c:'t_top',v:taNum('taBonus',3000)});}
 function tStop(){if(confirm('Terminer la partie et enregistrer le score ?'))send({c:'t_stop'});}
 function tFpga(on){send({c:'t_fpga',on:on?1:0});}
 function renderTfpga(){const cb=document.getElementById('tfpga'),st2=document.getElementById('tfpgaSt');
   if(cb)cb.checked=!!st.tfpga; if(!st2)return;
   const bus=st.tfpgaBus||st.bus==='diag'||st.demo;
-  st2.textContent=st.tfpga?'armé':(bus?'désarmé':'(mode diag requis)');
+  st2.textContent=st.tfpga?'actif':(bus?'inactif':'mode diag requis');
   st2.classList.toggle('on',!!st.tfpga);}
 function fmtUp(s){s|=0;if(s<60)return s+'s';const m=(s/60)|0;if(m<60)return m+'m '+(s%60)+'s';const h=(m/60)|0;return h+'h '+(m%60)+'m';}
 function reqSys(){send({c:'sysinfo'});}

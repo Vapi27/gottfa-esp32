@@ -13,10 +13,10 @@ namespace {
   int roundIds[4] = {0,0,0,0};   // tournament player ids in game slots P1..P4 (0 = empty)
   int nRound = 0;
   uint8_t  mode = 0;             // 0 = pinball score, 1 = time-attack
-  uint32_t startPts = 1000000;   // time-attack: starting points
-  uint32_t decayPS  = 10000;     // time-attack: points lost per second
-  uint32_t bonusPts = 25000;     // time-attack: points added per qualifying sound command
-  uint32_t bonusCap = 500000;    // time-attack: max total bonus per game (0 = uncapped)
+  uint32_t startPts = tourney::TA_DEF_START;   // time-attack: starting points
+  uint32_t decayPS  = tourney::TA_DEF_DECAY;   // time-attack: points lost per second
+  uint32_t bonusPts = tourney::TA_DEF_BONUS;   // time-attack: points added per qualifying sound command
+  uint32_t bonusCap = tourney::TA_DEF_CAP;     // time-attack: max total bonus per game (0 = uncapped)
   // --- live time-attack countdown (transient, never persisted) ---
   int      activeId = 0;         // player being timed (0 = idle)
   uint32_t remain   = 0;         // points left on the clock — THE live score
@@ -49,8 +49,8 @@ void begin(){
   File f = LittleFS.open("/tourney.json", "r"); if (!f) return;
   JsonDocument d; DeserializationError e = deserializeJson(d, f); f.close(); if (e) return;
   nextId = d["nextId"] | 1;
-  mode = d["mode"] | 0; startPts = d["start"] | 1000000u; decayPS = d["decay"] | 10000u;
-  bonusPts = d["bonus"] | 25000u; bonusCap = d["cap"] | 500000u;
+  mode = d["mode"] | 0; startPts = d["start"] | TA_DEF_START; decayPS = d["decay"] | TA_DEF_DECAY;
+  bonusPts = d["bonus"] | TA_DEF_BONUS; bonusCap = d["cap"] | TA_DEF_CAP;
   int idx = 0;
   for (JsonObject o : d["players"].as<JsonArray>()) { if (idx >= MAXP) break;
     Player& p = roster[idx]; p.used = true; p.id = o["id"] | 0;
@@ -96,6 +96,14 @@ void setMode(uint8_t m, uint32_t sp, uint32_t dp){
   mode = m ? 1 : 0;
   if (sp) startPts = (sp > TA_MAX) ? TA_MAX : sp;
   if (dp) decayPS  = (dp > TA_MAX) ? TA_MAX : dp;
+  save();
+}
+// Restore the shipped time-attack tuning. /tourney.json is authoritative once written, so a
+// firmware default change alone never reaches a board that has already saved a config — this is
+// the one-click way back to the ground-truthed ~40 s run.
+void resetTaDefaults(){
+  startPts = TA_DEF_START; decayPS = TA_DEF_DECAY;
+  bonusPts = TA_DEF_BONUS; bonusCap = TA_DEF_CAP;
   save();
 }
 void setBonus(uint32_t bp, uint32_t cap){

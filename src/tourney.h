@@ -29,7 +29,16 @@ namespace tourney {
   // start-minus-decay*elapsed form overflowed uint32 (9,999,999 x 430 s > 2^32) and the score
   // wrapped back UP mid-game. All decay/bonus arithmetic below is 64-bit then clamped.
   constexpr uint32_t TA_MAX = 9999999u;         // 7 display digits (and the 24-bit lisyctrl reg)
+  // Shipped defaults — measured on the machine 2026-07-27. 600000 / 15000 = a 40 s base run, and
+  // a 3000-point bonus (0.2 s) capped at 30000 (+2 s per game) stays WELL under the drain.
+  // The previous set (1000000 / 10000 / 25000 / 500000) gave 2.5 s per sound cue against a
+  // 10000/s drain: the player earned time faster than it ran out and the run never ended.
+  constexpr uint32_t TA_DEF_START = 600000u;    // start points  -> 40 s at the default decay
+  constexpr uint32_t TA_DEF_DECAY = 15000u;     // points lost per second
+  constexpr uint32_t TA_DEF_BONUS = 3000u;      // per qualifying sound cue (= 0.2 s back)
+  constexpr uint32_t TA_DEF_CAP   = 30000u;     // max total bonus per game (= +2 s)
   void   setMode(uint8_t mode, uint32_t startPts, uint32_t decayPerSec);
+  void   resetTaDefaults();                     // restore TA_DEF_* (a persisted /tourney.json wins otherwise)
   void   setBonus(uint32_t bonusPts, uint32_t capPts);   // per-sound-hit bonus + total cap/game
   uint32_t taStart();                           // current time-attack start points (for FPGA sync)
   uint32_t taDecay();                           // current time-attack decay/sec   (for FPGA sync)
