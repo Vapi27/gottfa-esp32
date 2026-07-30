@@ -6,18 +6,45 @@
 //  Board-side wiring reference + ESP32-S3 GPIO map.
 //  Target MCU: ESP32-S3 (DevKitC-1). All I/O is 3.3 V -> no level shifting.
 //  Common ground with the GottFA board is mandatory.
+//
+//  DO NOT `git update-index --skip-worktree` THIS FILE.
+//  It was marked skip-worktree to keep a local WiFi password out of commits, and
+//  the cost was invisible for weeks: every later edit to this header stopped being
+//  committed too. By v1.0.0 the version in git had PIN_OLED_SCL still on GPIO48
+//  (the value that latched the status LED white) and no PIN_RGB_LED at all, so a
+//  fresh clone of main DID NOT COMPILE -- the firmware only built on one laptop.
+//  Verified 2026-07-30 by cloning HEAD and running `pio run -e esp32s3`: four
+//  "'PIN_RGB_LED' was not declared" errors. There are no secrets in this file any
+//  more (credentials live in NVS via the provisioning wizard), so it must stay a
+//  normal tracked file. build.sh refuses to build if the flag comes back.
 // ============================================================================
 
 #define FW_NAME    "GottFA80-PLuS ESP32-S3 companion"
-#define FW_VERSION "0.5.0"
+#define FW_VERSION "1.0.0"
 #define MDNS_HOST  "gottfa"               // -> http://gottfa.local/
 
+// Build identity. version.py (a PlatformIO pre-script) overrides both from git:
+// FW_GIT = short commit (+ "-dirty"), FW_BUILD = the COMMIT date. The fallbacks
+// below only apply when the tree is built outside a checkout (tarball, IDE that
+// skips extra_scripts) -- so an unidentifiable board says so instead of lying.
+#ifndef FW_GIT
+#define FW_GIT   "nogit"
+#endif
+#ifndef FW_BUILD
+#define FW_BUILD "unknown"
+#endif
+// One string for logs / the OLED / the tab title: "1.0.0+951b327".
+#define FW_VERSION_FULL FW_VERSION "+" FW_GIT
+
 // ---- WiFi -------------------------------------------------------------------
-#define WIFI_STA_SSID       ""            // your network (empty = go straight to AP)
-#define WIFI_STA_PASS       ""
-#define WIFI_STA_TIMEOUT_MS 12000
-#define WIFI_AP_SSID        "GottFA80-Setup"
-#define WIFI_AP_PASS        "pinball80"   // >= 8 chars
+// NO compile-time SSID/password. Credentials live in NVS and are entered through
+// the provisioning wizard (SoftAP + captive portal, see wifiprov.cpp / WIFI_SETUP.md)
+// because a customer has no toolchain. The three #defines that used to sit here --
+// WIFI_STA_SSID / WIFI_STA_PASS / WIFI_AP_SSID / WIFI_AP_PASS -- had been dead since
+// the wizard landed and one of them was a real home-network password committed to
+// git. Removed for v1; the AP name/password defaults live in wifiprov.cpp
+// (WIFIPROV_AP_BASE / WIFIPROV_AP_PASS_DEFAULT), overridable per batch with -D.
+#define WIFI_STA_TIMEOUT_MS 12000         // boot-time STA connect budget (wifiprov)
 
 // ---- ESP32-S3 GPIO map ------------------------------------------------------
 // Chosen to avoid S3 reserved pins: strapping (0/3/45/46), native-USB (19/20),
@@ -70,8 +97,18 @@
 #define PIN_FPGA_LINK     8   // UART RX from FPGA Debug pin (K2): diag-mode token + sound#/game#
 #define PIN_FPGA_DISP_TX  9   // UART TX to FPGA Audio_RX/PIN_2 (hybrid): time-attack display digits (option B)
 // Optional status OLED (SSD1306 128x32 I2C) — free S3 GPIOs; skipped gracefully if absent.
+// SCL moved 48 -> 21 (2026-07-09): GPIO48 is the on-board WS2812 RGB LED (hardwired) —
+// I2C clock traffic on it kept the LED latched garbage-white. GPIO21 is free
+// (EPROM reader is disabled). SDA stays on 47.
 #define PIN_OLED_SDA     47
-#define PIN_OLED_SCL     48
+#define PIN_OLED_SCL     21
+// On-board WS2812 RGB LED (status beacon — see statusled.h), GPIO48 on this
+// board (big "RGB" LED; shares the pin with OLED SCL above — the LED
+// auto-disables if a panel is found). CAUTION: the core's neopixelWrite()
+// binds its RMT channel to the FIRST pin it is called with and silently
+// ignores the pin argument afterwards — so PIN_RGB_LED must be right at boot;
+// you cannot probe other pins at runtime.
+#define PIN_RGB_LED      48
 #define OLED_W          128
 #define OLED_H           32
 #define OLED_ADDR      0x3C

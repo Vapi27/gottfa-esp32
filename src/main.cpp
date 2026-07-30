@@ -28,7 +28,7 @@ static void idleGroupA() {
 void setup() {
   Serial.begin(115200);
   delay(400);
-  Serial.println("\n" FW_NAME " v" FW_VERSION);
+  Serial.println("\n" FW_NAME " v" FW_VERSION_FULL "  (built " FW_BUILD ")");
 
   idleGroupA();
 

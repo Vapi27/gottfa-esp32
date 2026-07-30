@@ -26,7 +26,10 @@ void begin() {
   if (!present) { Serial.println("[oled] no SSD1306 (skipped)"); return; }
   disp.clearDisplay();
   disp.setTextColor(SSD1306_WHITE); disp.setTextSize(1); disp.setCursor(0, 0);
-  disp.println("GottFA80+ PSOWAV"); disp.println(FW_VERSION);
+  // Splash carries the full build id: 128 px = 21 chars at size 1, and
+  // "v1.0.0+951b327" is 14 -- so the board can be identified from the glass
+  // alone, with no network and no serial cable.
+  disp.println("GottFA80+ PSOWAV"); disp.println("v" FW_VERSION_FULL);
   disp.display();
   Serial.println("[oled] SSD1306 ready");
 }

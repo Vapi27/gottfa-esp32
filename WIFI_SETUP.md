@@ -112,5 +112,9 @@ Module : `src/wifiprov.{h,cpp}` + `src/wifiprov_page.h` (page embarquée en flas
 * Bouton usine : **GPIO0** (BOOT) sur ESP32-S3, libre dans `include/board_config.h`
   (JTAG TCK y est sur GPIO4). Sur la cible **C3**, GPIO0 **est** `PIN_JTAG_TCK` : le bouton est
   retiré à la compilation, seule l'action web reste.
-* `WIFI_STA_SSID` / `WIFI_STA_PASS` de `include/board_config.h` ne sont plus utilisés une fois
-  le module intégré ; `WIFI_STA_TIMEOUT_MS` sert encore de budget au premier essai au boot.
+* `WIFI_STA_SSID` / `WIFI_STA_PASS` / `WIFI_AP_SSID` / `WIFI_AP_PASS` ont été **supprimés** de
+  `include/board_config.h` en v1.0.0 : ils étaient morts depuis l'arrivée de ce module, et l'un
+  d'eux contenait un vrai mot de passe de box, commité dans git. Seul `WIFI_STA_TIMEOUT_MS`
+  reste — c'est le budget du premier essai de connexion au boot.
+* `GET /sysinfo` indique `"apPassDefault":true` tant que le mot de passe d'usine n'a pas été
+  changé : de quoi repérer d'un coup d'œil les cartes d'un lot restées au réglage par défaut.

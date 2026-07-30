@@ -55,6 +55,7 @@ namespace wifiprov {
   const char* staSsid();     // configured home SSID ("" if none)
   const char* apSsid();      // hotspot name, e.g. "GottFA80-3A7C1E"
   const char* apPass();      // hotspot password (WPA2). NEVER print the STA password anywhere.
+  bool apPassIsDefault();    // still the factory hotspot password documented in WIFI_SETUP.md
 
   // Wipe the stored network + the "stay in AP mode" choice and go back to the wizard.
   // Reconfigures the radio live — no reboot, so it can never interrupt a NOR/OTA write.

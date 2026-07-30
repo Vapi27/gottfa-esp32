@@ -4,6 +4,7 @@
 #include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
 #include <Update.h>
+#include <string.h>       // strcmp/strncpy — used by /routes and the job slot on BOTH targets
 #include <SPI.h>          // SPIClass/SPISettings: used by /nor, /norloop and /sdprobe.
                           // It used to arrive only transitively through <SD.h>, which is
                           // #ifndef BOARD_C3, so the C3 build did not see it at all.
@@ -74,6 +75,13 @@ static void wavJanitor() {
   wavRelease(false);
 }
 #endif
+
+// Dead-man timer for the two diagnostics that PARK THE HARDWARE: /norhold (drives
+// CS/CLK/MOSI low) and /norloop (repeats a JEDEC read). Both also hold the FPGA in
+// reset, i.e. the pinball is dead while they are engaged, and before v1 nothing
+// ever undid that. 0 = nothing held; otherwise the millis() when the hold started.
+static uint32_t s_holdSince = 0;
+static const uint32_t HOLD_MAX_MS = 300000;   // 5 min, then netLoop() releases
 
 // /fsup upload slot (see the upload handler): one File, one uploader at a time.
 static bool     s_fsup_busy  = false;
@@ -300,7 +308,10 @@ static void runNorWrite() {
 static void runNorProbe() {
   pinMode(PIN_FPGA_RESET, OUTPUT); digitalWrite(PIN_FPGA_RESET, LOW);   // bus grant
   delay(60);                                                             // tri-state + settle
-  static const uint32_t HZ[] = {1000000, 400000, 100000};
+  // NOT named HZ: the RISC-V newlib headers pulled in by the C3 build define HZ as
+  // a macro, so `static const uint32_t HZ[]` expanded to garbage and was one of the
+  // three errors that made `pio run -e esp32c3` broken.
+  static const uint32_t PROBE_HZ[] = {1000000, 400000, 100000};
   uint32_t best = 0; int bestHz = 0; bool bestSwap = false;
   uint32_t seen[2][3] = {{0}};
 
@@ -311,7 +322,7 @@ static void runNorProbe() {
       SPIClass s(FSPI);
       pinMode(PIN_SPI_CS_SD, OUTPUT); digitalWrite(PIN_SPI_CS_SD, HIGH);
       s.begin(PIN_SPI_SCLK, miso, mosi, PIN_SPI_CS_SD);
-      s.beginTransaction(SPISettings(HZ[k], MSBFIRST, SPI_MODE0));
+      s.beginTransaction(SPISettings(PROBE_HZ[k], MSBFIRST, SPI_MODE0));
       digitalWrite(PIN_SPI_CS_SD, LOW);
       s.transfer(0x9F);
       uint32_t v = 0;
@@ -319,7 +330,7 @@ static void runNorProbe() {
       digitalWrite(PIN_SPI_CS_SD, HIGH);
       s.endTransaction(); s.end();
       seen[sw][k] = v;
-      if (v == 0xEF4016UL) { best = v; bestHz = HZ[k]; bestSwap = sw; break; }
+      if (v == 0xEF4016UL) { best = v; bestHz = PROBE_HZ[k]; bestSwap = sw; break; }
       delay(2);
     }
   }
@@ -471,6 +482,71 @@ static void jobRun() {
                 (unsigned)s_job.id, jobKindName(s_job.kind), (unsigned)s_job.ms);
 }
 
+// ===========================================================================
+// ROUTE INDEX   (GET /routes)
+// ===========================================================================
+// Every HTTP route this firmware answers, with the group it belongs to. The
+// board is its own documentation: a machine recovered years from now can be
+// asked what it can do, and nobody has to guess whether /norwrite is safe to
+// click. Groups:
+//
+//   product     everyday use. The web UI drives these. Safe.
+//   diagnostic  bench / bring-up instruments. Read-only or momentary; they may
+//               briefly take the shared SPI bus, which resets the FPGA.
+//   service     CHANGES PERSISTENT STATE (firmware, NOR flash, ROM store, the
+//               web UI itself) or holds hardware lines. Not for a customer.
+//
+// This table is documentation only -- it does not register anything. Keep it in
+// step with the server.on() calls below; /routes is the thing people will read.
+struct RouteDoc { const char *path; const char *grp; const char *desc; };
+static const RouteDoc ROUTES[] = {
+  // ---- product ----------------------------------------------------------
+  { "/",              "product", "web UI (LittleFS index.html)" },
+  { "/ws",            "product", "WebSocket: live LISYcontrol state + commands" },
+  { "/sysinfo",       "product", "board identity: firmware, git, FPGA, WiFi, memory" },
+  { "/link",          "product", "FPGA UART telemetry: diag flag, game in progress, ball" },
+  { "/routes",        "product", "this index" },
+  { "/wifi",          "product", "provisioning portal (also served on the captive AP)" },
+  { "/wifi/status",   "product", "WiFi state, current SSID, last failure reason" },
+  { "/wifi/scan",     "product", "cached 2.4 GHz scan for the portal" },
+  { "/wifi/connect",  "product", "POST ssid+pass -> store in NVS and join" },
+  { "/wifi/aponly",   "product", "POST: stay a hotspot for ever" },
+  { "/wifi/appass",   "product", "POST: change the hotspot password" },
+  { "/wifi/forget",   "product", "POST: erase stored credentials (factory WiFi reset)" },
+  { "/snd",           "product", "PSOWAV: play a sound / load a game set / status" },
+  { "/game",          "product", "select a game's sound set by FPGA game number" },
+  { "/roms",          "product", "ROM store contents + device key + Free-Play flag" },
+  { "/fp",            "product", "read/set the Free-Play variant served to the FPGA" },
+  { "/owned",         "product", "ownership gate: list / toggle / add" },
+  { "/jobstatus",     "product", "poll a deferred job started by a service route" },
+  // ---- diagnostic -------------------------------------------------------
+  { "/beep",          "diagnostic", "440 Hz sine straight to the DAC (isolates I2S from the SD)" },
+  { "/sndtrace",      "diagnostic", "sound-command capture ring (CSV/JSON) -- map a title's cues" },
+  { "/ramsnap",       "diagnostic", "640-byte game RAM snapshot over the FPGA link" },
+  { "/dispinj",       "diagnostic", "drive the score glass by hand (time-attack must be disarmed)" },
+  { "/jtag",          "diagnostic", "re-read the FPGA JTAG IDCODE" },
+  { "/pin",           "diagnostic", "read the level of a machine-wired input (GPIO 14 or 8)" },
+  { "/led",           "diagnostic", "force the status LED to a colour -- identify this board" },
+  { "/nor",           "diagnostic", "probe the W25Q32 NOR (takes the bus: RESETS THE FPGA)" },
+  { "/sdprobe",       "diagnostic", "probe the FPGA's game-ROM SD card (RESETS THE FPGA)" },
+  { "/grant",         "diagnostic", "verify the FPGA releases the shared bus (RESETS THE FPGA)" },
+  { "/verify",        "diagnostic", "CRC32 a stored dump against the known-good ROM DB" },
+  { "/dump",          "diagnostic", "EPROM-reader daughterboard: dump a chip (off by default)" },
+  { "/norloop",       "diagnostic", "repeat the NOR JEDEC read for a scope; auto-stops after 5 min" },
+  { "/norhold",       "diagnostic", "hold CS/CLK/MOSI low for a multimeter; auto-releases after 5 min" },
+  { "/norrelease",    "diagnostic", "release what /norhold and /norloop are holding" },
+  // ---- service ----------------------------------------------------------
+  { "/ota",           "service", "POST a firmware .bin -> flash + reboot (UNSIGNED)" },
+  { "/fsup",          "service", "POST a file -> LittleFS (this is how the web UI is replaced)" },
+  { "/romup",         "service", "POST a 16384-byte game ROM -> encrypted into the store" },
+  { "/romdel",        "service", "delete a game slot from the ROM store" },
+  { "/wavup",         "service", "POST a WAV -> the sound SD card" },
+  { "/norflash",      "service", "POST an image -> program it into the NOR (erase+verify)" },
+  { "/norwrite",      "service", "NOR self-test: erase+program+verify the last 4 KB sector" },
+  { "/norbig",        "service", "NOR self-test: erase+program+verify a whole 16 KB game slot" },
+};
+static const size_t N_ROUTES = sizeof(ROUTES) / sizeof(ROUTES[0]);
+
 static void onWsEvent(AsyncWebSocket *server, AsyncWebSocketClient *client,
                       AwsEventType type, void *arg, uint8_t *data, size_t len) {
   switch (type) {
@@ -497,13 +573,104 @@ void netBegin() {
   if (MDNS.begin(MDNS_HOST)) { MDNS.addService("http", "tcp", 80); Serial.printf("[net] http://%s.local/\n", MDNS_HOST); }
 
   diag::begin();
-  diag::setInfo(FW_VERSION, s_idcode, s_mode.c_str(), s_ip.c_str());
+  // Full build id ("1.0.0+951b327"), not just the semver: the web UI's Info and
+  // Système tabs show this verbatim, and it is what a support request must quote.
+  diag::setInfo(FW_VERSION_FULL, s_idcode, s_mode.c_str(), s_ip.c_str());
   diag::attach(&ws);
 
   ws.onEvent(onWsEvent);
   server.addHandler(&ws);
 
   wifiprov::attachRoutes(server);   // /wifi* — must precede serveStatic("/")
+
+  // =========================================================================
+  // GROUP: PRODUCT — identity and everyday state. Safe, read-only.
+  // =========================================================================
+
+  // --- /sysinfo — WHO IS THIS BOARD? ---------------------------------------
+  // The one endpoint to hit when a machine turns up in the field and nobody
+  // remembers what is on it. Everything needed to reproduce or replace the
+  // firmware: exact version + git commit + commit date, the running partition
+  // and its MD5, the chip's factory MAC (the only unforgeable board id), the
+  // FPGA it is talking to, and enough memory/filesystem state to tell a healthy
+  // board from a sick one.
+  //   curl -s http://gottfa.local/sysinfo | jq
+  server.on("/sysinfo", HTTP_GET, [](AsyncWebServerRequest *r) {
+    uint64_t mac = ESP.getEfuseMac();
+    uint8_t  m[6];                                   // efuse MAC is little-endian in that u64
+    for (int i = 0; i < 6; i++) m[i] = (uint8_t)(mac >> (8 * i));
+    uint32_t total, age; uint8_t last;
+    fpgalink::stats(total, last, age);
+    AsyncResponseStream *res = r->beginResponseStream("application/json");
+    res->printf("{\"name\":\"%s\",\"fw\":\"%s\",\"git\":\"%s\",\"built\":\"%s\","
+                "\"mac\":\"%02X:%02X:%02X:%02X:%02X:%02X\",\"chip\":\"%s\",\"rev\":%u,"
+                "\"cores\":%u,\"cpuMHz\":%u,",
+                FW_NAME, FW_VERSION, FW_GIT, FW_BUILD,
+                m[5], m[4], m[3], m[2], m[1], m[0],
+                ESP.getChipModel(), (unsigned)ESP.getChipRevision(),
+                (unsigned)ESP.getChipCores(), (unsigned)getCpuFrequencyMhz());
+    res->printf("\"host\":\"%s.local\",\"mode\":\"%s\",\"ip\":\"%s\",\"rssi\":%d,"
+                "\"ssid\":\"%s\",\"apPassDefault\":%s,",
+                MDNS_HOST, wifiprov::mode(), wifiprov::ip(), (int)WiFi.RSSI(),
+                WiFi.SSID().c_str(), wifiprov::apPassIsDefault() ? "true" : "false");
+    res->printf("\"idcode\":\"0x%08X\",\"fpga\":\"%s\",\"linkBytes\":%u,\"linkAgeMs\":%u,"
+                "\"diag\":%s,\"xvc\":%s,",
+                (unsigned)s_idcode, jtag::idcodeName(s_idcode),
+                (unsigned)total, (unsigned)age,
+                fpgalink::diagActive() ? "true" : "false",
+                xvc::active() ? "true" : "false");
+    res->printf("\"heap\":%u,\"heapMin\":%u,\"psram\":%u,\"flashMB\":%u,"
+                "\"sketch\":%u,\"sketchFree\":%u,\"sketchMD5\":\"%s\",",
+                (unsigned)ESP.getFreeHeap(), (unsigned)ESP.getMinFreeHeap(),
+                (unsigned)ESP.getFreePsram(),
+                (unsigned)(ESP.getFlashChipSize() / (1024 * 1024)),
+                (unsigned)ESP.getSketchSize(), (unsigned)ESP.getFreeSketchSpace(),
+                ESP.getSketchMD5().c_str());
+    res->printf("\"fsUsed\":%u,\"fsTotal\":%u,",
+                (unsigned)LittleFS.usedBytes(), (unsigned)LittleFS.totalBytes());
+#ifndef BOARD_C3
+    res->printf("\"target\":\"esp32s3\",\"sd\":%s,\"sets\":%u,\"theme\":\"%s\",",
+                wavplayer::ready() ? "true" : "false",
+                (unsigned)wavplayer::themeCount(), wavplayer::curTheme());
+#else
+    res->print("\"target\":\"esp32c3\",\"sd\":false,\"sets\":0,\"theme\":\"\",");
+#endif
+    res->printf("\"upS\":%u,\"routes\":\"/routes\"}", (unsigned)(millis() / 1000));
+    r->send(res);
+  });
+
+  // --- /routes — the board documents itself (see the ROUTES table above) ----
+  //   /routes            grouped plain text, readable straight in a browser
+  //   /routes?fmt=json   the same list as JSON
+  server.on("/routes", HTTP_GET, [](AsyncWebServerRequest *r) {
+    bool json = r->hasParam("fmt") && r->getParam("fmt")->value() == "json";
+    AsyncResponseStream *res = r->beginResponseStream(json ? "application/json" : "text/plain");
+    if (json) {
+      res->printf("{\"fw\":\"%s\",\"git\":\"%s\",\"routes\":[", FW_VERSION, FW_GIT);
+      for (size_t i = 0; i < N_ROUTES; i++)
+        res->printf("%s{\"path\":\"%s\",\"group\":\"%s\",\"desc\":\"%s\"}",
+                    i ? "," : "", ROUTES[i].path, ROUTES[i].grp, ROUTES[i].desc);
+      res->print("]}");
+    } else {
+      res->printf("GottFA80-PLuS ESP  v%s+%s  (%s)\n", FW_VERSION, FW_GIT, FW_BUILD);
+      static const char *GRP[]  = { "product", "diagnostic", "service" };
+      static const char *HEAD[] = {
+        "PRODUCT — everyday use, driven by the web UI. Safe.",
+        "DIAGNOSTIC — bench instruments. Read-only or momentary, but the ones marked\n"
+        "             RESETS THE FPGA take the shared SPI bus, which reboots the game.",
+        "SERVICE — changes persistent state (firmware, NOR, ROM store, web UI) or holds\n"
+        "          hardware lines. Not for a customer. Unauthenticated: see DIAGNOSTICS.md."
+      };
+      for (int g = 0; g < 3; g++) {
+        res->printf("\n== %s\n\n", HEAD[g]);
+        for (size_t i = 0; i < N_ROUTES; i++)
+          if (!strcmp(ROUTES[i].grp, GRP[g]))
+            res->printf("  %-14s %s\n", ROUTES[i].path, ROUTES[i].desc);
+      }
+      res->print("\nAlso listening: TCP 2542 = XVC (JTAG over WiFi -> openFPGALoader).\n");
+    }
+    r->send(res);
+  });
 
   // --- JTAG re-read (bring-up): re-scan the FPGA IDCODE on demand, no reboot needed ---
   //   /jtag  -> re-read TAP IDCODE, refresh s_idcode, return JSON {idcode, name, ok}
@@ -531,10 +698,11 @@ void netBegin() {
     fpgalink::stats(total, last, age);
     uint32_t ballN, ballAge; uint8_t ball;
     fpgalink::ballStats(ball, ballN, ballAge);
-    char j[256];
+    char j[352];   // sized for the longest form: every field present + fw/git
     snprintf(j, sizeof(j),
-      "{\"total\":%u,\"last\":\"0x%02X\",\"ageMs\":%u,\"diag\":%s,\"running\":%s,\"game\":%s,"
-      "\"ball\":%u,\"ballN\":%u,\"ballAge\":%ld}",
+      "{\"fw\":\"" FW_VERSION "\",\"git\":\"" FW_GIT "\","      // so a script polling /link
+      "\"total\":%u,\"last\":\"0x%02X\",\"ageMs\":%u,\"diag\":%s,\"running\":%s,\"game\":%s,"
+      "\"ball\":%u,\"ballN\":%u,\"ballAge\":%ld}",              // knows which build answered
       (unsigned)total, last, (unsigned)age,
       fpgalink::diagActive() ? "true" : "false",
       fpgalink::gameRunning() ? "true" : "false",
@@ -653,19 +821,36 @@ void netBegin() {
     r->send(res);
   });
 
-  // --- WS2812 pin hunt (bring-up): drive a candidate RGB-LED pin live, no reflash ---
-  //   /led?pin=38&r=255&g=0&b=0   — whitelisted pins only (38/47/48: SD-SCK & OLED,
-  //   both unused right now); lets us find which GPIO the on-board LED really is.
+  // --- [DIAG] /led — "which board am I?": force the WS2812 to a colour ---
+  //   /led?r=255&g=0&b=0    /led  (no args) = off, back to the beacon
+  //
+  // This route used to advertise a PIN HUNT (`/led?pin=38|47|48`) so the on-board
+  // LED's real GPIO could be found without a reflash. That never worked and could
+  // not: the Arduino core's neopixelWrite() binds its RMT channel to the FIRST pin
+  // it is ever called with and silently ignores the pin argument on every later
+  // call -- and statusled::begin() has already called it at boot. The ?pin=
+  // parameter was writing to whatever pin was bound and reporting the one you
+  // asked for, i.e. it lied. Dropped rather than left as a trap; the pin is a
+  // build-time constant (PIN_RGB_LED) and belongs in board_config.h.
+  //
+  // What survives is genuinely useful in the field: light up ONE board in a rack
+  // to confirm which IP is which machine. statusled::tick() only rewrites the LED
+  // when its own computed colour CHANGES, so the colour set here sticks until the
+  // board's state moves (link lost, diag entered, OTA...).
   server.on("/led", HTTP_GET, [](AsyncWebServerRequest *r) {
-    int pin = r->hasParam("pin") ? r->getParam("pin")->value().toInt() : PIN_RGB_LED;
-    if (pin != 38 && pin != 47 && pin != 48) { r->send(400, "text/plain", "pin: 38|47|48"); return; }
+#ifndef BOARD_C3
     uint8_t rr = r->hasParam("r") ? r->getParam("r")->value().toInt() : 0;
     uint8_t gg = r->hasParam("g") ? r->getParam("g")->value().toInt() : 0;
     uint8_t bb = r->hasParam("b") ? r->getParam("b")->value().toInt() : 0;
-    neopixelWrite(pin, rr, gg, bb);
-    char j[80];
-    snprintf(j, sizeof(j), "{\"pin\":%d,\"r\":%u,\"g\":%u,\"b\":%u}", pin, rr, gg, bb);
+    neopixelWrite(PIN_RGB_LED, rr, gg, bb);
+    char j[128];
+    snprintf(j, sizeof(j), "{\"pin\":%d,\"r\":%u,\"g\":%u,\"b\":%u,"
+             "\"note\":\"the status beacon takes the LED back on its next state change\"}",
+             PIN_RGB_LED, rr, gg, bb);
     r->send(200, "application/json", j);
+#else
+    r->send(501, "text/plain", "no WS2812 on the C3 target");   // PIN_RGB_LED is S3-only
+#endif
   });
 
   // --- PSOWAV sound test (bring-up): play any sound / set theme from a browser, no FPGA ---
@@ -964,10 +1149,12 @@ void netBegin() {
   server.on("/norloop", HTTP_GET, [](AsyncWebServerRequest *r) {
     extern volatile bool g_norloop;
     g_norloop = r->hasParam("on") && r->getParam("on")->value() == "1";
-    if (g_norloop) { pinMode(PIN_FPGA_RESET, OUTPUT); digitalWrite(PIN_FPGA_RESET, LOW); }
-    else           { pinMode(PIN_FPGA_RESET, INPUT); }
+    if (g_norloop) { pinMode(PIN_FPGA_RESET, OUTPUT); digitalWrite(PIN_FPGA_RESET, LOW);
+                     s_holdSince = millis() ? millis() : 1; }
+    else           { pinMode(PIN_FPGA_RESET, INPUT); s_holdSince = 0; }
     r->send(200, "application/json", g_norloop ?
-      "{\"loop\":true,\"scope\":\"trigger on CS falling; burst every ~100ms at 400kHz\"}" :
+      "{\"loop\":true,\"scope\":\"trigger on CS falling; burst every ~100ms at 400kHz\","
+      "\"autoStopS\":300}" :
       "{\"loop\":false}");
   });
 
@@ -976,17 +1163,28 @@ void netBegin() {
   //     board pull-ups are strong, the divider keeps the "low" above VIL(0.8V) and
   //     the chip never hears anything — the breadboard-vs-machine difference.
   //     /norhold drives low and returns; /norrelease frees the pins.
+  //     SAFETY (v1): both /norhold and /norloop leave the machine DEAD while they
+  //     are engaged — they pull PIN_FPGA_RESET low, so the FPGA is held in reset
+  //     and the game cannot run. Nothing used to undo that: one GET (a bookmark, a
+  //     browser prefetch, a forgotten tab) parked the pinball until someone
+  //     remembered /norrelease or power-cycled it. netLoop() now releases both
+  //     after HOLD_MAX_MS. The instrument is unchanged for its real use — five
+  //     minutes is far longer than anyone needs to put a probe on three legs.
   server.on("/norhold", HTTP_GET, [](AsyncWebServerRequest *r) {
     pinMode(PIN_FPGA_RESET, OUTPUT); digitalWrite(PIN_FPGA_RESET, LOW);   // grant (si bitstream bg2)
     pinMode(PIN_SPI_CS_SD, OUTPUT); digitalWrite(PIN_SPI_CS_SD, LOW);
     pinMode(PIN_SPI_SCLK,  OUTPUT); digitalWrite(PIN_SPI_SCLK,  LOW);
     pinMode(PIN_SPI_MOSI,  OUTPUT); digitalWrite(PIN_SPI_MOSI,  LOW);
+    s_holdSince = millis() ? millis() : 1;                                // 0 is the "idle" value
     r->send(200, "application/json",
-      "{\"holding\":\"CS+CLK+MOSI LOW\",\"measure\":\"NOR legs: p1 CS, p6 CLK, p5 DI - expect <0.4V; >=0.8V = divider problem\",\"then\":\"GET /norrelease\"}");
+      "{\"holding\":\"CS+CLK+MOSI LOW\",\"measure\":\"NOR legs: p1 CS, p6 CLK, p5 DI - expect <0.4V; >=0.8V = divider problem\",\"then\":\"GET /norrelease\",\"warn\":\"the FPGA is held in RESET while this is engaged - the game is dead\",\"autoReleaseS\":300}");
   });
   server.on("/norrelease", HTTP_GET, [](AsyncWebServerRequest *r) {
+    extern volatile bool g_norloop;
+    g_norloop = false;
     pinMode(PIN_SPI_CS_SD, INPUT); pinMode(PIN_SPI_SCLK, INPUT);
     pinMode(PIN_SPI_MOSI, INPUT);  pinMode(PIN_FPGA_RESET, INPUT);
+    s_holdSince = 0;
     r->send(200, "application/json", "{\"released\":true}");
   });
 
@@ -1211,6 +1409,15 @@ void netLoop() {
     Serial.println("[fsup] abandoned upload - releasing the slot");
     if (s_fsup_file && *s_fsup_file) s_fsup_file->close();
     s_fsup_busy = false; s_fsup_file = nullptr;
+  }
+  // Dead-man release for /norhold + /norloop: never leave the FPGA in reset for ever
+  // because someone closed the tab (see the s_holdSince declaration).
+  if (s_holdSince && millis() - s_holdSince > HOLD_MAX_MS) {
+    Serial.println("[nor] hold/loop timed out - releasing the bus and the FPGA reset");
+    g_norloop = false;
+    pinMode(PIN_SPI_CS_SD, INPUT); pinMode(PIN_SPI_SCLK, INPUT);
+    pinMode(PIN_SPI_MOSI, INPUT);  pinMode(PIN_FPGA_RESET, INPUT);
+    s_holdSince = 0;
   }
   static uint32_t nl_last = 0;
   if (g_norloop && millis() - nl_last > 100) {

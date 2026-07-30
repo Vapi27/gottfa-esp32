@@ -542,6 +542,9 @@ const char* ip()      { return g_ip; }
 const char* staSsid() { return g_staSsid; }
 const char* apSsid()  { return g_apSsid; }
 const char* apPass()  { return g_apPass; }
+// Still the documented factory hotspot password? /sysinfo reports this so a fleet check can see
+// at a glance which boards are still shipping the password that is printed in WIFI_SETUP.md.
+bool        apPassIsDefault() { return g_apPassDflt; }
 // True only after a deliberate half-second of hold, so a stray touch never lights a warning.
 bool        factoryHolding() { return g_btnDown && (millis() - g_btnDown) > 500; }
 

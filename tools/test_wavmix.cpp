@@ -22,12 +22,21 @@ static int fails = 0;
 int main() {
   int16_t out[BLOCK * 2];
 
-  printf("1) voix-zombie : boucle morte doit se LIBERER (avant: active a jamais, SD martelee)\n");
+  // MISE A JOUR (v1.0.0) : ce cas testait l'ancien comportement "un fill vide => on tue la voix".
+  // wavmix.cpp le fait exprès autrement depuis : un hoquet de lecture SD rend 0 frame très
+  // souvent, et tuer au premier zero coupait les musiques en plein milieu. Le mixeur PARDONNE
+  // donc jusqu'a 30 blocs (~90 ms) avant de liberer. Le test verifiait l'ancienne regle et
+  // echouait depuis ce changement — il verifie maintenant la regle voulue, des DEUX cotes :
+  // on survit a un hoquet court, et une source vraiment morte finit quand meme par etre liberee
+  // (c'est ca, l'anti-zombie : la SD n'est pas martelee indefiniment).
+  printf("1) voix-zombie : hoquet PARDONNE (~30 blocs) mais source morte LIBEREE au bout\n");
   { Mixer m; m.reset();
     VoiceCfg c; c.fill = fillDead; c.ctx = nullptr; c.rewind = rewindKo; c.gain = 255; c.tag = 7; c.loop = true;
     int id = m.trigger(c);
     g_fills = 0; m.mix(out, BLOCK);
-    CHECK(!m.active(id), "voix liberee apres source morte");
+    CHECK(m.active(id), "un seul bloc vide ne tue PAS la voix (hoquet SD tolere)");
+    for (int i = 0; i < 40; i++) m.mix(out, BLOCK);          // au-dela des 30 blocs de patience
+    CHECK(!m.active(id), "voix liberee apres une source durablement morte");
     int f1 = g_fills; m.mix(out, BLOCK);
     CHECK(g_fills == f1, "plus AUCUNE lecture apres liberation (SD epargnee)"); }
 

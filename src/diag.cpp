@@ -47,7 +47,10 @@ namespace {
   uint8_t coilFault= 0;          // last COIL_FAULT (0x32): b0 clamp,b1 refire,b2 wd; b7..4 coil#
 
   // info
-  char fw[12]="?", idcode[12]="0x0", mode[12]="?", ip[20]="0.0.0.0";
+  // fw was char[12] — long enough for "0.5.0" and nothing else. v1 reports the full
+  // build id ("1.0.0+951b327-dirty") so a board can be identified from the UI alone,
+  // and strncpy would have silently cut that in half.
+  char fw[40]="?", idcode[12]="0x0", mode[12]="?", ip[20]="0.0.0.0";
   char game[24]="—"; uint16_t gamenr=0; bool is80B=false;
   char busmode[8]="normal";      // diag-bus state: "normal" | "diag" | "bus?"
   uint8_t lisyId=0;              // lisyctrl ID register (0x80 = slave answering)
@@ -115,6 +118,7 @@ namespace {
   void sendSysInfo(AsyncWebSocketClient*c){
     JsonDocument d; d["t"]="sysinfo";
     d["fw"]=fw; d["idcode"]=idcode; d["ip"]=ip; d["mode"]=mode;
+    d["built"]=FW_BUILD;                                   // commit date (see version.py)
     d["heap"]=(uint32_t)ESP.getFreeHeap(); d["up"]=(uint32_t)(millis()/1000);
 #ifndef BOARD_C3
     d["sets"]=wavplayer::themeCount(); d["sd"]=wavplayer::ready()?1:0; d["c3"]=0;

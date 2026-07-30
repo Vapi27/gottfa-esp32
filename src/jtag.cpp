@@ -105,6 +105,24 @@ static inline void settle(uint32_t n) {
   for (volatile uint32_t i = 0; i < n; i++) { __asm__ __volatile__("nop"); }
 }
 
+// The GPIO peripheral struct is not the same shape on every ESP32 family: on the
+// S3 `GPIO.out_w1ts` is a plain uint32_t, on the C3 it is an anonymous union and
+// the value lives in `.val`. Writing the bare integer therefore fails to compile
+// on the C3 -- one of the three errors that made `pio run -e esp32c3` broken.
+// These macros keep the S3 expressions EXACTLY as they were (this is the proven
+// WiFi-XVC bitstream path; its ~150 ns settle timing was calibrated on hardware
+// and must not change) and only add the `.val` spelling for the C3.
+#if defined(CONFIG_IDF_TARGET_ESP32C3) || defined(CONFIG_IDF_TARGET_ESP32C6) || \
+    defined(CONFIG_IDF_TARGET_ESP32H2)
+  #define JTAG_W1TS(m)  (GPIO.out_w1ts.val = (m))
+  #define JTAG_W1TC(m)  (GPIO.out_w1tc.val = (m))
+  #define JTAG_IN()     (GPIO.in.val)
+#else
+  #define JTAG_W1TS(m)  (GPIO.out_w1ts = (m))
+  #define JTAG_W1TC(m)  (GPIO.out_w1tc = (m))
+  #define JTAG_IN()     (GPIO.in)
+#endif
+
 void jtag::shift(uint32_t nbits, const uint8_t* tms, const uint8_t* tdi, uint8_t* tdo) {
   const uint32_t TCK = 1u << PIN_JTAG_TCK;
   const uint32_t TMS = 1u << PIN_JTAG_TMS;
@@ -114,13 +132,13 @@ void jtag::shift(uint32_t nbits, const uint8_t* tms, const uint8_t* tdi, uint8_t
     uint8_t d = (tdi[i >> 3] >> (i & 7)) & 1;
     uint32_t setm = (m ? TMS : 0u) | (d ? TDI : 0u);
     uint32_t clrm = (m ? 0u : TMS) | (d ? 0u : TDI);
-    GPIO.out_w1ts = setm;                       // drive TMS/TDI (TCK low)
-    GPIO.out_w1tc = clrm;
+    JTAG_W1TS(setm);                            // drive TMS/TDI (TCK low)
+    JTAG_W1TC(clrm);
     settle(7);                                  // ~150 ns: lines + TDO settle
-    uint8_t o = (GPIO.in >> PIN_JTAG_TDO) & 1;  // sample TDO before the rising edge
-    GPIO.out_w1ts = TCK;                        // rising edge: device samples TMS/TDI
+    uint8_t o = (JTAG_IN() >> PIN_JTAG_TDO) & 1; // sample TDO before the rising edge
+    JTAG_W1TS(TCK);                             // rising edge: device samples TMS/TDI
     settle(7);                                  // ~150 ns TCK high
-    GPIO.out_w1tc = TCK;                        // falling edge: device updates TDO
+    JTAG_W1TC(TCK);                             // falling edge: device updates TDO
     if (o) tdo[i >> 3] |=  (uint8_t)(1u << (i & 7));
     else   tdo[i >> 3] &= (uint8_t)~(1u << (i & 7));
   }

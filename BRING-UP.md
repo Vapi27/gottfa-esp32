@@ -31,8 +31,10 @@ From `gottfa-esp32/`:
 pio run -e esp32s3 -t upload       # firmware (sound + diag + web)
 pio run -e esp32s3 -t uploadfs     # the web UI (data/ -> LittleFS)
 ```
-(For the C3 variant: `-e esp32c3`. C3 has no sound tier.)
-Set WiFi in `include/board_config.h` (`WIFI_STA_SSID/PASS`) or use the SoftAP `GottFA80-Setup`.
+(Or `./build.sh`, which also runs the host tests and writes `dist/MANIFEST.txt`.)
+The C3 env compiles but has never been run on hardware and has no sound tier — see README.
+WiFi is **not** configured at compile time: on first boot the board raises its own hotspot
+(`GottFA80-xxxxxx`, password `pinball80`) and a setup page pops up. See `WIFI_SETUP.md`.
 
 ## Step 3 — PSOWAV sound set onto the ESP SD
 Generate offline then deploy (see `PSOWAV.md`): `psowav-deploy.sh <out> <game...|--all>` →

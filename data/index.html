@@ -21,6 +21,7 @@
   .dot.ok{background:var(--ok);box-shadow:0 0 8px var(--ok)}
   .dot.demo{background:var(--warn);box-shadow:0 0 8px var(--warn)}
   .grow{flex:1}.conn{font-size:.78rem;color:var(--muted)}
+  .ver{font-size:.7rem;color:var(--muted);border:1px solid var(--line);border-radius:6px;padding:.05rem .35rem;white-space:nowrap}
   .game{font-size:.78rem;color:var(--accent);margin-top:.2rem}
   .master{display:flex;align-items:center;gap:.5rem;margin-top:.55rem;
     background:var(--panel2);border:1px solid var(--line);border-radius:var(--r);padding:.55rem .7rem}
@@ -116,6 +117,7 @@
   <div class="top">
     <span class="dot" id="dot"></span>
     <h1>GottFA80 · LISYcontrol</h1>
+    <span class="ver" id="ver" title="version du firmware ESP — à citer dans toute demande d'aide">—</span>
     <span class="grow"></span>
     <span class="conn" id="conn">…</span>
   </div>
@@ -227,6 +229,7 @@
     <div class="panel">
       <h2>Appareil — ESP32</h2>
       <div class="kv"><span class="k">Firmware</span><span id="s_fw">—</span></div>
+      <div class="kv"><span class="k">Compilé le</span><span id="s_built">—</span></div>
       <div class="kv"><span class="k">WiFi</span><span id="s_wifi">—</span></div>
       <div class="kv"><span class="k">FPGA IDCODE</span><span id="s_id">—</span></div>
       <div class="kv"><span class="k">Mémoire libre</span><span id="s_heap">—</span></div>
@@ -239,6 +242,29 @@
         <button class="btn danger" onclick="reboot()">⏻ Redémarrer l'ESP</button>
       </div>
       <div class="kv" style="margin-top:.5rem"><span class="k">Lien FPGA (UART)</span><span id="s_link">—</span></div>
+      <div class="note">Fiche d'identité complète de cette carte (à joindre à toute demande
+        d'aide) : <a href="/sysinfo" target="_blank"><code>/sysinfo</code></a>.</div>
+    </div>
+
+    <!-- The bench routes are the reason half of this project could be debugged at all. They stay,
+         they are simply named, grouped and labelled here so nobody mistakes them for features. -->
+    <div class="panel">
+      <h2>Outils de diagnostic <span class="pill">atelier</span></h2>
+      <div class="note">Instruments de mise au point, pas des fonctions de jeu. Ils s'ouvrent dans
+        un onglet et répondent en texte/JSON. La liste complète et à jour est toujours sur la carte
+        elle-même : <a href="/routes" target="_blank"><code>/routes</code></a>.</div>
+      <div class="row" style="margin-top:.6rem;flex-wrap:wrap">
+        <button class="btn" onclick="window.open('/sysinfo','_blank')">🪪 Identité carte</button>
+        <button class="btn" onclick="window.open('/link','_blank')">📡 Lien FPGA</button>
+        <button class="btn" onclick="window.open('/sndtrace','_blank')">🎚 Trace son</button>
+        <button class="btn" onclick="window.open('/ramsnap','_blank')">🧠 RAM du jeu</button>
+        <button class="btn" onclick="window.open('/beep','_blank')">🔊 Test DAC</button>
+        <button class="btn" onclick="window.open('/routes','_blank')">📜 Toutes les routes</button>
+      </div>
+      <div class="note warn">⚠ Certains outils (<code>/nor</code>, <code>/sdprobe</code>,
+        <code>/grant</code>, <code>/norhold</code>, <code>/norloop</code>) prennent le bus SPI
+        partagé : le FPGA est <b>remis à zéro</b>, donc la partie en cours est perdue. Les deux
+        derniers gardent la main sur les broches — ils se relâchent tout seuls au bout de 5 min.</div>
     </div>
   </section>
 
@@ -266,8 +292,15 @@
         <button class="btn accent" onclick="doOta()">⇪ Mettre à jour + redémarrer</button>
         <span id="otaMsg" class="note"></span>
       </div>
-      <div class="note">Build : <code>pio run -e esp32s3</code> → <code>.pio/build/esp32s3/firmware.bin</code>.
-        OTA nécessite une partition OTA ; sinon flash USB <code>pio run -t upload</code>.</div>
+      <div class="note">Build : <code>./build.sh</code> → <code>dist/firmware.bin</code> +
+        <code>dist/littlefs.bin</code> + <code>dist/MANIFEST.txt</code> (sha256, commit, tailles).
+        La table de partitions <code>default_16MB</code> a bien deux emplacements OTA
+        (app0/app1, 6,5 Mo chacun) : la mise à jour bascule sur l'autre et repart dessus.</div>
+      <div class="note warn">⚠ L'OTA n'est <b>ni signée ni authentifiée</b> : n'importe qui sur le
+        même réseau peut envoyer un firmware. Garde la carte sur un WiFi de confiance.
+        Ne coupe pas le courant pendant l'envoi.</div>
+      <div class="note">Interface web seule (sans reflasher le firmware) :
+        <code>curl -F "file=@data/index.html" http://&lt;ip&gt;/fsup</code></div>
     </div>
     <div class="panel">
       <h2>ROMs jeu — store ESP <span class="pill" id="rom_enc">🔒 chiffré</span></h2>
@@ -327,8 +360,21 @@
         <b>OFF</b> (défaut) : tout le son joue. Bonne foi / réduction de risque — <b>pas</b> une légalisation.</div>
     </div>
     <div class="panel">
-      <h2>FPGA bitstream — flash 1 clic <span class="pill">à venir</span></h2>
-      <div class="note">Prévu : l'ESP programme le <b>bitstream</b> (IS25LP016D via JTAG SFL) en une action. En développement.</div>
+      <h2>FPGA bitstream — flash par WiFi <span class="pill" id="xvcSt">serveur XVC</span></h2>
+      <div class="note">Ça marche, mais depuis un ordinateur : l'ESP expose le JTAG du FPGA sur le
+        port <b>2542</b> (protocole XVC), <b>aucun câble</b> de programmation nécessaire.
+        <div style="margin:.4rem 0 0"><code>openFPGALoader --cable xvc-client --ip &lt;ip-de-la-carte&gt; --port 2542 SYS80.svf</code></div>
+      </div>
+      <div class="note">Chargement en <b>RAM</b> du FPGA (perdu à l'extinction, idéal pour essayer) :
+        fichier <b>.svf</b> — un <code>.rbf</code> affiche « Done » mais le design ne démarre jamais.
+        Gravure <b>définitive</b> en EPCS : <code>-f --verify SYS80.rbf</code> (~6-8 min).</div>
+      <div class="note warn">⚠ Pendant une gravure EPCS, <b>ne laisse pas l'ordinateur s'endormir</b> :
+        le WiFi tombe, l'écriture s'arrête à moitié et le FPGA ne démarre plus (il faut regraver).
+        Sur Mac : <code>caffeinate -dimsu openFPGALoader …</code>.</div>
+      <div class="note">Le bouton « 1 clic » depuis cette page n'existe pas : il faudrait embarquer
+        le lecteur SVF dans l'ESP, et une coupure au mauvais moment laisserait la carte
+        <b>non configurable</b>, sans image de secours. Tant qu'il n'y a pas d'image « golden »
+        en EPCS, la gravure reste une opération volontaire, faite depuis un ordinateur.</div>
     </div>
   </section>
 
@@ -664,6 +710,11 @@ function renderTfpga(){const cb=document.getElementById('tfpga'),st2=document.ge
   st2.textContent=st.tfpga?'actif':(bus?'inactif':'mode diag requis');
   st2.classList.toggle('on',!!st.tfpga);}
 function fmtUp(s){s|=0;if(s<60)return s+'s';const m=(s/60)|0;if(m<60)return m+'m '+(s%60)+'s';const h=(m/60)|0;return h+'h '+(m%60)+'m';}
+/* Firmware id in the header, on every page of the UI. It is the first thing to ask for in a
+   support exchange, so it must never be more than one glance away. Also goes in the tab title
+   so a screenshot of the browser identifies the build. */
+function setVer(v){if(!v)return;const e=document.getElementById('ver');if(!e)return;
+  if(e.textContent===('v'+v))return;e.textContent='v'+v;document.title='GottFA80 v'+v;}
 function reqSys(){send({c:'sysinfo'});}
 function reqJtag(){
   const el=document.getElementById('s_id');const old=el.textContent;el.textContent='lecture…';
@@ -770,7 +821,7 @@ function connect(){
   }catch(e){startDemo();}
 }
 function handle(m){
-  if(m.t==='info'){i_fw.textContent=m.fw;i_id.textContent=m.idcode;i_ip.textContent=(m.mode||'')+' '+(m.ip||'');
+  if(m.t==='info'){i_fw.textContent=m.fw;setVer(m.fw);i_id.textContent=m.idcode;i_ip.textContent=(m.mode||'')+' '+(m.ip||'');
     const g=m.game||'—';i_game.textContent=g;document.getElementById('game').textContent='jeu : '+g+(m.gamenr?(' (#'+m.gamenr+')'):'');
     if('is80B'in m){st.is80B=!!m.is80B;applySys();} if('bus'in m){st.bus=m.bus;st.lisy=m.lisy||'—';applyBus();} if('outputs'in m)setOutputs(!!m.outputs,true);
     if('tfpga'in m){st.tfpga=m.tfpga?1:0;st.tfpgaBus=(m.bus==='diag')?1:0;renderTfpga();}}
@@ -801,9 +852,10 @@ function handle(m){
     renderMode();}
   else if(m.t==='sysinfo'){const h=Math.round((m.heap||0)/1024);
     s_fw.textContent=m.fw||'—';s_id.textContent=m.idcode||'—';s_wifi.textContent=(m.mode||'')+' '+(m.ip||'');
+    s_built.textContent=m.built||'—';
     s_heap.textContent=h+' KB';s_up.textContent=fmtUp(m.up||0);
     s_sd.textContent=m.c3?'(C3 — pas de son)':(m.sd?('OK · '+(m.sets||0)+' sets'):'absente');
-    d_fw.textContent=m.fw||'—';}
+    d_fw.textContent=m.fw||'—';setVer(m.fw);}
   else if(m.t==='toast'){toast(m.m||'');}
   else if(m.t==='dip'){for(let i=0;i<N_DIP;i++){st.dip[i]=(m.d[i>>3]>>(i&7))&1;const e=document.getElementById('dp'+i);if(e)e.checked=!!st.dip[i];}}
   else if(m.t==='names'){if(m.sw)st.names.sw=m.sw;if(m.lamp)st.names.lamp=m.lamp;if(m.coil)st.names.coil=m.coil;renderNames();}

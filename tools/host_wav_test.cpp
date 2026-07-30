@@ -61,12 +61,19 @@ int main() {
   int16_t os[8 * 2]; ms.mix(os, 8);
   CHECK(os[0] == 8000 && os[1] == -3000, "stereo L=8000 R=-3000 independent");
 
-  // 3) saturation per channel
+  // 3) limiting per channel.
+  // UPDATED (v1.0.0): this used to assert a HARD clip to +32767 / -32768. The mixer
+  // deliberately stopped doing that — hard clipping on a multi-voice stack is what
+  // made the cabinet speaker crackle — and applies a soft knee above +/-24000
+  // instead (wavmix.cpp: KNEE/RANGE). The assertion was never updated, so the suite
+  // had been failing ever since. What matters, and what is checked now: the sum is
+  // strongly compressed, stays symmetric, and can never reach full scale.
   Mixer m2; m2.reset(); m2.setMix(MIX_SUM);
   Tone c{30000, -30000, 10}, d{30000, -30000, 10};
   trig(m2, fill_tone, &c); trig(m2, fill_tone, &d);
   int16_t o2[8 * 2]; m2.mix(o2, 8);
-  CHECK(o2[0] == 32767 && o2[1] == -32768, "L saturates +32767, R -32768");
+  CHECK(o2[0] > 24000 && o2[0] < 32767, "L soft-knee: 60000 compressed below full scale");
+  CHECK(o2[1] == -o2[0], "R is the exact mirror of L (no asymmetric clip)");
 
   // 4) voice frees at EOF, then silence
   Mixer m3; m3.reset(); m3.setMix(MIX_SUM);

@@ -8,3 +8,6 @@
 fpga_bitstream/
 __pycache__/
 *.pyc
+# build.sh output: release artifacts + MANIFEST.txt. Regenerated from any commit,
+# so it is a build product, not source. Ship the directory, don't commit it.
+dist/
