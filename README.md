@@ -66,10 +66,17 @@ Measured on a Gottlieb **Volcano** (System 80, numeric displays):
 ./build.sh --clean      # from scratch (do this before tagging a release)
 ```
 
-`dist/MANIFEST.txt` records the sha256, size, git commit, commit date and toolchain of
-every artifact, plus the flash offsets. Builds are **reproducible**: the version stamp comes
-from the git commit and the **commit date**, never the wall clock, so the same commit
-rebuilds byte-for-byte. A dirty tree is stamped `-dirty` and the manifest says so.
+`dist/MANIFEST.txt` records the sha256, size, git commit, commit date and toolchain of every
+artifact, plus the flash offsets. A dirty tree is stamped `-dirty` and the manifest refuses to
+pretend otherwise. `build.sh` also aborts if any tracked file is hidden from git with
+`skip-worktree` — that is what silently broke the build before v1.
+
+Reproducibility, **measured** rather than claimed:
+
+| artifact | reproducible? |
+|---|---|
+| `firmware.bin` | **yes**, for the same commit rebuilt from the same absolute path — the version stamp uses the git *commit date*, not the wall clock. A different directory yields a different hash: the toolchain bakes absolute source paths in. |
+| `littlefs.bin` | **no.** `mklittlefs` stores each file's mtime, which changes on every checkout. Its hash identifies the image you shipped; it is not one a third party can recompute. |
 
 Plain PlatformIO works too:
 

@@ -12,11 +12,18 @@
 #   partitions.bin    partition table           } cable-attached flash
 #   MANIFEST.txt      sha256 + sizes + git commit + toolchain + flash offsets
 #
-# REPRODUCIBLE: version.py stamps the binary with the git commit and the COMMIT
-# DATE (never the wall clock), so rebuilding the same commit on the same
-# toolchain gives byte-identical files and the sha256 lines below can be checked
-# by someone else. Build from a CLEAN tree — a dirty tree is stamped "-dirty"
-# and MANIFEST.txt says so, loudly.
+# REPRODUCIBILITY — measured on 2026-07-30, not assumed:
+#   firmware.bin  IS byte-identical when the same commit is rebuilt from the same
+#                 absolute path (`./build.sh --clean` twice -> same sha256). That
+#                 works because version.py stamps the COMMIT DATE, never the wall
+#                 clock. It is NOT identical from a different directory: the
+#                 toolchain bakes absolute source paths into the image.
+#   littlefs.bin  is NOT reproducible at all — mklittlefs records each file's
+#                 mtime, which changes on every checkout or copy. Its sha256 in
+#                 MANIFEST.txt identifies the artifact you shipped; it is not a
+#                 value someone else can reproduce.
+# Build from a CLEAN tree — a dirty tree is stamped "-dirty" and MANIFEST.txt
+# says so, loudly.
 #
 # (C) 2026 Valere Pilpil / Pstore.
 set -euo pipefail
@@ -121,6 +128,15 @@ if command -v sha256sum >/dev/null; then SHA="sha256sum"; else SHA="shasum -a 25
   echo
   echo "verify the board actually runs this build:"
   echo "  curl -s http://<board>/sysinfo    -> \"fw\":\"$FW_VERSION\",\"git\":\"$GIT_SHORT\""
+  echo
+  echo "reproducibility (measured, not assumed)"
+  echo "---------------------------------------"
+  echo "  firmware.bin  same commit + same absolute build path -> identical sha256."
+  echo "                A different directory gives a different hash: the toolchain"
+  echo "                bakes absolute source paths into the image."
+  echo "  littlefs.bin  NOT reproducible - mklittlefs stores per-file mtimes, which"
+  echo "                change on every checkout. The hash above identifies the file"
+  echo "                that was shipped; it is not one a third party can recompute."
   echo
   echo "NOT included in this release (deliberately — see README.md):"
   echo "  - esp32c3: compiles, never run on hardware, no sound/display/time-attack"
