@@ -277,6 +277,13 @@ namespace {
     // makes the attempt fail for no reason. Defer instead.
     if (g_res == RES_TRYING) { g_scanWant = true; return; }
     g_scanWant = false;
+    // The station interface MUST be up to scan. On a virgin board there are no stored
+    // credentials, so applyMode() leaves the radio in plain WIFI_AP — and scanNetworks()
+    // then returns nothing at all, which reads to the operator as "no networks in range"
+    // on the one screen whose whole job is to list them. Ground-truthed on hardware
+    // 2026-07-30: first boot, empty list. Add STA alongside the AP for the scan; the AP
+    // stays up so the phone filling in the form is not dropped.
+    if (WiFi.getMode() == WIFI_AP) WiFi.mode(WIFI_AP_STA);
     g_scanBusy = true;
     WiFi.scanNetworks(true /*async*/, true /*show hidden*/);
   }
