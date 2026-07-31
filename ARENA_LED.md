@@ -15,28 +15,51 @@ with the GottFA80 companion app.
 | | State |
 |---|---|
 | LED boards | **made and in hand** — SK6812MINIRGBW-NW-P6 carrier, slot pads for the bus, single round pads for DATA in/out |
-| Controller | **WEMOS/LOLIN D1 Mini ESP32** (ESP32-WROOM-32, 4 MB, CH340C), data on **GPIO27** |
+| Controller | **WEMOS/LOLIN D1 Mini ESP32** (ESP32-WROOM-32, 4 MB), data on **GPIO27**. The board on the bench carries a **CP2104**, not the CH340C this doc assumed: `/dev/cu.usbserial-*`, MAC `68:09:47:48:7a:1c`, ESP32-D0WD-V3 rev 3.1, 4 MB flash. Batches vary — do not hard-code the bridge. |
 | Firmware | complete, builds for 4 targets, adversarially reviewed (5 defects found and fixed before first power-on) |
-| Hardware bring-up | **not started** — nothing has been powered yet |
+| Hardware bring-up | **first light-up done, one board** (2026-07-31) — see "Measured on hardware" below |
+
+### Measured on hardware — 2026-07-31, one LED board
+
+First power-on of the project. Nothing here is a model or an estimate; each line
+is something the bench returned.
+
+| | Measured |
+|---|---|
+| Colour order | **GRBW confirmed.** Commanded pure red (`mode=classic&r=255&g=0&b=0&w=0`), the pixel lit **red**. The `ARENA_ORDER_DEFAULT "grbw"` guess was right. |
+| Bus voltage | supply **5.3 V**, one series **silicon** diode, **4.53 V** at the LED. Drop 0.77 V — a plain PN junction, not a Schottky (~0.3 V). |
+| Data margin | works at that voltage, and the arithmetic says why: `VIH = 0.7 x 4.53 = 3.17 V` against the ESP32's 3.3 V, so ~130 mV of margin. This is **option B's mechanism** (§4: drop the LED's VDD with series diodes) applied to the whole bench rather than to a repeater pixel. It must NOT be "corrected" up to 5.0 V, where VIH becomes 3.50 V and the ESP is out of spec. |
+| ⚠ Does not scale | that diode is fine for 1-3 LEDs and **wrong for the playfield**. A junction drop is current-dependent (0.77 V at bench current, more under load), so the bus voltage would sag as the wall lights up, and the whole chain current — up to 10 A at 150 LEDs — would have to pass through one diode that dissipates `0.8 V x I`. At 10 A that is 8 W in a part usually rated well under 1 A. For the build, use **option A instead**: trim the PSU to 4.4 V and delete the diode. Same voltage at the pixel, no heat, no load-dependent sag. |
+| Power estimator | self-consistent: predicted 4.4 mA in TEST mode and 18.5 mA on one die at full drive, both matching a hand calculation from the source. **Not yet checked against a multimeter** — the model constant `LED_MA_PER_CHANNEL` is still unvalidated. |
+| Network | STA on the house WiFi, driven over REST from the workstation; `up` monotonic, heap stable ~221 kB, 63 fps. |
+
+Still open after this session: the **real** per-LED current (multimeter in series
+with +5 V, expected ~18.5 mA), and whether the ~130 mV margin survives three
+chained boards — which is the whole point of §8 step 3.
 
 ### Roadmap
 - [x] v1.0 — firmware: 7 modes, insert map, power meter + limiter, web UI + REST + OTA
 - [x] LED boards designed, panelized, assembled and delivered
 - [x] Adversarial preflight review — 5 defects found and fixed before first power-on
 - [x] D1 Mini ESP32 target (GPIO27) + one-command flash script
-- [ ] Bench bring-up §8 steps 1–4 (one board → three chained → thirty)
-- [ ] Data-level option chosen on evidence: 4.4 V trim (§4 A) or repeater pixel (§4 B)
+- [x] §8 steps 1–2 — one board lit, colour order GRBW **confirmed on hardware**
+- [ ] Bench bring-up §8 steps 3–4 (three chained → thirty)
+- [x] Data level settled by measurement: the pixel sits at 4.53 V and works. Keep the
+      pixel near 4.4-4.5 V, never 5.0 V — but reach it with the PSU trim (§4 A), not
+      with a series diode, which cannot carry the finished wall's current.
+- [ ] Per-LED current confirmed with a multimeter (model says 18.5 mA on one die)
 - [ ] Playfield populated, bus + injection + fuse
 - [ ] Inserts mapped to real zones, boot preset saved
 - [ ] V2 ideas: motion sensor, audio-reactive, MQTT / Home Assistant
 
-**Next action: §8 step 1** — buzz out one board with a multimeter, then power it
-alone on a current-limited supply (5 V, 150 mA): it must draw ~1 mA and stay
-dark. Then §8 step 2, the single-LED bench test.
+**Next action: §8 step 3** — three boards chained. That is the step that actually
+decides the design: one board proves the pixel and the colour order, three prove
+the *hop* — whether a data edge that left the ESP with 130 mV of margin is still
+clean after being retimed by two pixels and two board-to-board links with no
+ground wire of their own (§4, "signal hygiene").
 
-Open questions that only the bench can answer: whether the 3.3 V → 5 V data
-margin needs option A or B (§4), what the real per-LED current is, and whether
-the pixel colour order is really GRBW.
+Open questions that only the bench can answer: the real per-LED current, and
+whether the margin holds across chained hops.
 
 ### Working on this locally
 
