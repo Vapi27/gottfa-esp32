@@ -581,8 +581,8 @@ match your PSU and fuse.
 ### Mapping the inserts
 
 The chain is anonymous pixels; which LED is "spinner" or "pop-bumpers" is data
-in `/arena_map.json`. Two ways to fill it in, both on the board itself — no
-laptop, no serial cable, a phone under the playfield is enough.
+in NVS on the board, filled in from the web UI — no laptop, no serial cable, a
+phone under the playfield is enough.
 
 **The mapping wizard (use this one).** Web UI -> **Mapping wizard** -> *Start
 walking*. The board draws the playfield, spotlights one pixel, and you click the
@@ -603,10 +603,6 @@ This is what makes the effects spatial: `arena` mode switches to geometry as soo
 as one pixel is placed — a wave climbing from the flippers to the back panel, a
 ripple leaving the centre — instead of walking zones in cable order. Unplaced
 pixels stay on the base wash rather than pretending to be at (0,0).
-
-**Or edit the table by hand** in the **Insert map** panel below it (name, first
-LED, count), then **Save map** — written to LittleFS, used immediately by attract
-and arena modes.
 
 > Scripting the map instead? POST the JSON **raw**. `curl -d` sends it as
 > `application/x-www-form-urlencoded`, which this web-server stack folds into

@@ -123,9 +123,8 @@
 
   <section>
     <h2>Mapping wizard</h2>
-    <p class="hint">Walk the chain one pixel at a time: the wizard lights a pixel, you name the
-       insert it sits under, it moves on. Runs of the same name become zones. The walk is kept
-       in this browser &mdash; close the page, come back, carry on where you left off.</p>
+    <p class="hint">The board lights one pixel; you click the insert it sits under on the plan.
+       Every click is saved on the board, so you can stop and come back at any point.</p>
     <div class="row">
       <button id="wz-go" onclick="wzStart()">Start walking</button>
       <button onclick="wzStop()">Stop</button>
@@ -145,28 +144,6 @@
       </div>
       <p class="hint" id="wz-warn"></p>
     </div>
-  </section>
-
-  <section>
-    <h2>Insert map</h2>
-    <p class="hint">Which pixels light which part of the playfield. Use <b>find</b> to blink a
-       zone, or walk the chain one LED at a time to fill in the real Arena inserts.</p>
-    <div class="row">
-      <label>Walk LED</label>
-      <button onclick="walk(-1)">◀</button>
-      <input type="number" id="walkn" value="0" min="0" style="width:80px">
-      <button onclick="walk(1)">▶</button>
-      <button onclick="idLed()">Blink it</button>
-      <button onclick="api('/api/identify?clear=1')">Stop</button>
-    </div>
-    <table id="zones"><thead><tr><th>Zone</th><th>First</th><th>Count</th><th></th></tr></thead>
-      <tbody></tbody></table>
-    <p class="hint">
-      <button onclick="addZone()">Add zone</button>
-      <button onclick="saveZones()">Save map</button>
-      <button onclick="if(confirm('Reset the insert map to the default template?'))
-                       api('/api/zones/reset').then(loadZones)">Reset to template</button>
-    </p>
   </section>
 
   <section>
@@ -241,49 +218,11 @@ function render(s) {
   if (document.activeElement !== $('count'))  $('count').value  = s.count;
   if (document.activeElement !== $('budget')) $('budget').value = s.budget;
   if (document.activeElement !== $('order'))  $('order').value  = s.order;
-  $('walkn').max = s.count - 1;
 }
 function set(k, v) { $(k).value = v; $('o-' + k).value = v; }
 function fmtUp(s) {
   const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
   return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
-}
-
-// --- insert map ---
-let zones = [];
-function loadZones() {
-  fetch('/api/zones').then(r => r.json()).then(j => { zones = j.zones || []; drawZones(); });
-}
-function drawZones() {
-  const tb = $('zones').querySelector('tbody');
-  tb.innerHTML = '';
-  zones.forEach((z, i) => {
-    const tr = document.createElement('tr');
-    tr.innerHTML =
-      `<td><input value="${z.n}" onchange="zones[${i}].n=this.value"></td>` +
-      `<td><input class="n" type="number" min="0" max="149" value="${z.f}"
-            onchange="zones[${i}].f=+this.value"></td>` +
-      `<td><input class="n" type="number" min="0" max="150" value="${z.c}"
-            onchange="zones[${i}].c=+this.value"></td>` +
-      `<td><button onclick="api('/api/identify?zone=${i}')">find</button>
-           <button onclick="zones.splice(${i},1);drawZones()">✕</button></td>`;
-    tb.appendChild(tr);
-  });
-}
-function addZone() {
-  const last = zones[zones.length - 1];
-  zones.push({ n: 'zone' + (zones.length + 1), f: last ? last.f + last.c : 0, c: 4 });
-  drawZones();
-}
-function saveZones() {
-  fetch('/api/zones', { method: 'POST', body: JSON.stringify({ zones }) })
-    .then(r => r.text()).then(toast).then(loadZones);
-}
-function idLed() { api('/api/identify?led=' + $('walkn').value + '&ms=30000'); }
-function walk(d) {
-  const n = Math.max(0, Math.min(st.count - 1, (+$('walkn').value) + d));
-  $('walkn').value = n;
-  idLed();
 }
 
 // --- mapping wizard ---
@@ -398,7 +337,7 @@ function ota(inp) {
 }
 
 const poll = () => fetch('/api/state').then(r => r.json()).then(render).catch(() => {});
-poll(); loadZones(); wzDraw();
+poll(); wzDraw();
 setInterval(poll, 1500);
 </script>
 </body>
