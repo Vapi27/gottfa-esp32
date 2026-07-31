@@ -220,6 +220,18 @@ a full 5 V.
  ESP32 GPIO27 ── 330 R ──▶ LED1 DATA IN       LED1 DATA OUT ──▶ LED2 DATA IN
 ```
 
+**Measured on the bench, 2026-07-31** (5.3 V supply, 2 x 1N4148, one visible LED):
+
+| Repeater state | Its VDD | Chain needs `0.7 x 5.3` | Margin |
+|---|---|---|---|
+| driven **lit** (before `LED_REPEATER_PIXEL 1`) | **3.70 V** | 3.71 V | **-10 mV** — worked, out of spec |
+| held **dark** (after) | **4.2 V** | 3.71 V | **+490 mV** |
+
+That 0.5 V swing is the entire argument for keeping the pixel dark, and it is
+current, not theory: at ~70 mA a 1N4148 drops ~0.8 V, at ~1 mA about 0.55 V.
+Wire the repeater as a visible pixel and its supply — hence the whole chain's
+noise margin — moves with whatever colour it happens to be showing.
+
 **Measure it, do not trust the arithmetic**: with everything powered, the
 repeater's VDD must land between **4.0 and 4.4 V**. Above 4.4 V the ESP loses its
 input margin (`VIH = 0.7 x VDD` climbs past 3.3 V) — add a third diode. Below
@@ -231,6 +243,17 @@ Mount that first pixel **hidden behind the frame** and set
 `LED_REPEATER_PIXEL 1` in `include/arena_config.h`: the firmware keeps it dark
 and shifts all indices, so LED 0 in the web UI is still your first visible
 insert.
+
+**How to tell which build is actually running**, with no serial cable: read
+`/api/state` in `mode=off`. The idle estimate is `(count + repeater) x 1 mA`, so
+`count=1` reports **1.0 mA** without the repeater and **2.0 mA** with it. That
+number settled the question on the bench when an OTA left no other trace.
+
+**OTA over WiFi answers nothing — that is normal.** `curl -F` returns
+`HTTP=000` with the full firmware uploaded, because the handler restarts the
+board before the TCP response is flushed. Do not conclude the update failed and
+do not re-flash blindly: wait ~10 s, read `/api/state`, and check that `up` has
+reset and the mA signature above has changed.
 
 ### Option C — discrete transistor shifter *(only if A and B are impossible)*
 

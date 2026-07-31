@@ -70,7 +70,12 @@
 // Set this to 1 for option B: pixel 0 is then a hidden repeater, kept dark and
 // excluded from the map, so LED numbering in the UI still starts at the first
 // visible insert.
-#define LED_REPEATER_PIXEL     0
+// 1 on the Arena bench since 2026-07-31: the hidden repeater is fitted (2 x 1N4148
+// off the 5.3 V bus). Measured while it was still being driven lit: 3.70 V, i.e.
+// 10 mV BELOW the 0.7 x 5.3 = 3.71 V the rest of the chain needs — it worked, but
+// on the wrong side of the spec. Held dark by this switch, its current drops to
+// ~1 mA, the diode drop with it, and its VDD should settle near 4.1 V.
+#define LED_REPEATER_PIXEL     1
 
 // ---- Front-panel button (optional) -----------------------------------------
 // GPIO0 is the BOOT strap and is free once the board is running: short press =
