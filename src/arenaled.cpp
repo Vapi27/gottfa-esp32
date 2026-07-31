@@ -233,7 +233,7 @@ static void fxRomAttract(Rgbw* buf) {
 
   const float upK   = 1.0f - expf(-dt / 0.040f);  // ~40 ms rise
   const float downK = 1.0f - expf(-dt / 0.090f);  // ~90 ms fall
-  const Rgbw base   = scale(s_color, 0.06f);
+  const Rgbw base   = scale(s_color, ARENA_GI_LEVEL);   // the GI the ROM does not drive
 
   for (uint16_t i = 0; i < s_count; i++) {
     const int lamp = arenapf::lampOfLed(i);

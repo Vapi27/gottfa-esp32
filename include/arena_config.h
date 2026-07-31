@@ -127,6 +127,13 @@
 #define ARENA_WARM_B    0
 #define ARENA_WARM_W  255
 
+// General illumination, as a fraction of the current colour, under the ROM
+// attract mode. A real Arena is NOT dark during attract: the GI bulbs stay lit
+// and every insert, driven or not, sits in that glow. Reproducing only the lamp
+// matrix leaves the inserts the ROM never touches (L1, L2, L3 among them) looking
+// like dead pixels, which is how this was first reported. 0.06 was invisible.
+#define ARENA_GI_LEVEL 0.20f
+
 #define ARENA_BRIGHT_DEFAULT 180   // 0..255 global brightness
 #define ARENA_SPEED_DEFAULT  128   // 0..255 -> x0.25 .. x4 animation speed
 #define ARENA_NIGHT_BRIGHT    26   // ~10 % of 255 (night mode)
