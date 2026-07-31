@@ -1,0 +1,14 @@
+ref,item,qty_50,qty_100,qty_150,notes
+U1,WEMOS/LOLIN D1 Mini ESP32 (ESP32-WROOM-32 4MB),1,1,1,data on GPIO27; ESP32-S3 DevKitC-1 / C3 DevKitM-1 also supported (see platformio.ini)
+PCB1,LED PCB (SK6812MINIRGBW-NW-P6 carrier),50,100,150,as built: slot pads for the +5V/GND bus + round DATA IN/OUT pads
+D1,SK6812MINI-RGBW-NW-P6,55,110,165,+10% spares; already assembled on PCB1
+C1,100nF X7R 0603,55,110,165,one per LED board VDD-GND (already fitted)
+C2,1000uF 16V electrolytic,2,3,4,one per power injection point
+PSU1,Power supply 5V 15A 75W,1,1,1,must have a V-ADJ trim pot (set 4.4V - see ARENA_LED.md 4.A)
+F1,Fuse holder + 10A slow-blow fuse,1,1,1,between PSU and bus (firmware caps the chain at 9A)
+R1,330 ohm 1/4W,1,1,1,series on DATA at the ESP32 output
+D2,1N5819 Schottky,2,2,2,only for the repeater-pixel option (ARENA_LED.md 4.B)
+W1,AWG18 wire red+black,6 m,10 m,14 m,main +5V / GND bus; threads through the board slots and carries the boards
+W2,AWG26-24 wire,8 m,15 m,22 m,board-to-board DATA hops (single wire per hop - keep each hop under 15 cm)
+W3,AWG22 wire red+black,3 m,5 m,8 m,optional stub taps for boards the bus pair cannot reach
+SW1,NO push button (optional),1,1,1,GPIO0/D3 to GND - short press = next mode, long press = night

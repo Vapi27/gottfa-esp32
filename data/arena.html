@@ -1,0 +1,288 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Arena Wall-Art LED</title>
+<style>
+  :root{--bg:#0d0b09;--panel:#171310;--line:#2c241d;--txt:#efe6da;--dim:#9a8a78;
+        --amber:#ff9b21;--gold:#ffc046;--red:#e0483a;--ok:#4caf50}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--txt);
+       font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  header{padding:14px 16px;border-bottom:1px solid var(--line);
+         background:linear-gradient(180deg,#1d1712,#120f0c);position:sticky;top:0;z-index:5}
+  h1{margin:0;font-size:18px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}
+  .stat{margin-top:6px;font-size:12px;color:var(--dim);display:flex;gap:14px;flex-wrap:wrap}
+  .stat b{color:var(--txt);font-weight:600}
+  main{max-width:820px;margin:0 auto;padding:16px}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+          padding:14px;margin-bottom:14px}
+  h2{margin:0 0 10px;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
+  .modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px}
+  button{font:inherit;color:var(--txt);background:#241c16;border:1px solid var(--line);
+         border-radius:8px;padding:10px 12px;cursor:pointer}
+  button:hover{border-color:var(--amber)}
+  button.on{background:var(--amber);border-color:var(--amber);color:#150f08;font-weight:600}
+  .row{display:flex;align-items:center;gap:12px;margin:10px 0}
+  .row label{width:96px;font-size:13px;color:var(--dim);flex:none}
+  .row output{width:52px;text-align:right;font-variant-numeric:tabular-nums;font-size:13px}
+  input[type=range]{flex:1;accent-color:var(--amber)}
+  select{background:#100d0b;color:var(--txt);border:1px solid var(--line);
+         border-radius:6px;padding:7px 9px;width:100%;font:inherit}
+  input[type=number],input[type=text],input[type=password]{background:#100d0b;color:var(--txt);
+    border:1px solid var(--line);border-radius:6px;padding:7px 9px;width:100%}
+  .presets{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
+  .sw{width:34px;height:34px;border-radius:50%;border:2px solid var(--line);cursor:pointer}
+  table{width:100%;border-collapse:collapse;font-size:13px}
+  th{text-align:left;color:var(--dim);font-weight:500;font-size:11px;
+     text-transform:uppercase;letter-spacing:.1em;padding:4px 6px}
+  td{padding:3px 6px;border-top:1px solid var(--line)}
+  td input{padding:4px 6px}
+  td input.n{width:66px}
+  .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+  .warn{color:var(--red)}.ok{color:var(--ok)}
+  .hint{font-size:12px;color:var(--dim);margin:8px 0 0}
+  .bar{height:6px;background:#241c16;border-radius:3px;overflow:hidden;flex:1}
+  .bar i{display:block;height:100%;background:var(--amber)}
+  footer{color:var(--dim);font-size:11px;text-align:center;padding:0 0 24px}
+</style>
+</head>
+<body>
+<header>
+  <h1>Arena &mdash; wall art</h1>
+  <div class="stat">
+    <span>mode <b id="s-mode">–</b></span>
+    <span>leds <b id="s-count">–</b></span>
+    <span>current <b id="s-amps">–</b></span>
+    <span>fps <b id="s-fps">–</b></span>
+    <span><b id="s-net">–</b> <b id="s-ip"></b></span>
+    <span id="s-lim" class="warn"></span>
+  </div>
+</header>
+
+<main>
+  <section>
+    <h2>Lighting mode</h2>
+    <div class="modes" id="modes"></div>
+  </section>
+
+  <section>
+    <h2>Level</h2>
+    <div class="row"><label>Brightness</label>
+      <input type="range" id="bright" min="0" max="255"><output id="o-bright"></output></div>
+    <div class="row"><label>Speed</label>
+      <input type="range" id="speed" min="0" max="255"><output id="o-speed"></output></div>
+    <div class="row"><label>Power</label>
+      <div class="bar"><i id="pbar" style="width:0"></i></div><output id="o-pow"></output></div>
+    <p class="hint">The firmware meters every frame and dims the whole wall rather than
+       exceeding the budget below — the PSU and the bus wires are never asked for more.</p>
+  </section>
+
+  <section>
+    <h2>Colour (classic / attract / arena)</h2>
+    <div class="presets">
+      <button class="sw" title="Amber 255/100/0"    style="background:#ff6400" data-c="255,100,0,0"></button>
+      <button class="sw" title="Golden 255/140/0+W" style="background:#ff8c00" data-c="255,140,0,10"></button>
+      <button class="sw" title="Warm white (W)"     style="background:#fff1dc" data-c="0,0,0,255"></button>
+      <button class="sw" title="Cool red"           style="background:#e03020" data-c="255,20,0,0"></button>
+      <button class="sw" title="Arena blue"         style="background:#2060ff" data-c="0,60,255,0"></button>
+    </div>
+    <div class="row"><label>Red</label>   <input type="range" id="r" min="0" max="255"><output id="o-r"></output></div>
+    <div class="row"><label>Green</label> <input type="range" id="g" min="0" max="255"><output id="o-g"></output></div>
+    <div class="row"><label>Blue</label>  <input type="range" id="b" min="0" max="255"><output id="o-b"></output></div>
+    <div class="row"><label>White</label> <input type="range" id="w" min="0" max="255"><output id="o-w"></output></div>
+  </section>
+
+  <section>
+    <h2>Chain setup</h2>
+    <div class="grid2">
+      <div><label class="hint">LEDs in the chain</label>
+        <input type="number" id="count" min="1" max="150"></div>
+      <div><label class="hint">Power budget (mA)</label>
+        <input type="number" id="budget" min="500" max="15000" step="100"></div>
+      <div><label class="hint">Colour order</label>
+        <select id="order" onchange="push('order='+this.value)">
+          <option value="grbw">GRBW (SK6812 default)</option>
+          <option value="rgbw">RGBW</option>
+          <option value="gbrw">GBRW</option>
+          <option value="brgw">BRGW</option>
+          <option value="rbgw">RBGW</option>
+          <option value="bgrw">BGRW</option>
+        </select></div>
+    </div>
+    <p class="hint">Run <b>Wiring test</b>: the field must cycle red → green → blue → white in
+       that order. If two of them are swapped, pick the matching colour order above — the change
+       is live, no reflash.</p>
+    <p class="hint" style="margin-top:12px">
+      <button onclick="apply()">Apply</button>
+      <button onclick="api('/api/save').then(()=>toast('saved to NVS'))">Save as boot default</button>
+      <button onclick="setMode('test')">Wiring test</button>
+    </p>
+  </section>
+
+  <section>
+    <h2>Insert map</h2>
+    <p class="hint">Which pixels light which part of the playfield. Use <b>find</b> to blink a
+       zone, or walk the chain one LED at a time to fill in the real Arena inserts.</p>
+    <div class="row">
+      <label>Walk LED</label>
+      <button onclick="walk(-1)">◀</button>
+      <input type="number" id="walkn" value="0" min="0" style="width:80px">
+      <button onclick="walk(1)">▶</button>
+      <button onclick="idLed()">Blink it</button>
+      <button onclick="api('/api/identify?clear=1')">Stop</button>
+    </div>
+    <table id="zones"><thead><tr><th>Zone</th><th>First</th><th>Count</th><th></th></tr></thead>
+      <tbody></tbody></table>
+    <p class="hint">
+      <button onclick="addZone()">Add zone</button>
+      <button onclick="saveZones()">Save map</button>
+      <button onclick="if(confirm('Reset the insert map to the default template?'))
+                       api('/api/zones/reset').then(loadZones)">Reset to template</button>
+    </p>
+  </section>
+
+  <section>
+    <h2>Wi-Fi &amp; firmware</h2>
+    <div class="grid2">
+      <div><label class="hint">SSID</label><input type="text" id="ssid"></div>
+      <div><label class="hint">Password</label><input type="password" id="pass"></div>
+    </div>
+    <p class="hint" style="margin-top:12px">
+      <button onclick="saveWifi()">Join network &amp; reboot</button>
+      <span id="ota-wrap"><input type="file" id="fw" accept=".bin" style="display:none"
+        onchange="ota(this)"><button onclick="fw.click()">Upload firmware (OTA)</button></span>
+    </p>
+    <p class="hint" id="msg"></p>
+  </section>
+
+  <footer>Arena Wall-Art LED &middot; <span id="s-fw">–</span> &middot; uptime <span id="s-up">–</span></footer>
+</main>
+
+<script>
+const MODES = ['classic','attract','arena','night','rainbow','test','off'];
+const $ = id => document.getElementById(id);
+let st = {}, holdUntil = 0;
+
+const api = u => fetch(u).then(r => r.ok ? r.text() : Promise.reject(r.status));
+const toast = m => { $('msg').textContent = m; setTimeout(() => $('msg').textContent = '', 4000); };
+
+// --- mode buttons ---
+MODES.forEach(m => {
+  const b = document.createElement('button');
+  b.textContent = m; b.dataset.m = m; b.onclick = () => setMode(m);
+  $('modes').appendChild(b);
+});
+function setMode(m) { push('mode=' + m); }
+
+// --- sliders: send while dragging, but pause polling so the UI doesn't fight the user ---
+['bright','speed','r','g','b','w'].forEach(k => {
+  const el = $(k);
+  el.oninput = () => { $('o-' + k).value = el.value; holdUntil = Date.now() + 1500; };
+  el.onchange = () => push(k + '=' + el.value);
+});
+document.querySelectorAll('.sw').forEach(sw => sw.onclick = () => {
+  const [r,g,b,w] = sw.dataset.c.split(',');
+  push(`r=${r}&g=${g}&b=${b}&w=${w}`);
+});
+
+function push(q) { fetch('/api/set?' + q).then(r => r.json()).then(render).catch(() => {}); }
+function apply() { push('count=' + $('count').value + '&budget=' + $('budget').value); }
+
+function render(s) {
+  st = s;
+  $('s-mode').textContent  = s.mode;
+  $('s-count').textContent = s.count + '/' + s.max;
+  $('s-amps').textContent  = s.amps.toFixed(2) + ' A';
+  $('s-fps').textContent   = s.fps;
+  $('s-net').textContent   = s.net;
+  $('s-ip').textContent    = s.ip;
+  $('s-fw').textContent    = 'v' + s.fw;
+  $('s-up').textContent    = fmtUp(s.up);
+  $('s-lim').textContent   = s.limited ? '⚠ power-limited' : '';
+  document.querySelectorAll('#modes button')
+          .forEach(b => b.classList.toggle('on', b.dataset.m === s.mode));
+
+  const pct = Math.min(100, s.amps * 1000 / s.budget * 100);
+  $('pbar').style.width = pct + '%';
+  $('pbar').style.background = pct > 90 ? 'var(--red)' : 'var(--amber)';
+  $('o-pow').value = (s.budget / 1000).toFixed(1) + ' A';
+
+  if (Date.now() < holdUntil) return;            // don't stomp a slider being dragged
+  set('bright', s.bright); set('speed', s.speed);
+  set('r', s.r); set('g', s.g); set('b', s.b); set('w', s.w);
+  if (document.activeElement !== $('count'))  $('count').value  = s.count;
+  if (document.activeElement !== $('budget')) $('budget').value = s.budget;
+  if (document.activeElement !== $('order'))  $('order').value  = s.order;
+  $('walkn').max = s.count - 1;
+}
+function set(k, v) { $(k).value = v; $('o-' + k).value = v; }
+function fmtUp(s) {
+  const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+}
+
+// --- insert map ---
+let zones = [];
+function loadZones() {
+  fetch('/api/zones').then(r => r.json()).then(j => { zones = j.zones || []; drawZones(); });
+}
+function drawZones() {
+  const tb = $('zones').querySelector('tbody');
+  tb.innerHTML = '';
+  zones.forEach((z, i) => {
+    const tr = document.createElement('tr');
+    tr.innerHTML =
+      `<td><input value="${z.n}" onchange="zones[${i}].n=this.value"></td>` +
+      `<td><input class="n" type="number" min="0" max="149" value="${z.f}"
+            onchange="zones[${i}].f=+this.value"></td>` +
+      `<td><input class="n" type="number" min="0" max="150" value="${z.c}"
+            onchange="zones[${i}].c=+this.value"></td>` +
+      `<td><button onclick="api('/api/identify?zone=${i}')">find</button>
+           <button onclick="zones.splice(${i},1);drawZones()">✕</button></td>`;
+    tb.appendChild(tr);
+  });
+}
+function addZone() {
+  const last = zones[zones.length - 1];
+  zones.push({ n: 'zone' + (zones.length + 1), f: last ? last.f + last.c : 0, c: 4 });
+  drawZones();
+}
+function saveZones() {
+  fetch('/api/zones', { method: 'POST', body: JSON.stringify({ zones }) })
+    .then(r => r.text()).then(toast).then(loadZones);
+}
+function idLed() { api('/api/identify?led=' + $('walkn').value + '&ms=30000'); }
+function walk(d) {
+  const n = Math.max(0, Math.min(st.count - 1, (+$('walkn').value) + d));
+  $('walkn').value = n;
+  idLed();
+}
+
+// --- wifi / OTA ---
+function saveWifi() {
+  const s = $('ssid').value.trim();
+  if (!s) return toast('enter an SSID');
+  if (!confirm('Join "' + s + '" and reboot?')) return;
+  api(`/api/wifi?ssid=${encodeURIComponent(s)}&pass=${encodeURIComponent($('pass').value)}`)
+    .then(() => toast('rebooting — reconnect to your network, then http://arena.local/'))
+    .catch(() => toast('failed'));
+}
+function ota(inp) {
+  const f = inp.files[0];
+  if (!f || !confirm('Flash ' + f.name + ' (' + (f.size / 1024 | 0) + ' kB)?')) return;
+  const fd = new FormData();
+  fd.append('f', f);
+  toast('uploading…');
+  fetch('/update', { method: 'POST', body: fd })
+    .then(r => r.text()).then(t => toast(t + ' — reload in ~10 s'))
+    .catch(() => toast('OTA failed'));
+}
+
+const poll = () => fetch('/api/state').then(r => r.json()).then(render).catch(() => {});
+poll(); loadZones();
+setInterval(poll, 1500);
+</script>
+</body>
+</html>

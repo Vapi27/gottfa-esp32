@@ -1,4 +1,4 @@
-# GottFA80+ connected platform — status (updated 2026-06-04)
+# GottFA80+ connected platform — status (updated 2026-07-31)
 
 Validated by real toolchains: **ghdl** (logic sims), **Quartus Prime Lite 22.1**
 (full FPGA flow, on a dedicated x86_64 build host), **PlatformIO** (firmware).
@@ -38,6 +38,48 @@ Open `~/gottfa-esp32/data/index.html` in a browser → DEMO mode (faithful LISYc
 On real hardware the master toggle "arms the outputs" — **diag mode itself is entered
 by a long-press of the Gottlieb door TEST switch** (the FPGA then releases the SPI bus
 to the ESP and raises `Debug`).
+
+## Arena Wall-Art LED — the decoration branch of the platform
+A Gottlieb **Arena** playfield turned into an illuminated wall piece. Same repo,
+**separate firmware** (`env:arenaled_d1mini32` / `arenaled` / `arenaled_c3`), zero
+overlap with the app above: no FPGA, no SPI, no sound. Full doc: **[ARENA_LED.md](ARENA_LED.md)**.
+
+| | State |
+|---|---|
+| LED boards | **made and in hand** — SK6812MINIRGBW-NW-P6 carrier, bus-wire slot pads, single-pad DATA in/out |
+| Controller | **D1 Mini ESP32** (WROOM-32, 4 MB, CH340C), data on **GPIO27** |
+| Firmware | v1.0.0 — 7 modes, insert map, power meter/limiter, web UI + REST + OTA |
+| Builds | `arenaled`, `arenaled_c3`, `arenaled_d1mini32` ✓ (and `esp32s3`/`esp32c3` unaffected) |
+| Hardware bring-up | **not started** — nothing powered yet |
+
+### ✅ Validated (no hardware)
+1. **Four PlatformIO targets build** — the Arena envs plus both GottFA80 envs, which
+   the new source filter keeps untouched.
+2. **Adversarial firmware review** — 12 agents over 4 lenses, every finding attacked by an
+   independent verifier before it counted. 5 root causes found and fixed *before* first
+   power-on: soft start that never ran (blocking WiFi init ate the window), a float
+   animation clock that froze the wall after ~5 days, a shrunk LED count leaving the
+   dropped tail latched on while the power meter stopped counting it, `test` mode unusable
+   at 1 LED, and a null-deref panic on concurrent map edits.
+3. **Animation clock proven by simulation**, not argument — `tools/host_arenaphase_test.cpp`
+   replays 30 days of frames: the old float clock ran >1.5x fast from day 3.2 and stopped
+   dead at day 4.8; the current double + per-effect modulo reduction holds 0 s drift and
+   stays continuous on all six rates.
+4. **3.3 V → 5 V without a 74AHCT125** — three IC-free options documented and one
+   (`LED_REPEATER_PIXEL`) supported in firmware.
+
+### Next steps
+1. **Bench bring-up** — ARENA_LED.md §8, in order: buzz out one board, one board on a
+   current-limited supply (~1 mA, dark), one board + ESP (`test` mode: R→G→B→W, ~70 mA
+   all-dice), then **three chained** — the step that actually exercises the ground-less
+   data hop and reveals a level-margin problem while it is still cheap to fix.
+2. **Decide the data-level option on evidence** (§4): trim the bus to 4.4 V, or fit the
+   2-diode repeater pixel. The bench answers this, not the datasheet.
+3. **Map the inserts** with the web wizard once the chain follows the artwork; the default
+   zone names are a template, not a survey of a real Arena playfield.
+4. **V2 board** (if a second run happens): a local GND pad beside each data link, and a
+   schematic so DRC has a netlist to verify against — this run's nets are
+   `unconnected-(LED1-…)`, so connectivity was never machine-checked.
 
 ## Next steps
 1. **Hardware bring-up** (when the ESP arrives): wire per `README.md` (J3a/K2/S8/P5/TP4),
