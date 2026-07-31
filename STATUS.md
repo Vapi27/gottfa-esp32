@@ -50,7 +50,7 @@ overlap with the app above: no FPGA, no SPI, no sound. Full doc: **[ARENA_LED.md
 | Controller | **D1 Mini ESP32** (WROOM-32, 4 MB), data on **GPIO27**. Bench unit has a **CP2104** bridge, not the CH340C assumed — batches vary. |
 | Firmware | v1.0.0 — 7 modes, insert map, power meter/limiter, web UI + REST + OTA |
 | Builds | `arenaled`, `arenaled_c3`, `arenaled_d1mini32` ✓ (and `esp32s3`/`esp32c3` unaffected) |
-| Hardware bring-up | **first light-up done 2026-07-31** — one board lit, **colour order GRBW confirmed**, pixel at 4.53 V (5.3 V supply through one silicon diode), driven over WiFi REST from the workstation. Next: three chained boards. |
+| Hardware bring-up | **bench validated 2026-07-31** — boards lit, **colour order GRBW confirmed**, **option B built** (hidden repeater pixel on 2 x 1N4148, dark at 4.2 V; chain and ESP straight off 5.3 V, no diode in the high-current path). Driven over WiFi REST, **OTA proven**. Next: populate the playfield. |
 
 ### ✅ Validated (no hardware)
 1. **Four PlatformIO targets build** — the Arena envs plus both GottFA80 envs, which

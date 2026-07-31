@@ -43,23 +43,24 @@ chained boards — which is the whole point of §8 step 3.
 - [x] Adversarial preflight review — 5 defects found and fixed before first power-on
 - [x] D1 Mini ESP32 target (GPIO27) + one-command flash script
 - [x] §8 steps 1–2 — one board lit, colour order GRBW **confirmed on hardware**
-- [ ] Bench bring-up §8 steps 3–4 (three chained → thirty)
-- [x] Data level settled by measurement: the pixel sits at 4.53 V and works. Keep the
-      pixel near 4.4-4.5 V, never 5.0 V — but reach it with the PSU trim (§4 A), not
-      with a series diode, which cannot carry the finished wall's current.
+- [x] **Data level settled by measurement, and built: option B.** Chain and ESP both
+      straight off the 5.3 V supply; only the hidden repeater is dropped, through
+      2 x 1N4148, and held dark at 4.2 V. No diode carries chain current, so nothing
+      here limits how many pixels can be added.
+- [ ] Playfield populated, bus + injection + fuse — **in progress**
 - [ ] Per-LED current confirmed with a multimeter (model says 18.5 mA on one die)
-- [ ] Playfield populated, bus + injection + fuse
 - [ ] Inserts mapped to real zones, boot preset saved
 - [ ] V2 ideas: motion sensor, audio-reactive, MQTT / Home Assistant
 
-**Next action: §8 step 3** — three boards chained. That is the step that actually
-decides the design: one board proves the pixel and the colour order, three prove
-the *hop* — whether a data edge that left the ESP with 130 mV of margin is still
-clean after being retimed by two pixels and two board-to-board links with no
-ground wire of their own (§4, "signal hygiene").
+**Next action: populate the playfield** (§3 and §8 step 4). The electrical design
+is settled and built; what is left is wiring discipline — bus, injection every
+30-40 pixels, fuse — and doing it **in stages**, powering up at ~10, ~30 and ~75
+pixels rather than wiring 150 and hoping. Each stage costs a minute and tells you
+which hop broke; the finished wall does not.
 
-Open questions that only the bench can answer: the real per-LED current, and
-whether the margin holds across chained hops.
+Open question still worth closing: the real per-LED current against a multimeter.
+The whole power budget rests on `LED_MA_PER_CHANNEL = 17.5 mA`, and that constant
+is still the one number in this project that has never been measured.
 
 ### Working on this locally
 
