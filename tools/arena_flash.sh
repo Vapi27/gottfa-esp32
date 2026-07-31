@@ -39,15 +39,26 @@ fi
 if [ -z "$PORT" ]; then
   say "Looking for the board"
   pio device list || true
-  # Take the first port that is not a motherboard/virtual serial (ttyS*).
+  # Pick a REAL USB-serial bridge. Taking "the first port" is wrong on macOS,
+  # where the list always starts with cu.debug-console and cu.Bluetooth-* —
+  # both are virtual, both have hwid "n/a", and flashing them just times out.
+  # Rule: keep ports that report a USB VID:PID, and prefer the VIDs actually
+  # used by ESP32 boards (CP210x, CH34x, FTDI, Espressif native USB).
   PORT=$(pio device list --json-output 2>/dev/null \
-         | python3 -c 'import json,sys
+         | python3 -c 'import json,sys,re
 try: d=json.load(sys.stdin)
 except Exception: d=[]
+KNOWN={"10C4":"CP210x","1A86":"CH34x","0403":"FTDI","303A":"Espressif","067B":"PL2303"}
+cand=[]
 for p in d:
-    n=p.get("port","")
-    if "ttyS" in n and "USB" not in n: continue
-    print(n); break' 2>/dev/null || true)
+    n,h=p.get("port",""),(p.get("hwid") or "")
+    if "ttyS" in n and "USB" not in n: continue          # PC/VM motherboard UART
+    if re.search(r"Bluetooth|debug-console|irda", n, re.I): continue
+    m=re.search(r"VID:PID=([0-9A-Fa-f]{4})", h)
+    if not m: continue                                    # no USB id -> not a board
+    cand.append((0 if m.group(1).upper() in KNOWN else 1, n))
+cand.sort()
+if cand: print(cand[0][1])' 2>/dev/null || true)
 fi
 
 if [ -z "$PORT" ]; then
@@ -56,8 +67,13 @@ if [ -z "$PORT" ]; then
    - Is the USB cable a DATA cable? Plenty of them are charge-only.
    - Linux: you must be in the 'dialout' group ->
         sudo usermod -aG dialout $USER   (then log out and back in)
-   - Windows/macOS: install the CH340 driver (this board uses a CH340C).
-   - Then re-run, or pass the port explicitly:  tools/arena_flash.sh /dev/ttyUSB0
+   - Windows/macOS: install the driver for the board's USB bridge. Which one it
+     is varies between D1 Mini ESP32 batches: CH340C on most, CP2104 on others
+     (macOS names them /dev/cu.wchusbserial* and /dev/cu.usbserial-*). macOS 11+
+     ships a CP210x driver already; only the CH340 needs installing.
+   - Then re-run, or pass the port explicitly:
+        tools/arena_flash.sh /dev/cu.usbserial-XXXX     (macOS)
+        tools/arena_flash.sh /dev/ttyUSB0               (Linux)
 EOF
   exit 1
 fi
