@@ -19,6 +19,17 @@ with the GottFA80 companion app.
 | Firmware | complete, builds for 4 targets, adversarially reviewed (5 defects found and fixed before first power-on) |
 | Hardware bring-up | **not started** — nothing has been powered yet |
 
+### Roadmap
+- [x] v1.0 — firmware: 7 modes, insert map, power meter + limiter, web UI + REST + OTA
+- [x] LED boards designed, panelized, assembled and delivered
+- [x] Adversarial preflight review — 5 defects found and fixed before first power-on
+- [x] D1 Mini ESP32 target (GPIO27) + one-command flash script
+- [ ] Bench bring-up §8 steps 1–4 (one board → three chained → thirty)
+- [ ] Data-level option chosen on evidence: 4.4 V trim (§4 A) or repeater pixel (§4 B)
+- [ ] Playfield populated, bus + injection + fuse
+- [ ] Inserts mapped to real zones, boot preset saved
+- [ ] V2 ideas: motion sensor, audio-reactive, MQTT / Home Assistant
+
 **Next action: §8 step 1** — buzz out one board with a multimeter, then power it
 alone on a current-limited supply (5 V, 150 mA): it must draw ~1 mA and stay
 dark. Then §8 step 2, the single-LED bench test.
