@@ -17,7 +17,7 @@ with the GottFA80 companion app.
 | LED boards | **made and in hand** — SK6812MINIRGBW-NW-P6 carrier, slot pads for the bus, single round pads for DATA in/out |
 | Controller | **WEMOS/LOLIN D1 Mini ESP32** (ESP32-WROOM-32, 4 MB), data on **GPIO27**. The board on the bench carries a **CP2104**, not the CH340C this doc assumed: `/dev/cu.usbserial-*`, MAC `68:09:47:48:7a:1c`, ESP32-D0WD-V3 rev 3.1, 4 MB flash. Batches vary — do not hard-code the bridge. |
 | Firmware | complete, builds for 4 targets, adversarially reviewed (5 defects found and fixed before first power-on) |
-| Hardware bring-up | **first light-up done, one board** (2026-07-31) — see "Measured on hardware" below |
+| Hardware bring-up | **34 pixels chained and working** (2026-07-31) — see "Measured on hardware" below |
 
 ### Measured on hardware — 2026-07-31, one LED board
 
@@ -81,23 +81,28 @@ is still the one number in this project that has never been measured.
 
 ### Working on this locally
 
-The firmware lives on branch `claude/arena-wall-art-led-b7d10r` (PR #1).
+The firmware is on `main`.
 
 ```sh
 git clone https://github.com/Vapi27/gottfa-esp32.git
 cd gottfa-esp32
-git checkout claude/arena-wall-art-led-b7d10r
 
 pip install --user platformio     # Linux/macOS; on Windows: pip install platformio
 tools/arena_flash.sh              # build + flash + monitor (Windows: use the pio commands in §7)
 ```
 
-Per-OS notes for the CH340C on this board:
+Per-OS notes. **The USB bridge varies between batches** — the bench board is a
+**CP2104**, others carry a CH340C — so check what you actually have rather than
+installing a driver on faith (`pio device list` names it):
 
 - **Linux** — `sudo usermod -aG dialout $USER`, then log out and back in. Port is `/dev/ttyUSB0`.
-- **macOS** — install the CH340 driver; port is `/dev/cu.wchusbserial*`.
-- **Windows** — install the CH340 driver; port is `COM3`/`COM4`/… Run the `pio`
-  commands from §7 directly (the shell script needs Git Bash or WSL).
+- **macOS** — CP210x needs no driver on macOS 11+; a CH340 does. Port is
+  `/dev/cu.usbserial-*` or `/dev/cu.wchusbserial*`.
+- **Windows** — install the matching CH340 or CP210x driver; port is `COM3`/`COM4`/…
+  Run the `pio` commands from §7 directly (the shell script needs Git Bash or WSL).
+
+Once the board is mounted, you do not need USB at all: firmware and web UI both
+go over WiFi (§7, "Build and flash").
 
 Flashing must happen on the machine the board is plugged into — a cloud session
 has no USB. If you want an assistant driving the board directly, run Claude Code
