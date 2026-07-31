@@ -1,13 +1,23 @@
 // arena_pf.cpp — see arena_pf.h.
 #include <LittleFS.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 #include <string.h>
+#include <ctype.h>
 #include "arena_pf.h"
 
 namespace arenapf {
 
 static const char* PF_PATH   = "/arena_pf.json";     // the playfield (read-only)
-static const char* LEDS_PATH = "/arena_leds.json";   // this wall's assignment
+// This wall's assignment lives in NVS, NOT on LittleFS. It used to be a file
+// there, and pushing a new web UI wiped it: `/update?target=fs` rewrites the
+// whole filesystem partition, so shipped data and the owner's own work shared a
+// blast radius. NVS is a separate partition that neither OTA touches. The old
+// file is still read once, so an install that predates this keeps its map.
+static const char* LEDS_PATH = "/arena_leds.json";   // legacy, read-only migration
+static Preferences s_prefs;
+static const char* NVS_NS  = "arenapf";
+static const char* NVS_KEY = "ledmap";
 
 static Insert  s_ins[INSERT_MAX];
 static uint8_t s_nIns = 0;
@@ -41,6 +51,11 @@ bool setLedInsert(uint16_t led, uint8_t ins) {
 void clearAssignment() {
   memset(s_led, UNASSIGNED, sizeof(s_led));
   s_any = false;
+}
+
+int lampOfLed(uint16_t led) {
+  const uint8_t a = ledInsert(led);
+  return (a == UNASSIGNED || a >= s_nIns) ? -1 : s_ins[a].lamp;
 }
 
 bool xy(uint16_t led, float& x, float& y) {
@@ -81,6 +96,13 @@ static bool loadInserts() {
     it.name[NAME_LEN - 1] = 0;
     const char* k = o["k"] | "i";
     it.kind = k[0];
+    // "L26a" -> 26. The suffix means two physical inserts on one lamp, which is
+    // exactly right: both should light together, and both will.
+    it.lamp = -1;
+    if (it.name[0] == 'L' && isdigit((unsigned char)it.name[1])) {
+      const int n = atoi(it.name + 1);
+      if (n >= 0 && n < 64) it.lamp = (int8_t)n;
+    }
     it.x = o["x"] | 0.0f;
     it.y = o["y"] | 0.0f;
     s_nIns++;
@@ -126,24 +148,30 @@ bool fromJson(const char* json) {
 }
 
 bool save() {
-  File f = LittleFS.open(LEDS_PATH, "w");
-  if (!f) return false;
-  String j = toJson();
-  size_t w = f.print(j);
-  f.close();
-  return w == j.length();
+  return s_prefs.putBytes(NVS_KEY, s_led, sizeof(s_led)) == sizeof(s_led);
 }
 
 static bool loadAssignment() {
+  if (s_prefs.getBytesLength(NVS_KEY) == sizeof(s_led)) {
+    s_prefs.getBytes(NVS_KEY, s_led, sizeof(s_led));
+    recountAssigned();
+    return true;
+  }
+  // Migration: an install from before the move still has its map on LittleFS.
+  // Read it once and write it where it belongs.
   if (!LittleFS.exists(LEDS_PATH)) return false;
   File f = LittleFS.open(LEDS_PATH, "r");
   if (!f) return false;
-  String s = f.readString();
+  String j = f.readString();
   f.close();
-  return fromJson(s.c_str());
+  if (!fromJson(j.c_str())) return false;
+  save();
+  Serial.println("[pf] migrated the insert map from LittleFS to NVS");
+  return true;
 }
 
 void begin() {
+  s_prefs.begin(NVS_NS, false);
   clearAssignment();
   const bool haveTable = loadInserts();
   const bool haveMap   = haveTable && loadAssignment();

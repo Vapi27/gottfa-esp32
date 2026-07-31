@@ -5,6 +5,7 @@
 #include "arenaled.h"
 #include "arena_map.h"
 #include "arena_pf.h"
+#include "arena_attract.h"
 
 namespace arenaled {
 
@@ -209,9 +210,43 @@ static void fxZoneSweep(Rgbw* buf) {
   }
 }
 
+// Arena's ORIGINAL attract mode, replayed from the game ROM (arena_attract.h).
+// Each frame is the lamp mask Arena's own program was driving at that instant;
+// a pixel lights when the lamp its insert sits on is lit. The wall is running
+// the machine's attract sequence, not an impression of it.
+//
+// One deliberate liberty: #47 bulbs do not switch instantly. They take ~40 ms to
+// come up and rather longer to die, and without that the chases read as digital
+// blinking instead of a playfield. The envelope below is the only thing here
+// that is not in the ROM.
+static void fxRomAttract(Rgbw* buf) {
+  static float lvl[LED_MAX] = { 0 };
+  static uint32_t lastMs = 0;
+
+  const uint32_t now = millis();
+  float dt = (lastMs ? (now - lastMs) : 16) / 1000.0f;
+  lastMs = now;
+  if (dt > 0.2f) dt = 0.2f;                       // after a stall, do not jump
+
+  // The sequence runs on the animation clock, so the speed slider works on it.
+  const uint64_t mask = arenaattract::maskAt((uint32_t)(phase(1.0, 3600.0) * 1000.0f));
+
+  const float upK   = 1.0f - expf(-dt / 0.040f);  // ~40 ms rise
+  const float downK = 1.0f - expf(-dt / 0.090f);  // ~90 ms fall
+  const Rgbw base   = scale(s_color, 0.06f);
+
+  for (uint16_t i = 0; i < s_count; i++) {
+    const int lamp = arenapf::lampOfLed(i);
+    const bool on  = (lamp >= 0) && ((mask >> lamp) & 1ULL);
+    lvl[i] += (on ? (1.0f - lvl[i]) * upK : -lvl[i] * downK);
+    buf[i] = (lamp < 0) ? base : addSat(base, scale(s_color, lvl[i]));
+  }
+}
+
 // Attract = the five slow animations above, auto-cycled with a crossfade so the
-// wall never "cuts" from one effect to the next.
-static void fxAttract(Rgbw* buf) {
+// wall never "cuts" from one effect to the next. Stands in only when the ROM
+// capture or the insert placement is missing.
+static void fxAttractGeneric(Rgbw* buf) {
   typedef void (*FxFn)(Rgbw*);
   static FxFn FX[] = { fxPulse, fxWave, fxChase, fxSparkle, fxZoneSweep };
   const uint8_t N = sizeof(FX) / sizeof(FX[0]);
@@ -335,7 +370,12 @@ static const uint16_t OFFS = LED_REPEATER_PIXEL ? 1 : 0;
 static void renderMode(Mode m, Rgbw* buf) {
   switch (m) {
     case MODE_CLASSIC: fxClassic(buf); break;
-    case MODE_ATTRACT: fxAttract(buf); break;
+    case MODE_ATTRACT:
+      // The real thing needs both halves: the captured sequence, and pixels
+      // placed on inserts to paint it onto. Missing either, fall back.
+      if (arenaattract::available() && arenapf::anyAssigned()) fxRomAttract(buf);
+      else                                                     fxAttractGeneric(buf);
+      break;
     case MODE_ARENA:   fxArena(buf);   break;
     // Night is deliberately the warm-white die whatever the current colour is:
     // at 10 % an amber made of R+G reads orange and dirty, W stays clean.

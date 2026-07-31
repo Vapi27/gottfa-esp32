@@ -4,6 +4,7 @@
 #include "arenaled.h"
 #include "arena_map.h"
 #include "arena_pf.h"
+#include "arena_attract.h"
 #include "arena_net.h"
 
 // ============================================================================
@@ -53,7 +54,8 @@ void setup() {
     Serial.println("[fs] LittleFS mount failed (run: pio run -e arenaled -t uploadfs)");
 
   arenamap::begin();      // named zones: /arena_map.json, else the built-in template
-  arenapf::begin();       // playfield geometry: 99 inserts + which pixel sits on which
+  arenapf::begin();       // playfield geometry: inserts + which pixel sits on which
+  arenaattract::begin();  // Arena's own attract sequence, captured from the ROM
   arenaled::begin();      // NVS settings + chain init; pixels go dark-then-live
   arenanet::begin();      // WiFi + http://arena.local/
 

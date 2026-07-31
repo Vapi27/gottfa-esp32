@@ -1,6 +1,10 @@
 .pio/
 .vscode/
 *.bin
+# ...except the captured attract sequence: it is source data, not a build
+# artefact. Regenerating it needs PinMAME built and the game ROM in hand, so
+# it belongs in the repo next to the tool that produced it.
+!data/arena_attract.bin
 *.elf
 *.map
 # per-title sound-command maps are content, not linker output (see SOUND_MAP.md)

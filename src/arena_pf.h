@@ -32,7 +32,8 @@ static const uint8_t  UNASSIGNED  = 255;
 
 struct Insert {
   char  name[NAME_LEN];
-  char  kind;        // 'i' insert, 'l' side ladder, 'f' flasher
+  char  kind;        // 'i' matrix insert, 'f' flasher
+  int8_t lamp;       // matrix lamp number parsed from the name (L26a -> 26), -1 if none
   float x, y;        // 0..1, origin top-left: y grows towards the flippers
 };
 
@@ -49,6 +50,11 @@ void     clearAssignment();
 // Position of a chain index, 0..1. False when that pixel has no insert yet —
 // callers must decide what an unplaced pixel does rather than get (0,0).
 bool xy(uint16_t led, float& x, float& y);
+
+// Matrix lamp that drives the pixel at this chain index, -1 if it sits on a
+// flasher or has not been placed. This is what lets a lamp mask captured from
+// the ROM be painted straight onto the wall.
+int lampOfLed(uint16_t led);
 bool anyAssigned();
 
 String toJson();                    // {"leds":[{"i":0,"a":12},...]}
