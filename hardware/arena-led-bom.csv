@@ -7,7 +7,8 @@ C2,1000uF 16V electrolytic,2,3,4,one per power injection point
 PSU1,Power supply 5V 15A 75W,1,1,1,must have a V-ADJ trim pot (set 4.4V - see ARENA_LED.md 4.A)
 F1,Fuse holder + 10A slow-blow fuse,1,1,1,between PSU and bus (firmware caps the chain at 9A)
 R1,330 ohm 1/4W,1,1,1,series on DATA at the ESP32 output
-D2,1N5819 Schottky,2,2,2,only for the repeater-pixel option (ARENA_LED.md 4.B)
+D2,1N4148 silicon diode,2,2,2,repeater-pixel option only (ARENA_LED.md 4.B) - SILICON not Schottky: the repeater is held dark (~1 mA) and a Schottky drops too little at that current
+PCB1b,LED PCB - one spare as the hidden repeater pixel,1,1,1,repeater-pixel option only; mounted behind the frame and kept dark by LED_REPEATER_PIXEL 1
 W1,AWG18 wire red+black,6 m,10 m,14 m,main +5V / GND bus; threads through the board slots and carries the boards
 W2,AWG26-24 wire,8 m,15 m,22 m,board-to-board DATA hops (single wire per hop - keep each hop under 15 cm)
 W3,AWG22 wire red+black,3 m,5 m,8 m,optional stub taps for boards the bus pair cannot reach

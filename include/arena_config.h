@@ -61,9 +61,12 @@
 // The SK6812 wants VIH >= 0.7 x VDD; at VDD = 5.0 V that is 3.5 V and an ESP32
 // GPIO only reaches 3.3 V. Two hardware fixes need no logic IC (ARENA_LED.md §4):
 //   A. run the whole chain at 4.3-4.5 V (trim the PSU) -> VIH = 3.0-3.15 V. Nothing to set here.
-//   B. "repeater pixel": feed ONLY the first LED through 2 series Schottky diodes
-//      (~4.4 V) so it accepts 3.3 V data, and let its DATA OUT — a clean, full
-//      VDD-swing regenerated signal — drive the rest of the chain at 5 V.
+//   B. "repeater pixel": feed ONLY the first LED through 2 series SILICON diodes
+//      (1N4148, ~4.1-4.4 V) so it accepts 3.3 V data, and let its DATA OUT — a
+//      clean, full VDD-swing regenerated signal — drive the rest of the chain at 5 V.
+//      NOT Schottky: this pixel is held dark below, so it draws ~1 mA, and a
+//      Schottky drops only ~0.2 V there — too little to buy the margin (see
+//      ARENA_LED.md §4 B, corrected 2026-07-31). Measure: repeater VDD 4.0-4.4 V.
 // Set this to 1 for option B: pixel 0 is then a hidden repeater, kept dark and
 // excluded from the map, so LED numbering in the UI still starts at the first
 // visible insert.

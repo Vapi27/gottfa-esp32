@@ -195,19 +195,37 @@ Trim the PSU output down instead of raising the logic. At `VDD = 4.4 V`,
 
 ### Option B — "repeater pixel" *(2 diodes, chain stays at 5 V)*
 
-Feed **only the first LED** through two series Schottky diodes so it sits at
-~4.4 V and therefore accepts 3.3 V data. Its **DATA OUT is a regenerated,
-full-VDD-swing signal**, which then drives the rest of the chain at a full 5 V.
+Feed **only the first LED** through two series **silicon** diodes so it sits
+around 4.1-4.4 V and therefore accepts 3.3 V data. Its **DATA OUT is a
+regenerated, full-VDD-swing signal**, which then drives the rest of the chain at
+a full 5 V.
+
+> **Use silicon (1N4148), not Schottky — corrected 2026-07-31.** This section
+> used to specify 2 x 1N5819 "since LED1 draws <= 70 mA". That reasoning is wrong
+> as soon as `LED_REPEATER_PIXEL 1` is set, because the firmware then keeps that
+> pixel **dark**: it draws about **1 mA**, not 70 mA. A Schottky at 1 mA drops
+> only ~0.2 V, so two of them would leave the repeater near 4.9 V (on a 5.3 V
+> supply) — a VIH of 3.43 V, *above* the ESP32's 3.3 V. The recommended circuit
+> would not have worked. A 1N4148 drops ~0.6 V at 1 mA, which is what this needs.
+> Diode current here is ~1 mA either way, so the rating never matters; the
+> forward drop at that current is the whole point.
 
 ```
- +5V ──┬──────────────────────────────▶ LED2..n  VDD (5.0 V)
+ +5V ──┬──────────────────────────────▶ LED2..n  VDD (5.0-5.3 V)
        │
-       └─▶ ▶| ─ ▶| ─┬─▶ LED1 VDD (~4.4 V)     2 × 1N5819 (any small Schottky —
-          (2 × Schottky)                        LED1 draws ≤ 70 mA)
+       └─▶ ▶| ─ ▶| ─┬─▶ LED1 VDD (~4.1-4.4 V)  2 x 1N4148 (silicon; the pixel is
+          (2 x silicon)                          held dark, so it draws ~1 mA)
                     └─ 100 nF to GND
 
- ESP32 GPIO5 ── 330 R ──▶ LED1 DATA IN        LED1 DATA OUT ──▶ LED2 DATA IN
+ ESP32 GPIO27 ── 330 R ──▶ LED1 DATA IN       LED1 DATA OUT ──▶ LED2 DATA IN
 ```
+
+**Measure it, do not trust the arithmetic**: with everything powered, the
+repeater's VDD must land between **4.0 and 4.4 V**. Above 4.4 V the ESP loses its
+input margin (`VIH = 0.7 x VDD` climbs past 3.3 V) — add a third diode. Below
+4.0 V the repeater's own output starts crowding the `0.7 x 5.3 = 3.71 V` the rest
+of the chain demands — drop back to one diode. The window is wide; hitting it
+blind is not.
 
 Mount that first pixel **hidden behind the frame** and set
 `LED_REPEATER_PIXEL 1` in `include/arena_config.h`: the firmware keeps it dark
