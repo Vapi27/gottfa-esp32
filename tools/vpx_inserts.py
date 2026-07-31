@@ -19,7 +19,7 @@ We want item type 7 (Light) and its VCEN record — the light's centre on the
 playfield, in VP table units — plus NAME. Table bounds come from GameData
 (LEFT/RGHT/TOPX/BOTM), so positions can be normalised to 0..1.
 """
-import json, struct, sys
+import json, re, struct, sys
 import olefile
 
 ITEM_LIGHT, ITEM_BUMPER, ITEM_FLIPPER = 7, 5, 1
@@ -89,8 +89,35 @@ def main(path):
             items.append(rec)
     ole.close()
 
-    out = {"bounds": bounds, "counts": counts, "items": items}
-    print(json.dumps(out, indent=1))
+    # --- keep only what the machine actually commands -----------------------
+    # Evidence, not naming convention: the table's own VBS says
+    #   line 174  vpmMapLights AllLights   -> objects named L<n> ARE lamp <n>
+    #   line 365  \'Ramp running Light     -> the LS* column is ONE lamp (17)
+    #             that the table author animates as a chaser with his own timer
+    # So the 24 LS* are a visual effect on the virtual table and do not exist as
+    # lamps on the real playfield. GI is house light, never commanded. What is
+    # left: L* (the lamp matrix) and F* (flashers, driven by the solenoid board
+    # rather than the matrix — commanded all the same, kept and marked 'f').
+    def kind(name):
+        if name.startswith("GI"): return None            # general illumination
+        if name.startswith("LS"): return None            # ramp chaser, not lamps
+        if re.match(r"^L\d", name): return "i"           # lamp matrix insert
+        if name.startswith("F"):  return "f"             # flasher
+        return None
+
+    keep = []
+    for it in sorted(items, key=lambda z: (z["y"], z["x"])):
+        if it["kind"] != "light":
+            continue
+        k = kind(it["name"])
+        if not k:
+            continue
+        keep.append({"n": it["name"][:7], "k": k,
+                     "x": round(it["x"] / bounds["RGHT"], 4),
+                     "y": round(it["y"] / bounds["BOTM"], 4)})
+
+    rows = ",\n".join(json.dumps(r, separators=(",", ":")) for r in keep)
+    print("{\"inserts\":[\n" + rows + "\n]}")
     print("\n--- résumé ---", file=sys.stderr)
     print("bornes du plateau : %s" % bounds, file=sys.stderr)
     print("types d'objets    : %s" % dict(sorted(counts.items())), file=sys.stderr)
