@@ -75,6 +75,8 @@
       <input type="range" id="speed" min="0" max="255"><output id="o-speed"></output></div>
     <div class="row"><label>Glow</label>
       <input type="range" id="gi" min="0" max="255"><output id="o-gi"></output></div>
+    <div class="row"><label>Warmth</label>
+      <input type="range" id="warm" min="0" max="255"><output id="o-warm"></output></div>
     <div class="row"><label>Power</label>
       <div class="bar"><i id="pbar" style="width:0"></i></div><output id="o-pow"></output></div>
     <p class="hint">The firmware meters every frame and dims the whole wall rather than
@@ -133,6 +135,11 @@
       <span class="bar"><i id="wz-bar" style="width:0"></i></span>
       <output id="wz-pos" style="width:96px">&ndash;</output>
     </div>
+    <div class="row">
+      <label>Go to pixel</label>
+      <input type="number" id="wz-goto" min="0" style="width:90px">
+      <button onclick="wzGo(+$('wz-goto').value)">Light it</button>
+    </div>
 
     <div id="wz-body" style="display:none">
       <p class="hint" id="wz-say">Look at the playfield: <b>one pixel is blinking white</b>.
@@ -182,7 +189,7 @@ MODES.forEach(m => {
 function setMode(m) { push('mode=' + m); }
 
 // --- sliders: send while dragging, but pause polling so the UI doesn't fight the user ---
-['bright','speed','gi','r','g','b','w'].forEach(k => {
+['bright','speed','gi','warm','r','g','b','w'].forEach(k => {
   const el = $(k);
   el.oninput = () => { $('o-' + k).value = el.value; holdUntil = Date.now() + 1500; };
   el.onchange = () => push(k + '=' + el.value);
@@ -215,7 +222,7 @@ function render(s) {
   $('o-pow').value = (s.budget / 1000).toFixed(1) + ' A';
 
   if (Date.now() < holdUntil) return;            // don't stomp a slider being dragged
-  set('bright', s.bright); set('speed', s.speed); set('gi', s.gi);
+  set('bright', s.bright); set('speed', s.speed); set('gi', s.gi); set('warm', s.warm);
   set('r', s.r); set('g', s.g); set('b', s.b); set('w', s.w);
   if (document.activeElement !== $('count'))  $('count').value  = s.count;
   if (document.activeElement !== $('budget')) $('budget').value = s.budget;
@@ -298,19 +305,31 @@ function wzDraw() {
     const cx = (p.x * W).toFixed(1), cy = (p.y * H).toFixed(1);
     const own = owner[i], taken = own !== undefined;
     const col = PF_KIND[p.k] || '#ff9b21';
+    // The label is ALWAYS the insert's own name. It used to switch to the LED
+    // number once taken, which put two different quantities in the same place:
+    // "8" could mean insert L8 or pixel 8, with nothing to tell them apart.
+    // Which pixel sits there is secondary, so it goes in the tooltip and in the
+    // ring, not in the label.
     s += '<g onclick="wzAssign(' + i + ')" style="cursor:pointer">' +
+         '<title>' + p.n + (taken ? ' - pixel ' + own : ' - free') + '</title>' +
          '<circle cx="' + cx + '" cy="' + cy + '" r="30" fill="' + (taken ? col : '#241c16') +
-         '" stroke="' + (taken ? '#0d0b09' : col) + '" stroke-width="3"/>' +
+         '" stroke="' + (taken ? '#efe6da' : col) + '" stroke-width="' + (taken ? 5 : 3) + '"/>' +
          '<text x="' + cx + '" y="' + cy + '" font-size="26" font-weight="700" text-anchor="middle" ' +
          'dominant-baseline="central" fill="' + (taken ? '#0d0b09' : '#9a8a78') + '">' +
-         (taken ? own : p.n.replace(/^L/, '')) + '</text></g>';
+         p.n.replace(/^L/, '') + '</text></g>';
   });
   s += '</svg>';
   $('wz-plan').innerHTML = s;
 
+  const here = owner[LEDMAP[wz.at]] !== undefined ? null : null;
+  const mine = LEDMAP[wz.at];
+  $('wz-goto').max = Math.max(0, total - 1);
   $('wz-say').innerHTML = total
-    ? 'Pixel <b>' + wz.at + '</b> is blinking on the playfield &mdash; click the insert it sits ' +
-      'under. A filled dot already holds a pixel and shows its chain number.'
+    ? 'Pixel <b>' + wz.at + '</b> of ' + (total - 1) + ' is blinking on the playfield &mdash; click ' +
+      'the insert it sits under. Filled dots are already placed; the label is always the ' +
+      '<b>insert</b>, and the tooltip says which pixel is on it.' +
+      (mine !== undefined ? ' This one currently holds <b>' + (PF[mine] ? PF[mine].n : '?') + '</b>.' : '') +
+      (wz.at >= total - 1 ? ' <b>Last pixel of the chain</b> &mdash; clicking still assigns, it just has nowhere to advance to.' : '')
     : 'Set the LED count first.';
   $('wz-warn').textContent = PF.length
     ? placed + ' of ' + total + ' pixels placed, on ' + PF.length + ' known inserts.'
