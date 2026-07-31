@@ -66,7 +66,11 @@ brightness, which is the easiest point to check it against).
       here limits how many pixels can be added.
 - [ ] Playfield populated, bus + injection + fuse — **in progress**
 - [ ] Per-LED current confirmed with a multimeter (model says 18.5 mA on one die)
-- [ ] Inserts mapped to real zones, boot preset saved
+- [x] **Insert map built on hardware** — 34 pixels placed on real matrix lamps
+      (L1..L48) by clicking the plan, covering the full height of the playfield;
+      geometric `arena` mode confirmed running off it (current swings 56-123 mA
+      as the wave crosses, which a chain-order effect would not do)
+- [ ] Remaining 41 inserts placed, boot preset saved
 - [ ] V2 ideas: motion sensor, audio-reactive, MQTT / Home Assistant
 
 **Next action: populate the playfield** (§3 and §8 step 4). The electrical design
