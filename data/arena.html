@@ -134,29 +134,16 @@
     </div>
 
     <div id="wz-body" style="display:none">
-      <div class="row">
-        <label>This pixel is</label>
-        <input type="text" id="wz-name" list="wz-names" maxlength="19"
-               placeholder="name of the insert it lights" autocomplete="off">
-        <datalist id="wz-names"></datalist>
-      </div>
+      <p class="hint" id="wz-say">Look at the playfield: <b>one pixel is blinking white</b>.
+        Click the insert it sits under.</p>
+      <div id="wz-plan"></div>
       <div class="modes">
-        <button onclick="wzAssign()">Assign &amp; next</button>
-        <button onclick="wzSame()">Same as previous</button>
-        <button onclick="wzSkip()">Not an insert</button>
+        <button onclick="wzSkip()">Not on an insert</button>
         <button onclick="wzGo(wz.at-1)">&#9664; Back</button>
+        <button onclick="wzGo(wz.at+1)">Skip ahead &#9654;</button>
+        <button onclick="if(confirm('Forget every placement?')) wzClear()">Clear all</button>
       </div>
-      <p class="hint"><b>Enter</b> assigns what you typed, or repeats the previous name if the
-        box is empty &mdash; that is the one key you will use for most of the chain.
-        <b>Esc</b> skips a pixel that lights nothing worth naming.</p>
-
-      <table id="wz-runs"><thead><tr><th>Zone</th><th>LEDs</th><th>Range</th></tr></thead>
-        <tbody></tbody></table>
       <p class="hint" id="wz-warn"></p>
-      <p class="hint">
-        <button onclick="wzBuild()">Build zones &amp; save to the board</button>
-        <button onclick="if(confirm('Discard the whole walk?')) wzReset()">Discard walk</button>
-      </p>
     </div>
   </section>
 
@@ -300,98 +287,95 @@ function walk(d) {
 }
 
 // --- mapping wizard ---
-// The chain is anonymous: only someone looking at the playfield can say what a
-// given pixel lights. So spotlight one pixel, take a name, advance. Runs of the
-// same name collapse into the {first,count} zones the firmware stores — which is
-// also why a zone can only ever be a contiguous stretch of the chain.
+// The playfield (99 inserts and where each one sits) was lifted out of the
+// Visual Pinball table and is fixed — it is the machine. What the wizard
+// collects is the part that is not: which chain index landed on which insert.
 //
-// The walk lives in localStorage, not on the board: naming 100 inserts is a long
-// job done on a phone under a playfield, and losing it to a dropped WiFi frame or
-// a locked screen would be worse than any bug in here.
-const WZ_KEY = 'arenaWalk', WZ_ZONE_MAX = 24;
-let wz = { at: 0, names: [] };
-try { const s = localStorage.getItem(WZ_KEY); if (s) wz = JSON.parse(s); } catch (e) {}
+// So: light one pixel, let the eye find it on the real table, take one click on
+// the plan. Nothing to read off, nothing to type, and the coordinates the
+// geometric effects need arrive for free. Every click is saved on the board,
+// because placing ninety-nine inserts is a long session under a playfield and a
+// power cut at pixel 80 must not cost the other 79.
+let PF = [], LEDMAP = {}, wz = { at: 0 };
 
-function wzPersist() { try { localStorage.setItem(WZ_KEY, JSON.stringify(wz)); } catch (e) {} }
-function wzStart() { $('wz-body').style.display = ''; wzGo(wz.at); }
+function pfLoad() {
+  return Promise.all([
+    fetch('/api/pf').then(r => r.json()).then(j => { PF = j.inserts || []; }),
+    fetch('/api/ledmap').then(r => r.json()).then(j => {
+      LEDMAP = {};
+      (j.leds || []).forEach(e => { LEDMAP[e.i] = e.a; });
+    })
+  ]).then(wzDraw).catch(() => {});
+}
+function wzStart() { $('wz-body').style.display = ''; pfLoad().then(() => wzGo(wz.at)); }
 function wzStop()  { api('/api/identify?clear=1'); }
-function wzReset() { wz = { at: 0, names: [] }; wzPersist(); wzStop(); wzDraw(); }
 
 function wzGo(n) {
   const last = Math.max(0, (st.count || 1) - 1);
   wz.at = Math.max(0, Math.min(last, n));
-  wzPersist();
-  // 10 min outlasts any single naming step, and every step re-arms it anyway.
+  // 10 min outlasts any single step, and every step re-arms it anyway.
   api('/api/identify?led=' + wz.at + '&ms=600000');
-  $('wz-name').value = '';
-  $('wz-name').focus();
   wzDraw();
 }
-function wzSet(name) { wz.names[wz.at] = name; wzGo(wz.at + 1); }
-function wzAssign()  { const v = $('wz-name').value.trim(); v ? wzSet(v) : wzSame(); }
-function wzSkip()    { wzSet(null); }
-function wzSame() {
-  const p = wzPrev();
-  if (!p) { toast('nothing to repeat yet — type a name first'); return; }
-  wzSet(p);
+function wzAssign(ins) {
+  const led = wz.at;
+  api('/api/assign?led=' + led + '&ins=' + ins)
+    .then(() => { LEDMAP[led] = ins; wzGo(led + 1); })
+    .catch(e => toast('assign failed: ' + e));
 }
-function wzPrev() {
-  for (let i = wz.at - 1; i >= 0; i--) if (wz.names[i]) return wz.names[i];
-  return null;
+function wzSkip() {
+  const led = wz.at;
+  api('/api/assign?led=' + led + '&ins=none')
+    .then(() => { delete LEDMAP[led]; wzGo(led + 1); });
 }
-// Contiguous runs of one name -> one zone. A gap or a different name ends the run.
-function wzRuns() {
-  const runs = [];
-  for (let i = 0; i < wz.names.length; i++) {
-    const n = wz.names[i];
-    if (!n) continue;
-    const last = runs[runs.length - 1];
-    if (last && last.n === n && last.f + last.c === i) last.c++;
-    else runs.push({ n: n, f: i, c: 1 });
-  }
-  return runs;
+function wzClear() {
+  api('/api/ledmap/reset').then(() => { LEDMAP = {}; wzGo(0); });
 }
+// insert index -> the chain index sitting on it (the reverse of LEDMAP)
+function pfOwner() {
+  const o = {};
+  Object.keys(LEDMAP).forEach(led => { o[LEDMAP[led]] = +led; });
+  return o;
+}
+
+const PF_KIND = { i: '#ff9b21', l: '#ffc046', f: '#e0483a' };
+
 function wzDraw() {
   const total = st.count || 0;
-  $('wz-pos').value = total ? 'LED ' + wz.at + ' / ' + (total - 1) : '–';
+  $('wz-pos').value = total ? 'LED ' + wz.at + ' / ' + (total - 1) : '-';
   $('wz-bar').style.width = total ? ((wz.at + 1) / total * 100) + '%' : '0';
 
-  const runs = wzRuns(), tb = $('wz-runs').querySelector('tbody');
-  tb.innerHTML = '';
-  runs.forEach(r => {
-    const tr = document.createElement('tr');
-    tr.innerHTML = `<td>${r.n}</td><td>${r.c}</td><td>${r.f}–${r.f + r.c - 1}</td>`;
-    tb.appendChild(tr);
+  const owner = pfOwner(), placed = Object.keys(LEDMAP).length;
+  const W = 1000, H = 2074;              // 960 x 1991 table units, normalised
+  let s = '<svg viewBox="-30 -30 ' + (W + 60) + ' ' + (H + 60) +
+          '" style="width:100%;max-width:430px;display:block;margin:8px auto">';
+  s += '<rect x="0" y="0" width="' + W + '" height="' + H +
+       '" rx="64" fill="#141009" stroke="#2c241d" stroke-width="4"/>';
+  s += '<text x="' + (W / 2) + '" y="-6" fill="#5b4c3c" font-size="38" text-anchor="middle">back panel</text>';
+  s += '<text x="' + (W / 2) + '" y="' + (H + 26) + '" fill="#5b4c3c" font-size="38" text-anchor="middle">flippers</text>';
+  PF.forEach((p, i) => {
+    const cx = (p.x * W).toFixed(1), cy = (p.y * H).toFixed(1);
+    const own = owner[i], taken = own !== undefined;
+    const col = PF_KIND[p.k] || '#ff9b21';
+    s += '<g onclick="wzAssign(' + i + ')" style="cursor:pointer">' +
+         '<circle cx="' + cx + '" cy="' + cy + '" r="30" fill="' + (taken ? col : '#241c16') +
+         '" stroke="' + (taken ? '#0d0b09' : col) + '" stroke-width="3"/>' +
+         '<text x="' + cx + '" y="' + cy + '" font-size="26" font-weight="700" text-anchor="middle" ' +
+         'dominant-baseline="central" fill="' + (taken ? '#0d0b09' : '#9a8a78') + '">' +
+         (taken ? own : p.n.replace(/^L/, '')) + '</text></g>';
   });
+  s += '</svg>';
+  $('wz-plan').innerHTML = s;
 
-  const dl = $('wz-names');
-  dl.innerHTML = '';
-  [...new Set(wz.names.filter(Boolean))].forEach(n => {
-    const o = document.createElement('option'); o.value = n; dl.appendChild(o);
-  });
-
-  // Two things silently produce a map that does not mean what you meant.
-  const seen = {}, dup = [];
-  runs.forEach(r => { if (seen[r.n]) { if (dup.indexOf(r.n) < 0) dup.push(r.n); } seen[r.n] = 1; });
-  let w = '';
-  if (runs.length > WZ_ZONE_MAX)
-    w = `⚠ ${runs.length} zones — the board stores ${WZ_ZONE_MAX}. Reuse names for neighbouring pixels before saving.`;
-  else if (dup.length)
-    w = `⚠ ${dup.join(', ')} appears in more than one separate run. A zone must be one unbroken stretch of the chain, so each run is saved as its own zone.`;
-  $('wz-warn').textContent = w;
-  $('wz-warn').className = w ? 'hint warn' : 'hint';
+  $('wz-say').innerHTML = total
+    ? 'Pixel <b>' + wz.at + '</b> is blinking on the playfield &mdash; click the insert it sits ' +
+      'under. A filled dot already holds a pixel and shows its chain number.'
+    : 'Set the LED count first.';
+  $('wz-warn').textContent = PF.length
+    ? placed + ' of ' + total + ' pixels placed, on ' + PF.length + ' known inserts.'
+    : 'The board has no /arena_pf.json - re-upload the filesystem.';
+  $('wz-warn').className = PF.length ? 'hint' : 'hint warn';
 }
-function wzBuild() {
-  const runs = wzRuns();
-  if (!runs.length)                { toast('nothing named yet'); return; }
-  if (runs.length > WZ_ZONE_MAX)   { toast(`too many zones (${runs.length} > ${WZ_ZONE_MAX})`); return; }
-  fetch('/api/zones', { method: 'POST', body: JSON.stringify({ zones: runs }) })
-    .then(r => r.text()).then(toast).then(loadZones);
-}
-$('wz-name').addEventListener('keydown', e => {
-  if (e.key === 'Enter')       { e.preventDefault(); wzAssign(); }
-  else if (e.key === 'Escape') { e.preventDefault(); wzSkip(); }
-});
 
 // --- wifi / OTA ---
 function saveWifi() {

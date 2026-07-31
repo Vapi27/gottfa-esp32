@@ -4,6 +4,7 @@
 #include <string.h>
 #include "arenaled.h"
 #include "arena_map.h"
+#include "arena_pf.h"
 
 namespace arenaled {
 
@@ -228,9 +229,44 @@ static void fxAttract(Rgbw* buf) {
   }
 }
 
+// Geometric Arena mode — used when the pixels have been placed on the playfield
+// (arenapf). Chain order is an accident of wiring; position is the real thing, so
+// once we know where each pixel *is*, the effects should be about the table and
+// not about the cable. Two waves at right angles: one climbing from the flippers
+// to the back panel, one sweeping across, plus a ripple leaving the middle.
+static void fxArenaGeo(Rgbw* buf) {
+  const Rgbw amber = { ARENA_AMBER_R, ARENA_AMBER_G, ARENA_AMBER_B, ARENA_AMBER_W };
+  const Rgbw gold  = { ARENA_GOLD_R,  ARENA_GOLD_G,  ARENA_GOLD_B,  ARENA_GOLD_W  };
+  fill(buf, scale(s_color, 0.14f));
+
+  const float up    = phase(1.0, 1.0);          // 0..1, climbing the playfield
+  const float ripT  = phase(1.0, 6.0) / 6.0f;   // ripple every 6 s
+  const float rip   = ripT * 1.15f;             // radius, overshoots so it leaves
+
+  for (uint16_t i = 0; i < s_count; i++) {
+    float x, y;
+    if (!arenapf::xy(i, x, y)) continue;        // pixel not placed: leave it on the wash
+
+    // Wave climbing from the flippers (y=1) to the back panel (y=0).
+    float d = fabsf((1.0f - y) - up);
+    if (d > 0.5f) d = 1.0f - d;                 // wrap: the wave is continuous
+    buf[i] = addSat(buf[i], scale(amber, expf(-d * d * 90.0f)));
+
+    // Ripple leaving the middle of the playfield.
+    const float dx = x - 0.5f, dy = y - 0.55f;
+    const float r  = sqrtf(dx * dx + dy * dy);
+    const float dr = fabsf(r - rip);
+    if (dr < 0.12f)
+      buf[i] = addSat(buf[i], scale(gold, (1.0f - dr / 0.12f) * (1.0f - ripT) * 0.9f));
+  }
+}
+
 // Arena mode: a "ball" runs the zones in chain order, each hit flashes its zone
-// and decays; every ~20 s the whole playfield flashes (jackpot).
+// and decays; every ~20 s the whole playfield flashes (jackpot). Falls back to
+// this whenever no pixel has been placed on the playfield yet.
 static void fxArena(Rgbw* buf) {
+  if (arenapf::anyAssigned()) { fxArenaGeo(buf); return; }
+
   const Rgbw amber = { ARENA_AMBER_R, ARENA_AMBER_G, ARENA_AMBER_B, ARENA_AMBER_W };
   fill(buf, scale(s_color, 0.14f));
 

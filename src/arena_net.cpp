@@ -8,6 +8,7 @@
 #include "arena_net.h"
 #include "arenaled.h"
 #include "arena_map.h"
+#include "arena_pf.h"
 
 namespace arenanet {
 
@@ -160,6 +161,25 @@ void begin() {
     r->send(200, "text/plain", "ok");
   });
 
+  // ---- Sub-paths must be registered BEFORE their parent --------------------
+  // This server matches a handler when the request URL equals its URI *or*
+  // starts with it followed by '/'. So "/api/zones" also answers
+  // "/api/zones/reset", and whichever was registered first wins. Registered the
+  // other way round, /api/zones/reset silently returned the zone list and the
+  // UI's "Reset to template" button did nothing at all - which is exactly what
+  // it had been doing, unnoticed, since there was no hardware to try it on.
+  s_server.on("/api/zones/reset", HTTP_GET, [](AsyncWebServerRequest* r) {
+    arenamap::reset();
+    arenamap::save();
+    r->send(200, "application/json", arenamap::toJson());
+  });
+
+  s_server.on("/api/ledmap/reset", HTTP_GET, [](AsyncWebServerRequest* r) {
+    arenapf::clearAssignment();
+    arenapf::save();
+    r->send(200, "text/plain", "cleared");
+  });
+
   s_server.on("/api/zones", HTTP_GET, [](AsyncWebServerRequest* r) {
     r->send(200, "application/json", arenamap::toJson());
   });
@@ -196,10 +216,36 @@ void begin() {
       if (body) for (size_t i = 0; i < len; i++) body->concat((char)data[i]);
     });
 
-  s_server.on("/api/zones/reset", HTTP_GET, [](AsyncWebServerRequest* r) {
-    arenamap::reset();
-    arenamap::save();
-    r->send(200, "application/json", arenamap::toJson());
+  // --- Playfield geometry ---------------------------------------------------
+  //  /api/pf                      the 99 inserts and where they are (fixed)
+  //  /api/ledmap                  which chain index sits on which insert
+  //  /api/assign?led=N&ins=M      place one pixel (ins=none to unplace it)
+  //  /api/ledmap/reset            forget every placement
+  s_server.on("/api/pf", HTTP_GET, [](AsyncWebServerRequest* r) {
+    r->send(200, "application/json", arenapf::insertsJson());
+  });
+
+  s_server.on("/api/ledmap", HTTP_GET, [](AsyncWebServerRequest* r) {
+    r->send(200, "application/json", arenapf::toJson());
+  });
+
+  // Saved on every click. Placing 99 inserts is a long session under a
+  // playfield; losing it to a power cut at pixel 80 is not acceptable, and the
+  // write is a few hundred bytes onto a partition that is otherwise idle.
+  s_server.on("/api/assign", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("led")) { r->send(400, "text/plain", "led= [&ins=N|none]"); return; }
+    const int led = r->getParam("led")->value().toInt();
+    uint8_t ins = arenapf::UNASSIGNED;
+    if (r->hasParam("ins")) {
+      const String v = r->getParam("ins")->value();
+      if (v != "none" && v.length()) ins = (uint8_t)v.toInt();
+    }
+    if (!arenapf::setLedInsert((uint16_t)led, ins)) {
+      r->send(400, "text/plain", "led or ins out of range");
+      return;
+    }
+    arenapf::save();
+    r->send(200, "application/json", arenapf::toJson());
   });
 
   // --- WiFi provisioning: /api/wifi?ssid=...&pass=... then reboot ---------
