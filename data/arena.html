@@ -122,6 +122,45 @@
   </section>
 
   <section>
+    <h2>Mapping wizard</h2>
+    <p class="hint">Walk the chain one pixel at a time: the wizard lights a pixel, you name the
+       insert it sits under, it moves on. Runs of the same name become zones. The walk is kept
+       in this browser &mdash; close the page, come back, carry on where you left off.</p>
+    <div class="row">
+      <button id="wz-go" onclick="wzStart()">Start walking</button>
+      <button onclick="wzStop()">Stop</button>
+      <span class="bar"><i id="wz-bar" style="width:0"></i></span>
+      <output id="wz-pos" style="width:96px">&ndash;</output>
+    </div>
+
+    <div id="wz-body" style="display:none">
+      <div class="row">
+        <label>This pixel is</label>
+        <input type="text" id="wz-name" list="wz-names" maxlength="19"
+               placeholder="name of the insert it lights" autocomplete="off">
+        <datalist id="wz-names"></datalist>
+      </div>
+      <div class="modes">
+        <button onclick="wzAssign()">Assign &amp; next</button>
+        <button onclick="wzSame()">Same as previous</button>
+        <button onclick="wzSkip()">Not an insert</button>
+        <button onclick="wzGo(wz.at-1)">&#9664; Back</button>
+      </div>
+      <p class="hint"><b>Enter</b> assigns what you typed, or repeats the previous name if the
+        box is empty &mdash; that is the one key you will use for most of the chain.
+        <b>Esc</b> skips a pixel that lights nothing worth naming.</p>
+
+      <table id="wz-runs"><thead><tr><th>Zone</th><th>LEDs</th><th>Range</th></tr></thead>
+        <tbody></tbody></table>
+      <p class="hint" id="wz-warn"></p>
+      <p class="hint">
+        <button onclick="wzBuild()">Build zones &amp; save to the board</button>
+        <button onclick="if(confirm('Discard the whole walk?')) wzReset()">Discard walk</button>
+      </p>
+    </div>
+  </section>
+
+  <section>
     <h2>Insert map</h2>
     <p class="hint">Which pixels light which part of the playfield. Use <b>find</b> to blink a
        zone, or walk the chain one LED at a time to fill in the real Arena inserts.</p>
@@ -260,6 +299,100 @@ function walk(d) {
   idLed();
 }
 
+// --- mapping wizard ---
+// The chain is anonymous: only someone looking at the playfield can say what a
+// given pixel lights. So spotlight one pixel, take a name, advance. Runs of the
+// same name collapse into the {first,count} zones the firmware stores — which is
+// also why a zone can only ever be a contiguous stretch of the chain.
+//
+// The walk lives in localStorage, not on the board: naming 100 inserts is a long
+// job done on a phone under a playfield, and losing it to a dropped WiFi frame or
+// a locked screen would be worse than any bug in here.
+const WZ_KEY = 'arenaWalk', WZ_ZONE_MAX = 24;
+let wz = { at: 0, names: [] };
+try { const s = localStorage.getItem(WZ_KEY); if (s) wz = JSON.parse(s); } catch (e) {}
+
+function wzPersist() { try { localStorage.setItem(WZ_KEY, JSON.stringify(wz)); } catch (e) {} }
+function wzStart() { $('wz-body').style.display = ''; wzGo(wz.at); }
+function wzStop()  { api('/api/identify?clear=1'); }
+function wzReset() { wz = { at: 0, names: [] }; wzPersist(); wzStop(); wzDraw(); }
+
+function wzGo(n) {
+  const last = Math.max(0, (st.count || 1) - 1);
+  wz.at = Math.max(0, Math.min(last, n));
+  wzPersist();
+  // 10 min outlasts any single naming step, and every step re-arms it anyway.
+  api('/api/identify?led=' + wz.at + '&ms=600000');
+  $('wz-name').value = '';
+  $('wz-name').focus();
+  wzDraw();
+}
+function wzSet(name) { wz.names[wz.at] = name; wzGo(wz.at + 1); }
+function wzAssign()  { const v = $('wz-name').value.trim(); v ? wzSet(v) : wzSame(); }
+function wzSkip()    { wzSet(null); }
+function wzSame() {
+  const p = wzPrev();
+  if (!p) { toast('nothing to repeat yet — type a name first'); return; }
+  wzSet(p);
+}
+function wzPrev() {
+  for (let i = wz.at - 1; i >= 0; i--) if (wz.names[i]) return wz.names[i];
+  return null;
+}
+// Contiguous runs of one name -> one zone. A gap or a different name ends the run.
+function wzRuns() {
+  const runs = [];
+  for (let i = 0; i < wz.names.length; i++) {
+    const n = wz.names[i];
+    if (!n) continue;
+    const last = runs[runs.length - 1];
+    if (last && last.n === n && last.f + last.c === i) last.c++;
+    else runs.push({ n: n, f: i, c: 1 });
+  }
+  return runs;
+}
+function wzDraw() {
+  const total = st.count || 0;
+  $('wz-pos').value = total ? 'LED ' + wz.at + ' / ' + (total - 1) : '–';
+  $('wz-bar').style.width = total ? ((wz.at + 1) / total * 100) + '%' : '0';
+
+  const runs = wzRuns(), tb = $('wz-runs').querySelector('tbody');
+  tb.innerHTML = '';
+  runs.forEach(r => {
+    const tr = document.createElement('tr');
+    tr.innerHTML = `<td>${r.n}</td><td>${r.c}</td><td>${r.f}–${r.f + r.c - 1}</td>`;
+    tb.appendChild(tr);
+  });
+
+  const dl = $('wz-names');
+  dl.innerHTML = '';
+  [...new Set(wz.names.filter(Boolean))].forEach(n => {
+    const o = document.createElement('option'); o.value = n; dl.appendChild(o);
+  });
+
+  // Two things silently produce a map that does not mean what you meant.
+  const seen = {}, dup = [];
+  runs.forEach(r => { if (seen[r.n]) { if (dup.indexOf(r.n) < 0) dup.push(r.n); } seen[r.n] = 1; });
+  let w = '';
+  if (runs.length > WZ_ZONE_MAX)
+    w = `⚠ ${runs.length} zones — the board stores ${WZ_ZONE_MAX}. Reuse names for neighbouring pixels before saving.`;
+  else if (dup.length)
+    w = `⚠ ${dup.join(', ')} appears in more than one separate run. A zone must be one unbroken stretch of the chain, so each run is saved as its own zone.`;
+  $('wz-warn').textContent = w;
+  $('wz-warn').className = w ? 'hint warn' : 'hint';
+}
+function wzBuild() {
+  const runs = wzRuns();
+  if (!runs.length)                { toast('nothing named yet'); return; }
+  if (runs.length > WZ_ZONE_MAX)   { toast(`too many zones (${runs.length} > ${WZ_ZONE_MAX})`); return; }
+  fetch('/api/zones', { method: 'POST', body: JSON.stringify({ zones: runs }) })
+    .then(r => r.text()).then(toast).then(loadZones);
+}
+$('wz-name').addEventListener('keydown', e => {
+  if (e.key === 'Enter')       { e.preventDefault(); wzAssign(); }
+  else if (e.key === 'Escape') { e.preventDefault(); wzSkip(); }
+});
+
 // --- wifi / OTA ---
 function saveWifi() {
   const s = $('ssid').value.trim();
@@ -281,7 +414,7 @@ function ota(inp) {
 }
 
 const poll = () => fetch('/api/state').then(r => r.json()).then(render).catch(() => {});
-poll(); loadZones();
+poll(); loadZones(); wzDraw();
 setInterval(poll, 1500);
 </script>
 </body>

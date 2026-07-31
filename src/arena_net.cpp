@@ -168,9 +168,20 @@ void begin() {
   s_server.on("/api/zones", HTTP_POST,
     [](AsyncWebServerRequest* r) {
       String* body = (String*)r->_tempObject;
-      bool ok = body && arenamap::fromJson(body->c_str());
+      // No body at all is almost never malformed JSON — it is the wrong content
+      // type. ESPAsyncWebServer swallows application/x-www-form-urlencoded and
+      // multipart into request params and never calls the body handler, so
+      // `curl -d` silently arrives here empty while the browser's fetch (which
+      // sends text/plain) works. Say which of the two failures this is.
+      if (!body) {
+        r->send(400, "text/plain",
+                "empty body - send the JSON raw, not form-encoded "
+                "(curl: --data-binary + -H 'Content-Type: application/json')");
+        return;
+      }
+      bool ok = arenamap::fromJson(body->c_str());
       if (ok) ok = arenamap::save();
-      if (body) { delete body; r->_tempObject = nullptr; }
+      delete body; r->_tempObject = nullptr;
       r->send(ok ? 200 : 400, "text/plain", ok ? "map saved" : "bad map json");
     },
     nullptr,
@@ -204,7 +215,17 @@ void begin() {
     ESP.restart();
   });
 
-  // --- OTA: POST a firmware .bin (fails gracefully if there is no OTA slot) ---
+  // --- OTA: POST a firmware .bin, or the web UI with ?target=fs -------------
+  //  /update             -> application partition   (firmware.bin)
+  //  /update?target=fs   -> filesystem partition    (littlefs.bin)
+  //
+  // The second one matters more than it looks: without it the only way to change
+  // the web UI is a USB cable, and this board spends its life behind a playfield.
+  // The filesystem has to be unmounted before it is overwritten, so everything
+  // served from LittleFS is gone until the reboot at the end — expected, not a
+  // failure. Note the reply below often never reaches the client: the restart
+  // beats the TCP flush, so curl reports HTTP 000 on a *successful* update.
+  // Verify by uptime, not by the response (ARENA_LED.md §4 B).
   s_server.on("/update", HTTP_POST,
     [](AsyncWebServerRequest* r) {
       bool ok = !Update.hasError();
@@ -213,8 +234,10 @@ void begin() {
     },
     [](AsyncWebServerRequest* r, String fn, size_t idx, uint8_t* data, size_t len, bool done) {
       if (!idx) {
-        Serial.printf("[ota] start %s\n", fn.c_str());
-        if (!Update.begin(UPDATE_SIZE_UNKNOWN)) Update.printError(Serial);
+        const bool fs = r->hasParam("target") && r->getParam("target")->value() == "fs";
+        Serial.printf("[ota] start %s -> %s\n", fn.c_str(), fs ? "filesystem" : "app");
+        if (fs) LittleFS.end();                      // cannot be mounted while it is rewritten
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN, fs ? U_SPIFFS : U_FLASH)) Update.printError(Serial);
       }
       if (Update.write(data, len) != len) Update.printError(Serial);
       if (done) {

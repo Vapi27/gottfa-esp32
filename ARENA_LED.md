@@ -426,7 +426,24 @@ try next on any failure:
 tools/arena_flash.sh                 # or: tools/arena_flash.sh /dev/ttyUSB0
 ```
 
-The same thing by hand:
+**Once it is on the wall, use WiFi instead** — both halves update over the air,
+which is the only sane option for a board mounted behind a playfield:
+
+```sh
+pio run -e arenaled_d1mini32                      # firmware
+curl -F u=@.pio/build/arenaled_d1mini32/firmware.bin  http://arena.local/update
+
+pio run -e arenaled_d1mini32 -t buildfs           # web UI
+curl -F u=@.pio/build/arenaled_d1mini32/littlefs.bin "http://arena.local/update?target=fs"
+```
+
+Both **return `HTTP 000` when they succeed**: the board restarts before the
+response is flushed. Do not re-send. Wait ~10 s and check `/api/state` — `up`
+back near zero means it took. Flash the firmware before the filesystem if you
+are doing both, and note that `?target=fs` unmounts LittleFS, so the web UI is
+unreachable from the moment the upload starts until the reboot.
+
+The same thing over USB, by hand:
 
 ```sh
 # WEMOS/LOLIN D1 Mini ESP32 (the board in use):
@@ -504,11 +521,33 @@ match your PSU and fuse.
 ### Mapping the inserts
 
 The chain is anonymous pixels; which LED is "spinner" or "pop-bumpers" is data
-in `/arena_map.json`, editable from the **Insert map** panel:
+in `/arena_map.json`. Two ways to fill it in, both on the board itself — no
+laptop, no serial cable, a phone under the playfield is enough.
 
-1. **Walk LED** ◀ / ▶ blinks one pixel at a time — note which insert lights up.
-2. Type the zone boundaries into the table (name, first LED, count).
-3. **Save map** — written to LittleFS, used immediately by attract and arena modes.
+**The mapping wizard (use this one).** Web UI → **Mapping wizard** → *Start
+walking*. It spotlights one pixel, you name the insert it sits under, it moves
+to the next. Consecutive pixels sharing a name become one zone, which is why the
+firmware's zones are always a contiguous stretch of chain.
+
+- **Enter** assigns what you typed, or repeats the previous name when the box is
+  empty — that single key covers most of a chain, since inserts come in runs.
+- **Esc** skips a pixel that lights nothing worth naming; a skip breaks the run.
+- The walk is held in the **browser's** localStorage, not on the board. Naming
+  100 inserts is a long job done one-handed under a playfield: a dropped WiFi
+  frame, a locked screen or a reloaded tab must not cost you the walk.
+- **Build zones & save** compresses the walk and POSTs it. It refuses past
+  `ZONE_MAX` (24) zones and warns when one name appears in two separate runs —
+  they cannot merge into one zone, so each becomes its own.
+
+**Or edit the table by hand** in the **Insert map** panel below it (name, first
+LED, count), then **Save map** — written to LittleFS, used immediately by attract
+and arena modes.
+
+> Scripting the map instead? POST the JSON **raw**. `curl -d` sends it as
+> `application/x-www-form-urlencoded`, which this web-server stack folds into
+> request params and never hands to the body handler, so the board sees an empty
+> body. Use `--data-binary` with `-H 'Content-Type: application/json'`. The
+> firmware now says exactly that instead of "bad map json".
 
 The built-in template is a 100-LED starting point (`src/arena_map.cpp`), chain
 order bottom-left → up the playfield → back panel:
