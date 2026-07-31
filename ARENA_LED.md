@@ -546,20 +546,25 @@ The chain is anonymous pixels; which LED is "spinner" or "pop-bumpers" is data
 in `/arena_map.json`. Two ways to fill it in, both on the board itself — no
 laptop, no serial cable, a phone under the playfield is enough.
 
-**The mapping wizard (use this one).** Web UI → **Mapping wizard** → *Start
-walking*. It spotlights one pixel, you name the insert it sits under, it moves
-to the next. Consecutive pixels sharing a name become one zone, which is why the
-firmware's zones are always a contiguous stretch of chain.
+**The mapping wizard (use this one).** Web UI -> **Mapping wizard** -> *Start
+walking*. The board draws the playfield, spotlights one pixel, and you click the
+insert it sits under. Nothing to read off, nothing to type.
 
-- **Enter** assigns what you typed, or repeats the previous name when the box is
-  empty — that single key covers most of a chain, since inserts come in runs.
-- **Esc** skips a pixel that lights nothing worth naming; a skip breaks the run.
-- The walk is held in the **browser's** localStorage, not on the board. Naming
-  100 inserts is a long job done one-handed under a playfield: a dropped WiFi
-  frame, a locked screen or a reloaded tab must not cost you the walk.
-- **Build zones & save** compresses the walk and POSTs it. It refuses past
-  `ZONE_MAX` (24) zones and warns when one name appears in two separate runs —
-  they cannot merge into one zone, so each becomes its own.
+- The plan is the real Arena: **99 inserts** with their true positions and their
+  Gottlieb lamp names, extracted from the Visual Pinball table by
+  `tools/vpx_inserts.py` and shipped as `/arena_pf.json`. It is the machine, so
+  it never changes.
+- What you are filling in is only **which chain index landed on which insert** —
+  150 bytes, saved to the board **on every click**. A power cut at pixel 80 costs
+  you pixel 80, not the other 79.
+- A filled dot already holds a pixel and shows its chain number, so you can see
+  at a glance what is left and spot a double assignment.
+- *Not on an insert* skips a pixel that lights nothing (a wash or a spare).
+
+This is what makes the effects spatial: `arena` mode switches to geometry as soon
+as one pixel is placed — a wave climbing from the flippers to the back panel, a
+ripple leaving the centre — instead of walking zones in cable order. Unplaced
+pixels stay on the base wash rather than pretending to be at (0,0).
 
 **Or edit the table by hand** in the **Insert map** panel below it (name, first
 LED, count), then **Save map** — written to LittleFS, used immediately by attract
