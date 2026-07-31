@@ -73,6 +73,8 @@
       <input type="range" id="bright" min="0" max="255"><output id="o-bright"></output></div>
     <div class="row"><label>Speed</label>
       <input type="range" id="speed" min="0" max="255"><output id="o-speed"></output></div>
+    <div class="row"><label>Glow</label>
+      <input type="range" id="gi" min="0" max="255"><output id="o-gi"></output></div>
     <div class="row"><label>Power</label>
       <div class="bar"><i id="pbar" style="width:0"></i></div><output id="o-pow"></output></div>
     <p class="hint">The firmware meters every frame and dims the whole wall rather than
@@ -180,7 +182,7 @@ MODES.forEach(m => {
 function setMode(m) { push('mode=' + m); }
 
 // --- sliders: send while dragging, but pause polling so the UI doesn't fight the user ---
-['bright','speed','r','g','b','w'].forEach(k => {
+['bright','speed','gi','r','g','b','w'].forEach(k => {
   const el = $(k);
   el.oninput = () => { $('o-' + k).value = el.value; holdUntil = Date.now() + 1500; };
   el.onchange = () => push(k + '=' + el.value);
@@ -213,7 +215,7 @@ function render(s) {
   $('o-pow').value = (s.budget / 1000).toFixed(1) + ' A';
 
   if (Date.now() < holdUntil) return;            // don't stomp a slider being dragged
-  set('bright', s.bright); set('speed', s.speed);
+  set('bright', s.bright); set('speed', s.speed); set('gi', s.gi);
   set('r', s.r); set('g', s.g); set('b', s.b); set('w', s.w);
   if (document.activeElement !== $('count'))  $('count').value  = s.count;
   if (document.activeElement !== $('budget')) $('budget').value = s.budget;

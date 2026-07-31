@@ -139,6 +139,10 @@
 // are incandescent too, so they should sit on the same physical curve as the
 // inserts rather than be a dimmed copy of whatever colour is selected.
 #define ARENA_GI_T 0.62f
+// Boot value of the GI slider, 0..255 (0 = no background at all). Modest by
+// default: the background is faithful, but a wall piece that never goes dark is
+// a matter of taste and the owner should meet it turned down rather than up.
+#define ARENA_GI_DEFAULT 90
 
 #define ARENA_BRIGHT_DEFAULT 180   // 0..255 global brightness
 #define ARENA_SPEED_DEFAULT  128   // 0..255 -> x0.25 .. x4 animation speed

@@ -45,6 +45,13 @@ void        nextMode();                    // front-panel button: cycle usable m
 
 void    setBrightness(uint8_t b);
 uint8_t brightness();
+
+// General illumination under the ROM attract mode, 0..255 (0 = off). A real
+// Arena's GI bulbs stay lit through attract, so an insert the ROM never drives
+// still glows — but whether a wall piece should carry that permanent background
+// is taste, not fidelity, so it is a live setting rather than a constant.
+void    setGi(uint8_t g);
+uint8_t gi();
 void    setSpeed(uint8_t s);               // 0..255 -> x0.25 .. x4
 uint8_t speed();
 void    setColor(Rgbw c);                  // base colour for CLASSIC / ATTRACT / ARENA

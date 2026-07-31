@@ -40,6 +40,7 @@ static String stateJson() {
   j += ",\"mode\":\"" + String(arenaled::modeName(arenaled::mode())) + "\"";
   j += ",\"bright\":" + String(arenaled::brightness());
   j += ",\"speed\":"  + String(arenaled::speed());
+  j += ",\"gi\":"     + String(arenaled::gi());
   j += ",\"count\":"  + String(arenaled::count());
   j += ",\"max\":"    + String(LED_MAX);
   j += ",\"r\":" + String(c.r) + ",\"g\":" + String(c.g) +
@@ -126,6 +127,7 @@ void begin() {
     }
     if (r->hasParam("bright")) arenaled::setBrightness(param8(r, "bright", arenaled::brightness()));
     if (r->hasParam("speed"))  arenaled::setSpeed(param8(r, "speed", arenaled::speed()));
+    if (r->hasParam("gi"))     arenaled::setGi(param8(r, "gi", arenaled::gi()));
     if (r->hasParam("r") || r->hasParam("g") || r->hasParam("b") || r->hasParam("w")) {
       arenaled::Rgbw c = arenaled::color();
       c.r = param8(r, "r", c.r);

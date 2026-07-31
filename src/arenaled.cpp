@@ -25,6 +25,7 @@ static uint8_t  s_spark[LED_MAX];      // "random inserts" decay envelopes
 
 static Mode     s_mode      = MODE_CLASSIC;
 static uint8_t  s_bright    = ARENA_BRIGHT_DEFAULT;
+static uint8_t  s_gi        = ARENA_GI_DEFAULT;   // GI level under ROM attract, 0 = off
 static uint8_t  s_speed     = ARENA_SPEED_DEFAULT;
 static Rgbw     s_color     = { ARENA_WARM_R, ARENA_WARM_G, ARENA_WARM_B, ARENA_WARM_W };
 static uint16_t s_count     = LED_COUNT_DEFAULT;
@@ -291,16 +292,17 @@ static void fxRomAttract(Rgbw* buf) {
   // The sequence runs on the animation clock, so the speed slider works on it.
   const uint64_t mask = arenaattract::maskAt((uint32_t)(phase(1.0, 3600.0) * 1000.0f));
 
-  // General illumination: on a real Arena the GI bulbs stay lit through attract
-  // and every insert sits in that glow, so an insert the ROM never drives is dim
-  // rather than dark. Those are filaments too, hence the same curve.
-  const Rgbw gi = filament(ARENA_GI_T);
+  // General illumination. On a real Arena the GI bulbs stay lit through attract,
+  // so an insert the ROM never drives still glows rather than sitting dark — but
+  // whether the wall should carry that permanent background is taste, so it is a
+  // slider. It is a filament too, hence the same curve, and 0 means truly off.
+  const Rgbw giC = s_gi ? filament(ARENA_GI_T * (float)s_gi / 255.0f) : Rgbw{ 0, 0, 0, 0 };
 
   for (uint16_t i = 0; i < s_count; i++) {
     const int lamp = arenapf::lampOfLed(i);
     const bool on  = (lamp >= 0) && ((mask >> lamp) & 1ULL);
     T[i] = filamentStep(T[i], on, dt);
-    buf[i] = (lamp < 0) ? gi : addSat(gi, filament(T[i]));
+    buf[i] = (lamp < 0) ? giC : addSat(giC, filament(T[i]));
   }
 }
 
@@ -552,6 +554,8 @@ void nextMode() {
 
 void setBrightness(uint8_t b) { s_bright = b; markDirty(); }
 uint8_t brightness() { return s_bright; }
+void setGi(uint8_t g) { s_gi = g; markDirty(); }
+uint8_t gi() { return s_gi; }
 void setSpeed(uint8_t s) { s_speed = s; markDirty(); }
 uint8_t speed() { return s_speed; }
 void setColor(Rgbw c) { s_color = c; markDirty(); }
@@ -642,6 +646,7 @@ void save() {
   s_prefs.putUChar("mode",   (uint8_t)s_mode);
   s_prefs.putUChar("bright", s_bright);
   s_prefs.putUChar("speed",  s_speed);
+  s_prefs.putUChar("gi",     s_gi);
   s_prefs.putUShort("count", s_count);
   s_prefs.putUShort("budget", s_budget);
   s_prefs.putBytes("color", &s_color, sizeof(s_color));
@@ -655,6 +660,7 @@ void begin() {
   if (s_mode >= MODE_COUNT) s_mode = MODE_CLASSIC;
   s_bright = s_prefs.getUChar("bright", ARENA_BRIGHT_DEFAULT);
   s_speed  = s_prefs.getUChar("speed",  ARENA_SPEED_DEFAULT);
+  s_gi     = s_prefs.getUChar("gi",     ARENA_GI_DEFAULT);
   s_count  = s_prefs.getUShort("count", LED_COUNT_DEFAULT);
   s_budget = s_prefs.getUShort("budget", LED_POWER_BUDGET_MA);
   if (s_count < 1 || s_count > LED_MAX) s_count = LED_COUNT_DEFAULT;
