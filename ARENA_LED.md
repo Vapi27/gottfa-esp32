@@ -70,7 +70,8 @@ brightness, which is the easiest point to check it against).
       (L1..L48) by clicking the plan, covering the full height of the playfield;
       geometric `arena` mode confirmed running off it (current swings 56-123 mA
       as the wave crosses, which a chain-order effect would not do)
-- [ ] Remaining 41 inserts placed, boot preset saved
+- [x] **Arena's own attract mode**, captured from the ROM and replayed on the wall
+- [ ] Remaining inserts placed, boot preset saved
 - [ ] V2 ideas: motion sensor, audio-reactive, MQTT / Home Assistant
 
 **Next action: populate the playfield** (§3 and §8 step 4). The electrical design
@@ -533,6 +534,39 @@ whole window, leaving the chain to snap on at full brightness.
 `test` mode is usable with a **single LED**: below two pixels the walking white
 marker is suppressed, so the R → G → B → W field stays visible (otherwise the
 walker would sit on the only pixel and hold it permanently white).
+
+### The original attract mode
+
+`attract` does not imitate Arena's attract mode: it **replays it**, from the
+game's own ROM.
+
+`tools/capture_attract.cpp` runs `prom1.cpu` / `prom2.cpu` under PinMAME and
+writes down the lamp matrix the ROM drives, every 20 ms. `data/arena_attract.bin`
+is 44 s of that — one 64-bit lamp mask per frame, 17 KB, loaded to RAM at boot.
+
+```sh
+# PinMAME source lives in ../gottfa-upstream/lisy_5_28 and builds natively:
+cp cmake/libpinmame/CMakeLists_osx-arm64.txt CMakeLists.txt     # or linux-x64
+cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_SHARED=ON . && cmake --build build -j8
+cp arena.zip ~/.pinmame/roms/
+clang++ -std=c++17 -O2 -I src/libpinmame tools/capture_attract.cpp \
+        -o capture_attract -Lbuild -lpinmame
+./capture_attract 45 > raw.json          # then pack to data/arena_attract.bin
+```
+
+It lands on the wall because every identifier lines up: the ROM drives lamp
+`n`, the playfield plan calls that insert `L<n>` — both extracted from the same
+machine — and the wizard recorded which pixel sits on it. All 44 lamps the ROM
+touches were checked against the plan before any of this was trusted; none were
+orphaned.
+
+Falls back to the five generic animations when either half is missing (no
+capture on the board, or no pixel placed yet).
+
+**One liberty is taken**, and it is the only thing here not in the ROM: each
+pixel rises over ~40 ms and falls over ~90 ms. #47 bulbs do not switch instantly,
+and without that envelope the chases read as digital blinking rather than as a
+playfield.
 
 ### Power metering
 
