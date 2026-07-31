@@ -1,0 +1,17 @@
+ref,item,qty_50,qty_100,qty_150,notes
+U1,ESP32-S3 DevKitC-1 (USB-C),1,1,1,ESP32-C3 DevKitM-1 also supported (env arenaled_c3)
+PCB1,LED PCB 12x12mm 1.0mm black ENIG,50,100,150,panelize ~64 per 100x100mm V-cut panel
+D1,SK6812MINI-RGBW-NW-P6,55,110,165,+10% spares; hot air / hot plate assembly
+C1,100nF X7R 0603,55,110,165,one per LED board VDD-GND
+C2,1000uF 16V electrolytic,2,3,4,one per power injection point
+PSU1,Power supply 5V 15A 75W,1,1,1,must have a V-ADJ trim pot (set 4.4V - see ARENA_LED.md 4.A)
+F1,Fuse holder + 10A slow-blow fuse,1,1,1,between PSU and bus (firmware caps the chain at 9A)
+R1,330 ohm 1/4W,1,1,1,series on DATA at the ESP32 output
+R2,100 ohm 0603 (optional),50,100,150,optional series R in the local DATA IN trace
+D2,1N5819 Schottky,2,2,2,only for the repeater-pixel option (ARENA_LED.md 4.B)
+J1,JST-PH 2.0mm 2-pin header,100,200,300,two per board (DATA IN / DATA OUT + GND)
+J2,JST-PH 2.0mm pre-crimped jumper,50,100,150,board-to-board data link
+W1,AWG18 wire red+black,6 m,10 m,14 m,main +5V / GND bus
+W2,AWG22 wire red+black,6 m,10 m,15 m,per-LED taps from the bus to the PCB pads
+W3,AWG26 twisted pair,1 m,1 m,1 m,ESP32 -> LED1 data + ground return (keep < 15 cm)
+H1,M2 screw or 1.6mm brad,100,200,300,two per board
