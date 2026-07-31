@@ -10,6 +10,51 @@ with the GottFA80 companion app.
 
 ---
 
+## 0. Where this stands
+
+| | State |
+|---|---|
+| LED boards | **made and in hand** — SK6812MINIRGBW-NW-P6 carrier, slot pads for the bus, single round pads for DATA in/out |
+| Controller | **WEMOS/LOLIN D1 Mini ESP32** (ESP32-WROOM-32, 4 MB, CH340C), data on **GPIO27** |
+| Firmware | complete, builds for 4 targets, adversarially reviewed (5 defects found and fixed before first power-on) |
+| Hardware bring-up | **not started** — nothing has been powered yet |
+
+**Next action: §8 step 1** — buzz out one board with a multimeter, then power it
+alone on a current-limited supply (5 V, 150 mA): it must draw ~1 mA and stay
+dark. Then §8 step 2, the single-LED bench test.
+
+Open questions that only the bench can answer: whether the 3.3 V → 5 V data
+margin needs option A or B (§4), what the real per-LED current is, and whether
+the pixel colour order is really GRBW.
+
+### Working on this locally
+
+The firmware lives on branch `claude/arena-wall-art-led-b7d10r` (PR #1).
+
+```sh
+git clone https://github.com/Vapi27/gottfa-esp32.git
+cd gottfa-esp32
+git checkout claude/arena-wall-art-led-b7d10r
+
+pip install --user platformio     # Linux/macOS; on Windows: pip install platformio
+tools/arena_flash.sh              # build + flash + monitor (Windows: use the pio commands in §7)
+```
+
+Per-OS notes for the CH340C on this board:
+
+- **Linux** — `sudo usermod -aG dialout $USER`, then log out and back in. Port is `/dev/ttyUSB0`.
+- **macOS** — install the CH340 driver; port is `/dev/cu.wchusbserial*`.
+- **Windows** — install the CH340 driver; port is `COM3`/`COM4`/… Run the `pio`
+  commands from §7 directly (the shell script needs Git Bash or WSL).
+
+Flashing must happen on the machine the board is plugged into — a cloud session
+has no USB. If you want an assistant driving the board directly, run Claude Code
+locally in this repo (`npm install -g @anthropic-ai/claude-code`, then `claude`);
+it will have the serial port. That is a fresh session with no memory of this one,
+which is what this section is for — it plus §8 is the whole handover.
+
+---
+
 ## 1. System overview
 
 ```
