@@ -33,9 +33,26 @@ is something the bench returned.
 | Power estimator | self-consistent: predicted 4.4 mA in TEST mode and 18.5 mA on one die at full drive, both matching a hand calculation from the source. **Not yet checked against a multimeter** — the model constant `LED_MA_PER_CHANNEL` is still unvalidated. |
 | Network | STA on the house WiFi, driven over REST from the workstation; `up` monotonic, heap stable ~221 kB, 63 fps. |
 
+**34 pixels chained, 2026-07-31.** Nineteen lit, the rest dark. The break was a
+**dead SK6812**, not the design: VDD was good on the first dark board, the hop
+had continuity, IN/OUT were the right way round, and swapping that board with a
+working one moved nothing — a replacement brought the whole chain back. Worth
+recording because the symptom is indistinguishable from a wiring fault: a pixel
+is a repeater, so one that cannot run its logic takes everything downstream with
+it, whether it is unpowered or dead.
+
+Diagnosis order that worked, cheapest first: measure VDD on the first dark board
+(an unpowered pixel is far more common than a dead one), then hop continuity,
+then IN/OUT orientation, then **swap the suspect board with a known-good one** —
+that last test is the one that separates "this board is dead" from "this position
+is bad", which are different repairs. The BOM's +10% spares exist for this.
+
+It also proved the chain itself: nineteen consecutive regenerations, the repeater
+and the 3.3 V first hop all behaved.
+
 Still open after this session: the **real** per-LED current (multimeter in series
-with +5 V, expected ~18.5 mA), and whether the ~130 mV margin survives three
-chained boards — which is the whole point of §8 step 3.
+with +5 V; the firmware predicts 618 mA for 34 pixels on the white die at full
+brightness, which is the easiest point to check it against).
 
 ### Roadmap
 - [x] v1.0 — firmware: 7 modes, insert map, power meter + limiter, web UI + REST + OTA
