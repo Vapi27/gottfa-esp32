@@ -45,6 +45,7 @@ static String stateJson() {
        ",\"b\":" + String(c.b) + ",\"w\":" + String(c.w);
   j += ",\"amps\":"   + String(arenaled::lastAmps(), 2);
   j += ",\"budget\":" + String(arenaled::budgetMa());
+  j += ",\"order\":\""  + String(arenaled::order()) + "\"";
   j += ",\"limited\":" + String(arenaled::limited() ? "true" : "false");
   j += ",\"fps\":"    + String(arenaled::fps());
   j += ",\"ip\":\""   + s_ip + "\",\"net\":\"" + s_mode + "\"";
@@ -111,7 +112,7 @@ void begin() {
     r->send(200, "application/json", stateJson());
   });
 
-  //  /api/set?mode=arena&bright=180&speed=128&r=255&g=100&b=0&w=0&count=100&budget=9000
+  //  /api/set?mode=arena&bright=180&speed=128&r=255&g=100&b=0&w=0&count=100&budget=9000&order=grbw
   s_server.on("/api/set", HTTP_GET, [](AsyncWebServerRequest* r) {
     if (r->hasParam("mode")) {
       arenaled::Mode m = arenaled::modeFromName(r->getParam("mode")->value().c_str());
@@ -127,6 +128,12 @@ void begin() {
       c.b = param8(r, "b", c.b);
       c.w = param8(r, "w", c.w);
       arenaled::setColor(c);
+    }
+    if (r->hasParam("order")) {
+      if (!arenaled::setOrder(r->getParam("order")->value().c_str())) {
+        r->send(400, "text/plain", "bad order (grbw|rgbw|gbrw|brgw|rbgw|bgrw)");
+        return;
+      }
     }
     if (r->hasParam("count"))  arenaled::setCount((uint16_t)r->getParam("count")->value().toInt());
     if (r->hasParam("budget")) arenaled::setBudgetMa((uint16_t)r->getParam("budget")->value().toInt());

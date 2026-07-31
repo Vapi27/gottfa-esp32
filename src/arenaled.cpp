@@ -27,6 +27,14 @@ static uint8_t  s_speed     = ARENA_SPEED_DEFAULT;
 static Rgbw     s_color     = { ARENA_WARM_R, ARENA_WARM_G, ARENA_WARM_B, ARENA_WARM_W };
 static uint16_t s_count     = LED_COUNT_DEFAULT;
 static uint16_t s_budget    = LED_POWER_BUDGET_MA;
+static char     s_order[8]  = ARENA_ORDER_DEFAULT;
+static uint32_t s_bootMs    = 0;       // soft-start reference
+
+// The web handlers run in the AsyncTCP task, the renderer in loop(). Anything
+// that reallocates or re-initialises the strip is therefore NOT done inline from
+// a request — it is flagged here and applied at the top of the next tick(), on
+// the render task, where nothing else is touching the pixel buffer.
+static volatile bool s_pendLen = false;
 
 static float    s_phase     = 0.0f;    // animation clock (s, speed-scaled)
 static uint32_t s_lastUs    = 0;
@@ -324,6 +332,26 @@ static void push(const Rgbw* buf) {
 }
 
 // ---------------------------------------------------------------------------
+//  Pixel colour order
+//  SK6812MINI-RGBW is GRBW, but reels and clones vary and the only way to know
+//  is to look at the wall. Rather than make that a reflash-and-guess loop, the
+//  order is a live setting: Adafruit_NeoPixel::updateType() re-types the chain in
+//  place (all these are 4-byte pixels, so nothing is reallocated).
+// ---------------------------------------------------------------------------
+struct OrderDef { const char* name; neoPixelType type; };
+static const OrderDef ORDERS[] = {
+  { "grbw", NEO_GRBW }, { "rgbw", NEO_RGBW }, { "gbrw", NEO_GBRW },
+  { "brgw", NEO_BRGW }, { "rbgw", NEO_RBGW }, { "bgrw", NEO_BGRW },
+};
+static const uint8_t ORDER_N = sizeof(ORDERS) / sizeof(ORDERS[0]);
+
+static neoPixelType orderType(const char* name) {
+  for (uint8_t i = 0; i < ORDER_N; i++)
+    if (strcasecmp(name, ORDERS[i].name) == 0) return ORDERS[i].type;
+  return NEO_GRBW;
+}
+
+// ---------------------------------------------------------------------------
 //  Public API
 // ---------------------------------------------------------------------------
 static const char* MODE_NAMES[MODE_COUNT] = {
@@ -371,21 +399,51 @@ void setCount(uint16_t n) {
   if (n < 1) n = 1;
   if (n > LED_MAX) n = LED_MAX;
   if (n == s_count) return;
+  // s_count itself is safe to move now: every buffer is statically sized to
+  // LED_MAX, and Adafruit_NeoPixel::setPixelColor() bounds-checks against its own
+  // length, so at worst one frame is pushed at the old chain length.
   s_count = n;
-  s_strip.updateLength(n + OFFS);
+  s_pendLen = true;                     // realloc happens in tick(), see above
+  markDirty();
+}
+
+// Runs on the render task only.
+static void applyPending() {
+  if (!s_pendLen) return;
+  s_pendLen = false;
+  s_strip.updateLength(s_count + OFFS);
   s_strip.begin();
   s_strip.clear();
   s_strip.show();
 #if LED_CHAIN2_ENABLE
-  s_strip2.updateLength(n + OFFS);
+  s_strip2.updateLength(s_count + OFFS);
   s_strip2.begin();
+  s_strip2.clear();
+  s_strip2.show();
 #endif
-  markDirty();
 }
 
 void setBudgetMa(uint16_t ma) {
   s_budget = ma ? ma : 1;
   markDirty();
+}
+
+const char* order() { return s_order; }
+
+bool setOrder(const char* s) {
+  if (!s) return false;
+  for (uint8_t i = 0; i < ORDER_N; i++) {
+    if (strcasecmp(s, ORDERS[i].name) != 0) continue;
+    strncpy(s_order, ORDERS[i].name, sizeof(s_order) - 1);
+    s_order[sizeof(s_order) - 1] = '\0';
+    s_strip.updateType(ORDERS[i].type + NEO_KHZ800);
+#if LED_CHAIN2_ENABLE
+    s_strip2.updateType(ORDERS[i].type + NEO_KHZ800);
+#endif
+    markDirty();
+    return true;
+  }
+  return false;
 }
 
 void identifyLed(int led, uint32_t ms) {
@@ -415,6 +473,7 @@ void save() {
   s_prefs.putUShort("count", s_count);
   s_prefs.putUShort("budget", s_budget);
   s_prefs.putBytes("color", &s_color, sizeof(s_color));
+  s_prefs.putString("order", s_order);
   s_dirtyAt = 0;
 }
 
@@ -429,17 +488,22 @@ void begin() {
   if (s_count < 1 || s_count > LED_MAX) s_count = LED_COUNT_DEFAULT;
   if (s_prefs.getBytesLength("color") == sizeof(s_color))
     s_prefs.getBytes("color", &s_color, sizeof(s_color));
+  String ord = s_prefs.getString("order", ARENA_ORDER_DEFAULT);
+  strncpy(s_order, ord.c_str(), sizeof(s_order) - 1);
+  s_order[sizeof(s_order) - 1] = '\0';
 
   memset(s_frame, 0, sizeof(s_frame));
   memset(s_render, 0, sizeof(s_render));
   memset(s_prev, 0, sizeof(s_prev));
   memset(s_spark, 0, sizeof(s_spark));
 
+  s_strip.updateType(orderType(s_order) + NEO_KHZ800);
   s_strip.updateLength(s_count + OFFS);
   s_strip.begin();
   s_strip.clear();
   s_strip.show();                       // a defined dark state before the first frame
 #if LED_CHAIN2_ENABLE
+  s_strip2.updateType(orderType(s_order) + NEO_KHZ800);
   s_strip2.updateLength(s_count + OFFS);
   s_strip2.begin();
   s_strip2.clear();
@@ -448,14 +512,17 @@ void begin() {
 
   s_lastUs = micros();
   s_fpsT0  = millis();
-  Serial.printf("[led] %u px on GPIO%d, mode=%s bright=%u budget=%u mA\n",
-                s_count, PIN_LED_DATA, modeName(s_mode), s_bright, s_budget);
+  s_bootMs = millis();
+  Serial.printf("[led] %u px on GPIO%d, order=%s mode=%s bright=%u budget=%u mA\n",
+                s_count, PIN_LED_DATA, s_order, modeName(s_mode), s_bright, s_budget);
 }
 
 void tick() {
   uint32_t now = millis();
   if (now - s_lastFrame < (uint32_t)(1000 / LED_FRAME_HZ)) return;
   s_lastFrame = now;
+
+  applyPending();       // strip length changes land here, not in an HTTP handler
 
   uint32_t us = micros();
   float dt = (float)(uint32_t)(us - s_lastUs) / 1e6f;
@@ -497,6 +564,13 @@ void tick() {
   memcpy(s_render, s_frame, sizeof(Rgbw) * LED_MAX);  // pre-gamma copy for the next crossfade
 
   uint8_t gain = (s_mode == MODE_NIGHT) ? min<uint8_t>(s_bright, ARENA_NIGHT_BRIGHT) : s_bright;
+#if ARENA_SOFTSTART_MS > 0
+  // Soft start: ease the chain up over the first second so 100+ pixels lighting
+  // at once can't trip the PSU's over-current hiccup or slam the bulk caps.
+  uint32_t sinceBoot = now - s_bootMs;
+  if (sinceBoot < ARENA_SOFTSTART_MS)
+    gain = (uint8_t)((uint32_t)gain * sinceBoot / ARENA_SOFTSTART_MS);
+#endif
   applyGainGamma(s_frame, gain);
   s_amps = meterAndLimit(s_frame);
   push(s_frame);

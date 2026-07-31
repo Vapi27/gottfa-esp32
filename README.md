@@ -39,9 +39,9 @@ First boot prints the FPGA IDCODE and the WiFi IP, then serves `http://gottfa.lo
 No JTAG wired yet? IDCODE reads `0x00000000` / `0xFFFFFFFF` — expected, harmless.
 
 ## Also in this repo — Arena Wall-Art LED
-A separate, standalone firmware (`pio run -e arenaled`) that turns a Gottlieb **Arena**
-playfield into an illuminated wall piece: ESP32-S3 + up to 150 SK6812MINI-RGBW on one data
-chain, pinball-style lighting modes mapped to the real inserts, Wi-Fi web UI + REST + OTA,
+A separate, standalone firmware (`pio run -e arenaled_d1mini32`) that turns a Gottlieb **Arena**
+playfield into an illuminated wall piece: D1 Mini ESP32 (or S3/C3) + up to 150 SK6812MINI-RGBW
+on one data chain, pinball-style lighting modes mapped to the real inserts, Wi-Fi web UI + REST + OTA,
 and a per-frame current meter that never lets the chain exceed its power budget.
 No FPGA, no sound, nothing shared with the app above. See **[ARENA_LED.md](ARENA_LED.md)**
 (hardware, PCB, power injection, and how to drive 5 V pixels from 3.3 V logic without a

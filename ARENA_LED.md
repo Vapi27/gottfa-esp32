@@ -21,14 +21,14 @@ with the GottFA80 companion app.
         │             ├── injection 3 (LED ~75)
         │             └── injection 4 (LED ~115)
         │
-   ESP32-S3 ── 330 R ──▶ DATA ──▶ LED1 ▶ LED2 ▶ … ▶ LED150
-   (USB-C, Wi-Fi, OTA)                 (data only through the small connectors)
+   D1 Mini ESP32 ── 330 R ──▶ DATA ──▶ LED1 ▶ LED2 ▶ … ▶ LED150
+   GPIO27 (Wi-Fi, OTA)                     (data only through the round pads)
 ```
 
 | Block | Choice | Why |
 |---|---|---|
 | LED | **SK6812MINI-RGBW-NW-P6** | addressable, integrated controller, RGB **+ dedicated neutral white**, 3.5 mm package, single wire |
-| MCU | **ESP32-S3** (DevKitC-1) | Wi-Fi, USB-C, OTA, RMT peripheral drives the chain with ~0 CPU |
+| MCU | **D1 Mini ESP32** (WROOM-32) — S3 / C3 also supported | Wi-Fi, OTA, RMT peripheral drives the chain with ~0 CPU |
 | Bus | 5 V / GND, AWG18 | 10.5 A worst case can't run through thin wire |
 | Data | one daisy chain, 800 kHz | independent from power — data connectors carry DATA + GND only |
 | Supply | 5 V / 15 A (75 W) | 150 × 70 mA = 10.5 A + ~30 % margin |
@@ -150,75 +150,111 @@ Any of these is a drop-in for the 74AHCT125 and is a single cheap IC:
 `SN74AHCT1G125`. Note the **T** in HCT/LVT — plain `74HC` at 5 V has the same
 0.7 × VDD threshold problem as the LED and does **not** solve anything.
 
+### Which option suits the D1 Mini ESP32
+
+The controller in use is a **WEMOS/LOLIN D1 Mini ESP32** (ESP32-WROOM-32, 4 MB,
+CH340C, micro-USB). It changes nothing about the LED side, but it does decide how
+the ESP itself is powered, and that interacts with option A:
+
+| Your board's LDO | What to do |
+|---|---|
+| ME6211 / SGM2212 class (~200 mV dropout) | Option A: trim the bus to 4.4 V and feed the ESP's **5V** pin straight off the bus. Verify: the **3V3** pin must still read ≥ 3.2 V with WiFi up. |
+| AMS1117 (1.1 V dropout) or unknown | Either power the ESP from **micro-USB** (and tie ESP GND to the bus GND), or take **option B** and leave the bus at 5.0 V. |
+
+Cheapest reliable answer during bring-up: ESP on USB, chain on the bench supply,
+grounds tied. Decide the permanent arrangement afterwards.
+
 ### Signal hygiene (do this regardless of the option chosen)
 
 - **330 Ω in series** at the ESP output, physically at the ESP end.
-- **100 nF** across VDD/GND on **every** LED PCB (§5) — this is not optional at 150 pixels.
-- ESP → LED1 wire **short** (< 15 cm) and **twisted with its GND return**.
-- Every board-to-board data jumper carries **DATA + GND together** — never let
-  the data return current find its way home through the power bus.
+- **100 nF** across VDD/GND on **every** LED board (§5) — not optional at 150 pixels.
+- ESP → LED1 wire **short** (< 15 cm), run alongside its ground return.
+- **The board as built has no ground pin on its data links** (§5), so every data
+  hop returns through the power bus. That is workable — it is how most commercial
+  pixel strings do it — but it makes three things mandatory rather than optional:
+  keep each board-to-board data hop **short** (≤ 10–15 cm) and lying **along the
+  bus wires**, never looping away from them; keep the GND bus **continuous and
+  low-impedance** (it is now the data return path, not just the power return);
+  and prefer **option A**, whose fatter noise margin is exactly what a
+  single-wire hop needs.
 
 ---
 
-## 5. LED PCB
+## 5. The LED board (as built)
 
-One tiny board per insert. Each carries:
-
-- 1 × SK6812MINI-RGBW-NW-P6
-- 1 × 100 nF X7R (0603) decoupling, right at the LED pins
-- 2 × mounting holes
-- 2 × data connectors (in / out)
-- 2 × large solder pads for the power tap
+The boards are made and in hand. One per insert, single-sided, with the
+SK6812MINI-RGBW-NW-P6 and its 100 nF decoupling cap, and four connection points:
 
 ```
         ┌───────────────────────┐
-   ○    │         +5V           │    ○      ○ = 2.2 mm mounting hole
-        │   ┌───────────────┐   │           (M2, or a 1.6 mm brad/screw)
- DATA   │   │   SK6812MINI  │   │   DATA
-  OUT ◀─┤   │     RGBW      │   ├─◀ IN
- +GND   │   └───────────────┘   │   +GND
-        │    ▪ 100 nF           │
-   ○    │         GND           │    ○
+        │  ▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄▄   │   ← GND slot   (bus wire passes through)
+        │         GND           │
+        │   ┌──────────────┐    │
+        │   │  SK6812MINI  │ ▪  │   ▪ = 100 nF
+        │   │     RGBW     │    │
+   ●    │   └──────────────┘    │   ●   ← LED OUT (left) / LED IN (right)
+  OUT   │                       │  IN       single round pads, DATA only
+        │  ▐▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▀▌   │   ← +5V slot  (bus wire passes through)
+        │         +5V           │
         └───────────────────────┘
-             ~12 × 12 mm
 ```
 
-### Fab spec (JLCPCB)
+Three consequences of this layout worth planning around:
+
+1. **The slots are the mount.** The +5 V and GND bus wires thread through the two
+   slot pads and are soldered there, so each board is carried mechanically by the
+   bus itself. That means the **slot pitch fixes the spacing of the two bus
+   wires** — run them as a parallel pair (a ladder), not as two independently
+   routed wires. If a given insert needs the board somewhere the pair does not
+   reach, solder short AWG22 stubs into the slots instead and keep the board loose.
+2. **The data links are single pads** — DATA only, no ground pin. See §4 signal
+   hygiene: short hops, laid along the bus.
+3. **Solder the bus wires with a chisel tip and be quick.** An AWG18 wire in a
+   large slot pad is a lot of thermal mass sitting ~10 mm from an already-reflowed
+   SK6812, and those parts do not enjoy a second long heat soak. Pre-tin the wire,
+   ~350 °C, in and out in a couple of seconds, and let each board cool before the
+   next one.
+
+### Before you wire a hundred of them: buzz out one board
+
+The KiCad net names in the layout read `unconnected-(LED1-VDD-Pad6)`,
+`unconnected-(LED1-GND-Pad2)`, `unconnected-(LED1-DIN-Pad3)` — the signature of a
+PCB drawn without a schematic/netlist behind it. The copper is there, but **DRC
+had no netlist to check it against**, so it could not have told you if a
+connection were missing. Ten minutes with a multimeter on one board removes all
+doubt before it is multiplied by a hundred:
+
+| Check | Expected |
+|---|---|
+| +5 V slot ↔ LED VDD pad | continuity (< 1 Ω) |
+| GND slot ↔ LED GND pad | continuity (< 1 Ω) |
+| C1 legs ↔ +5 V slot / GND slot | continuity, one leg each |
+| LED IN pad ↔ LED DIN pad | continuity |
+| LED OUT pad ↔ LED DOUT pad | continuity |
+| +5 V slot ↔ GND slot | **not** a short — expect kΩ or a diode drop through the LED, never < 1 Ω |
+| LED orientation | pin 1 marker against the footprint — if the assembler rotated it, all boards are rotated |
+
+A short between the slots on **one** board takes down the whole bus, so it is
+also worth a quick +5 V/GND buzz on each board as you solder it into the chain.
+
+### Fab spec (for reference / a v2 run)
 
 | Parameter | Value |
 |---|---|
-| Size | 12 × 12 mm (fits between playfield inserts; 10 × 10 mm is possible if tight) |
-| Layers / copper | 2 layers, 1 oz |
-| Thickness | **1.0 mm** (thin = sits flush under the playfield) |
-| Solder mask | **black** (disappears against the playfield underside) |
-| Finish | **ENIG** (flat pads, kinder to the SK6812's side pads than HASL) |
+| Layers / copper | 2 layers (this run is routed single-sided), 1 oz |
+| Thickness | 1.0 mm — thin sits flush under the playfield |
+| Solder mask | black hides better against the playfield underside; green is what this run used and is fine |
+| Finish | ENIG — flat pads, kinder to the SK6812's side pads than HASL |
 | Power traces | 1.0–1.5 mm |
 | Data traces | 0.3 mm |
-| Power pads | 2.5 × 3 mm, mask-opened, tinned — takes an AWG22 tap directly |
-| Data connectors | JST-PH 2.0 mm 2-pin (robust, repairable) or JST-SH 1.0 mm if space is critical |
-| Optional | 100 Ω series in the local DATA IN trace — tames ringing on flying leads |
+| Optional v2 | a second pad next to each data link for a local GND, and a schematic so DRC has a netlist to verify |
 
-### Panelize — don't order 50 separate boards
+### Panelize — don't order small boards individually
 
 At this size, board count is irrelevant to the price; **area** is. A 100 × 100 mm
-panel holds **8 × 8 = 64** boards of 12 mm with V-cut. Five of those panels is
-320 boards for the price of five small PCBs. Before ordering, price both in the
-JLCPCB cart:
-
-1. 50 individual boards, versus
-2. 1 panel of ~50–64 boards (V-cut, 100 × 100 mm).
-
-Option 2 normally wins by an order of magnitude. Ask for **V-cut** (straight
-lines only) rather than mouse-bites — cleaner edges on a board this small.
-
-### Assembly
-
-The SK6812MINI has side-wettable pads under a 3.5 mm body: hot plate or hot air
-with solder paste and a stencil is easy; a soldering iron alone is not. If you'd
-rather not, JLCPCB assembly on a panel is an option — check current stock for the
-SK6812MINI variant before committing the design.
-
----
+panel holds dozens of boards with V-cut, for the price of a handful of separate
+PCBs. Ask for **V-cut** (straight lines only) rather than mouse-bites — cleaner
+edges on a board this small.
 
 ## 6. Bill of materials
 
@@ -235,11 +271,12 @@ For a 100-LED build (scale linearly; the design is validated to 150):
 | 7 | Fuse holder + 10 A slow-blow | 1 | PSU → bus |
 | 8 | 330 Ω resistor | 1 | ESP data out |
 | 9 | 1N5819 Schottky | 2 | only for §4 option B |
-| 10 | JST-PH 2.0 2-pin connector + housing | 200 | 2 per board |
-| 11 | Pre-crimped JST-PH jumpers | 100 | board-to-board data |
-| 12 | AWG18 wire (red/black) | ~10 m | power bus |
-| 13 | AWG22 wire | ~10 m | per-LED power taps |
-| 14 | M2 screws / brads | 200 | 2 per board |
+| 10 | AWG18 wire (red/black) | ~10 m | power bus — threads through the board slots |
+| 11 | AWG26–24 wire | ~15 m | board-to-board data hops (single wire per hop) |
+| 12 | AWG22 wire | ~5 m | only if some boards get stub taps instead of the through-bus |
+
+No connectors: the boards as built take wire directly (slot pads for the bus,
+round pads for DATA in/out), and the bus wire doubles as the mechanical mount.
 
 A machine-readable version is in [`hardware/arena-led-bom.csv`](hardware/arena-led-bom.csv).
 
@@ -261,10 +298,19 @@ Custom firmware rather than WLED — this is a mapped playfield, not a light str
 ### Build and flash
 
 ```sh
-pio run -e arenaled -t uploadfs     # web UI + default map -> LittleFS (do this first)
-pio run -e arenaled -t upload       # firmware
-pio device monitor -e arenaled      # 115200
+# WEMOS/LOLIN D1 Mini ESP32 (the board in use):
+pio run -e arenaled_d1mini32 -t uploadfs   # web UI + default map -> LittleFS (do this FIRST)
+pio run -e arenaled_d1mini32 -t upload     # firmware
+pio device monitor -e arenaled_d1mini32    # 115200
+
+# ESP32-S3 DevKitC-1: -e arenaled     ESP32-C3: -e arenaled_c3
 ```
+
+Data is on **GPIO27** on the D1 Mini ESP32 (GPIO5 on S3/C3) — see
+`include/arena_config.h` for why: 27 dodges the flash pins, the input-only pins,
+the strapping pins and the CH340C's UART lines. If auto-reset fails on a CH340C
+board, hold IO0 to GND while the upload starts.
+The firmware fills ~70 % of that board's 1.3 MB app slot, so OTA still fits.
 
 First boot brings up the SoftAP **`Arena-LED`** (password `pinball87`) →
 open <http://192.168.4.1/>, enter your Wi-Fi in the last panel, and after the
@@ -287,6 +333,16 @@ A cheaper ESP32-C3 build is `pio run -e arenaled_c3` — same firmware.
 
 Colour reference values from the vintage-incandescent palette are the UI presets:
 amber `255/100/0/0`, golden `255/140/0/10`, warm white `0/0/0/255`.
+
+**Colour order is a live setting, not a reflash.** SK6812MINI-RGBW is GRBW and
+that is the default, but reels and clones vary. Run `test`: the field must cycle
+**red → green → blue → white** in that order. If two of them are swapped, pick
+another order from the dropdown (`grbw` / `rgbw` / `gbrw` / `brgw` / `rbgw` /
+`bgrw`) — it re-types the chain immediately and is stored in NVS.
+
+**Soft start**: at boot the firmware ramps global brightness from 0 to the saved
+value over ~900 ms (`ARENA_SOFTSTART_MS`) instead of lighting 100+ pixels in one
+frame, so the inrush into the bulk caps cannot trip a PSU's over-current hiccup.
 
 ### Power metering
 
@@ -344,19 +400,47 @@ Wi-Fi defaults, `LED_REPEATER_PIXEL` (§4 option B), `LED_CHAIN2_ENABLE`
 
 ---
 
-## 8. Build order
+## 8. Bring-up, with the boards in hand
 
-1. **Bench first, 8 LEDs on a breadboard.** Prove the data path (§4) before
-   anything is glued to a playfield. Run `test` mode: R/G/B/W must be correct
-   and the walking pixel must reach the last LED.
-2. Fit the PCBs to the playfield inserts, two screws each, from the back.
-3. Lay the AWG18 bus, then the four injection points, then the per-LED taps.
-4. Chain the data jumpers **in the order you want them numbered** — a chain that
-   follows the artwork makes the effects far easier to map.
-5. Fuse, power up at low brightness, check the far end of the bus with a meter
-   under a full-white frame (`classic` at 255): it must stay above ~4.0 V.
-6. Map the zones with the wizard, save, then set your boot mode and
-   **Save as boot default**.
+Do this in order. Each step is cheap; the mistakes they catch are not.
+
+**1 — One board, no ESP.** Buzz it out per §5. Then power it alone from a bench
+supply at 5 V with a current limit of ~150 mA. It should draw ~1 mA and stay
+dark. If it draws hundreds of mA or the limit trips, the LED is backwards or
+there is a bridge — stop and fix that before touching the other 99.
+
+**2 — One board + ESP, on the bench.** Flash the firmware (`uploadfs` first, then
+`upload`), set the LED count to 1, and run `test` mode. You are checking four
+things: the pixel lights at all (data path OK), the sequence is red → green →
+blue → white (colour order OK — if not, change the dropdown, §7), the white step
+uses the dedicated W die and looks neutral rather than pinkish (you really do
+have the RGBW part), and current at full white is ~70 mA (the die drive is
+healthy).
+
+**3 — Three boards chained.** This is the step that proves the *link*, which is
+the part of this build with no ground pin. Set count to 3, run `test`, and watch
+the walking pixel reach board 3. Then try to break it: wiggle the hops, run a
+longer hop, put the ESP's 330 Ω in and out. If board 3 flickers or shows garbage
+while boards 1–2 are clean, you are seeing the level-margin problem from §4 —
+apply option A (trim to 4.4 V) or option B (repeater pixel) *now*, not after the
+playfield is populated.
+
+**4 — Thirty boards, still on the bench.** Enough to be representative of a real
+bus. Run `classic` at full brightness and measure: the voltage at the *far* end
+of the bus (must stay above ~4.0 V), the total current (compare with the figure
+the UI reports — they should agree within ~15 %), and how warm the bus wire gets
+(it should not be noticeably warm at all). Leave it running for an hour.
+
+**5 — Populate the playfield.** Fit boards to inserts, thread the bus pair, chain
+the data hops **in the order you want them numbered**. A chain that follows the
+artwork makes mapping far easier later.
+
+**6 — Injection and fuse.** Star-wire the injection points back to the PSU, add
+the bulk caps, fit the 10 A fuse. Power up with the brightness slider low, then
+walk it up while watching the current.
+
+**7 — Map and save.** Use the mapping wizard to name the zones, save the map,
+pick your boot mode and brightness, then **Save as boot default**.
 
 ## 9. Future (V2)
 
