@@ -136,19 +136,28 @@ static void fill(Rgbw* buf, const Rgbw& c) {
 //  playfield. With RGBW pixels the real curve is reachable.
 //
 //  FILAMENT is Planck's law for a black body from 800 K to 2700 K, converted to
-//  sRGB, split so the white die carries the neutral part, and scaled by T^4 —
-//  Stefan-Boltzmann, which is why the light collapses so much faster than the
-//  temperature does and why the dim red tail lasts so long.
+//  sRGB and scaled by T^4 — Stefan-Boltzmann, which is why the light collapses
+//  so much faster than the temperature does and why the dim red tail lasts so
+//  long.
+//
+//  The RGBW split is deliberately NOT the colorimetric one. Splitting so the
+//  white die only carries the neutral part of the spectrum is what a meter would
+//  do, and it came out looking orange: a 2700 K source measures orange, but the
+//  eye adapts to the dominant illuminant and reads a bulb as warm white. So the
+//  white die takes a growing share of the output as the filament heats (none
+//  below t=0.35, ~85 % at full), which keeps the physical trajectory — dull red
+//  when cold, warm white when hot — and lands where the eye expects it.
+//  Regenerate with tools/filament_lut.py if the wall wants a different bulb.
 static const uint8_t FILAMENT[33][4] = {   // R,G,B,W du filament de 800 K a 2700 K
   {  2,  0,  0,  0}, {  3,  0,  0,  0}, {  4,  0,  0,  0}, {  5,  0,  0,  0},
-  {  6,  0,  0,  0}, {  8,  0,  0,  0}, { 10,  1,  0,  0}, { 12,  1,  0,  0},
-  { 14,  1,  0,  0}, { 17,  2,  0,  0}, { 20,  2,  0,  0}, { 24,  3,  0,  0},
-  { 28,  4,  0,  0}, { 33,  5,  0,  0}, { 38,  7,  0,  0}, { 44,  8,  0,  0},
-  { 50, 10,  0,  0}, { 57, 13,  0,  0}, { 65, 15,  0,  0}, { 74, 18,  0,  0},
-  { 83, 21,  0,  1}, { 92, 25,  0,  1}, {103, 29,  0,  2}, {114, 33,  0,  3},
-  {127, 38,  0,  4}, {140, 43,  0,  6}, {153, 48,  0,  7}, {168, 54,  0, 10},
-  {184, 61,  0, 12}, {200, 68,  0, 15}, {218, 75,  0, 19}, {236, 83,  0, 23},
-  {255, 92,  0, 28},
+  {  7,  0,  0,  0}, {  8,  0,  0,  0}, { 10,  1,  0,  0}, { 12,  1,  0,  0},
+  { 15,  1,  0,  0}, { 18,  2,  0,  0}, { 21,  3,  0,  0}, { 25,  3,  0,  0},
+  { 28,  4,  0,  2}, { 30,  5,  0,  4}, { 33,  6,  0,  7}, { 36,  7,  0, 10},
+  { 39,  8,  0, 14}, { 42,  9,  0, 19}, { 45, 11,  0, 24}, { 48, 12,  0, 30},
+  { 50, 13,  0, 38}, { 53, 15,  0, 46}, { 55, 16,  0, 56}, { 57, 17,  0, 67},
+  { 59, 19,  0, 80}, { 60, 20,  0, 94}, { 60, 21,  0,110}, { 60, 21,  0,128},
+  { 59, 22,  0,149}, { 57, 22,  0,171}, { 54, 22,  0,196}, { 50, 21,  0,224},
+  { 45, 19,  0,255},
 };
 
 static const uint8_t FILAMENT_N = sizeof(FILAMENT) / sizeof(FILAMENT[0]);
