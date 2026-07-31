@@ -135,7 +135,10 @@
 // and every insert, driven or not, sits in that glow. Reproducing only the lamp
 // matrix leaves the inserts the ROM never touches (L1, L2, L3 among them) looking
 // like dead pixels, which is how this was first reported. 0.06 was invisible.
-#define ARENA_GI_LEVEL 0.20f
+// Expressed as a filament temperature, not a brightness fraction: the GI bulbs
+// are incandescent too, so they should sit on the same physical curve as the
+// inserts rather than be a dimmed copy of whatever colour is selected.
+#define ARENA_GI_T 0.62f
 
 #define ARENA_BRIGHT_DEFAULT 180   // 0..255 global brightness
 #define ARENA_SPEED_DEFAULT  128   // 0..255 -> x0.25 .. x4 animation speed

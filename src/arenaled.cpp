@@ -127,6 +127,57 @@ static void fill(Rgbw* buf, const Rgbw& c) {
 }
 
 // ---------------------------------------------------------------------------
+//  Incandescent filament model
+//
+//  A bulb switching on does not just get brighter, it changes COLOUR: the
+//  filament climbs from dull red through amber to warm white as it heats, and
+//  falls back through red as it cools. Fading an LED's brightness keeps its hue
+//  fixed at every level, and that is what reads as "digital" rather than as a
+//  playfield. With RGBW pixels the real curve is reachable.
+//
+//  FILAMENT is Planck's law for a black body from 800 K to 2700 K, converted to
+//  sRGB, split so the white die carries the neutral part, and scaled by T^4 —
+//  Stefan-Boltzmann, which is why the light collapses so much faster than the
+//  temperature does and why the dim red tail lasts so long.
+static const uint8_t FILAMENT[33][4] = {   // R,G,B,W du filament de 800 K a 2700 K
+  {  2,  0,  0,  0}, {  3,  0,  0,  0}, {  4,  0,  0,  0}, {  5,  0,  0,  0},
+  {  6,  0,  0,  0}, {  8,  0,  0,  0}, { 10,  1,  0,  0}, { 12,  1,  0,  0},
+  { 14,  1,  0,  0}, { 17,  2,  0,  0}, { 20,  2,  0,  0}, { 24,  3,  0,  0},
+  { 28,  4,  0,  0}, { 33,  5,  0,  0}, { 38,  7,  0,  0}, { 44,  8,  0,  0},
+  { 50, 10,  0,  0}, { 57, 13,  0,  0}, { 65, 15,  0,  0}, { 74, 18,  0,  0},
+  { 83, 21,  0,  1}, { 92, 25,  0,  1}, {103, 29,  0,  2}, {114, 33,  0,  3},
+  {127, 38,  0,  4}, {140, 43,  0,  6}, {153, 48,  0,  7}, {168, 54,  0, 10},
+  {184, 61,  0, 12}, {200, 68,  0, 15}, {218, 75,  0, 19}, {236, 83,  0, 23},
+  {255, 92,  0, 28},
+};
+
+static const uint8_t FILAMENT_N = sizeof(FILAMENT) / sizeof(FILAMENT[0]);
+
+// Filament at normalised temperature t (0 = cold, 1 = full), interpolated.
+static Rgbw filament(float t) {
+  if (t <= 0.0f) return { 0, 0, 0, 0 };
+  if (t >= 1.0f) t = 0.999f;
+  const float f = t * (FILAMENT_N - 1);
+  const uint8_t i = (uint8_t)f;
+  const float k = f - i;
+  const uint8_t* a = FILAMENT[i];
+  const uint8_t* b = FILAMENT[i + 1];
+  return { clamp8(a[0] + (b[0] - a[0]) * k), clamp8(a[1] + (b[1] - a[1]) * k),
+           clamp8(a[2] + (b[2] - a[2]) * k), clamp8(a[3] + (b[3] - a[3]) * k) };
+}
+
+// Thermal step. Heating is a constant-power exponential approach; cooling is
+// radiation (T^4) plus conduction out through the leads (linear), which is what
+// gives the long tail instead of a clean exponential. Constants tuned to a #47:
+// ~80 % of full light 100 ms after switch-on, down to ~3 % 170 ms after cut.
+static inline float filamentStep(float T, bool on, float dt) {
+  if (on) return T + (1.0f - T) * (1.0f - expf(-dt / 0.035f));
+  const float T2 = T * T;
+  T -= dt * (0.70f * T2 * T2 + 0.30f * T) / 0.110f;
+  return T > 0.0f ? T : 0.0f;
+}
+
+// ---------------------------------------------------------------------------
 //  Effects — each renders a full frame at full scale into buf[]
 // ---------------------------------------------------------------------------
 
@@ -220,7 +271,7 @@ static void fxZoneSweep(Rgbw* buf) {
 // blinking instead of a playfield. The envelope below is the only thing here
 // that is not in the ROM.
 static void fxRomAttract(Rgbw* buf) {
-  static float lvl[LED_MAX] = { 0 };
+  static float T[LED_MAX] = { 0 };
   static uint32_t lastMs = 0;
 
   const uint32_t now = millis();
@@ -231,15 +282,16 @@ static void fxRomAttract(Rgbw* buf) {
   // The sequence runs on the animation clock, so the speed slider works on it.
   const uint64_t mask = arenaattract::maskAt((uint32_t)(phase(1.0, 3600.0) * 1000.0f));
 
-  const float upK   = 1.0f - expf(-dt / 0.040f);  // ~40 ms rise
-  const float downK = 1.0f - expf(-dt / 0.090f);  // ~90 ms fall
-  const Rgbw base   = scale(s_color, ARENA_GI_LEVEL);   // the GI the ROM does not drive
+  // General illumination: on a real Arena the GI bulbs stay lit through attract
+  // and every insert sits in that glow, so an insert the ROM never drives is dim
+  // rather than dark. Those are filaments too, hence the same curve.
+  const Rgbw gi = filament(ARENA_GI_T);
 
   for (uint16_t i = 0; i < s_count; i++) {
     const int lamp = arenapf::lampOfLed(i);
     const bool on  = (lamp >= 0) && ((mask >> lamp) & 1ULL);
-    lvl[i] += (on ? (1.0f - lvl[i]) * upK : -lvl[i] * downK);
-    buf[i] = (lamp < 0) ? base : addSat(base, scale(s_color, lvl[i]));
+    T[i] = filamentStep(T[i], on, dt);
+    buf[i] = (lamp < 0) ? gi : addSat(gi, filament(T[i]));
   }
 }
 
