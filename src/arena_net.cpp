@@ -44,6 +44,10 @@ static String stateJson() {
   j += ",\"r\":" + String(c.r) + ",\"g\":" + String(c.g) +
        ",\"b\":" + String(c.b) + ",\"w\":" + String(c.w);
   j += ",\"amps\":"   + String(arenaled::lastAmps(), 2);
+  // Also in mA: two decimals of an amp cannot show a bench of one or three LEDs
+  // (a single pixel in TEST mode is ~4 mA, which prints as "0.00" and reads like
+  // a broken meter). mA is what the multimeter in the +5 V wire shows anyway.
+  j += ",\"ma\":"     + String(arenaled::lastAmps() * 1000.0f, 1);
   j += ",\"budget\":" + String(arenaled::budgetMa());
   j += ",\"order\":\""  + String(arenaled::order()) + "\"";
   j += ",\"limited\":" + String(arenaled::limited() ? "true" : "false");
