@@ -28,6 +28,8 @@
   .row label{width:96px;font-size:13px;color:var(--dim);flex:none}
   .row output{width:52px;text-align:right;font-variant-numeric:tabular-nums;font-size:13px}
   input[type=range]{flex:1;accent-color:var(--amber)}
+  select{background:#100d0b;color:var(--txt);border:1px solid var(--line);
+         border-radius:6px;padding:7px 9px;width:100%;font:inherit}
   input[type=number],input[type=text],input[type=password]{background:#100d0b;color:var(--txt);
     border:1px solid var(--line);border-radius:6px;padding:7px 9px;width:100%}
   .presets{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
@@ -99,7 +101,19 @@
         <input type="number" id="count" min="1" max="150"></div>
       <div><label class="hint">Power budget (mA)</label>
         <input type="number" id="budget" min="500" max="15000" step="100"></div>
+      <div><label class="hint">Colour order</label>
+        <select id="order" onchange="push('order='+this.value)">
+          <option value="grbw">GRBW (SK6812 default)</option>
+          <option value="rgbw">RGBW</option>
+          <option value="gbrw">GBRW</option>
+          <option value="brgw">BRGW</option>
+          <option value="rbgw">RBGW</option>
+          <option value="bgrw">BGRW</option>
+        </select></div>
     </div>
+    <p class="hint">Run <b>Wiring test</b>: the field must cycle red → green → blue → white in
+       that order. If two of them are swapped, pick the matching colour order above — the change
+       is live, no reflash.</p>
     <p class="hint" style="margin-top:12px">
       <button onclick="apply()">Apply</button>
       <button onclick="api('/api/save').then(()=>toast('saved to NVS'))">Save as boot default</button>
@@ -200,6 +214,7 @@ function render(s) {
   set('r', s.r); set('g', s.g); set('b', s.b); set('w', s.w);
   if (document.activeElement !== $('count'))  $('count').value  = s.count;
   if (document.activeElement !== $('budget')) $('budget').value = s.budget;
+  if (document.activeElement !== $('order'))  $('order').value  = s.order;
   $('walkn').max = s.count - 1;
 }
 function set(k, v) { $(k).value = v; $('o-' + k).value = v; }

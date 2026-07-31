@@ -54,6 +54,11 @@ uint16_t count();
 void    setBudgetMa(uint16_t ma);          // power ceiling for the whole chain
 uint16_t budgetMa();
 
+// Pixel colour order, e.g. "grbw" (SK6812 default) / "rgbw" / "gbrw" / ...
+// Changing it re-types the chain live — no reflash, no reboot.
+bool        setOrder(const char* s);       // false if the string is not a known order
+const char* order();
+
 // --- mapping helpers (web UI wizard) ---------------------------------------
 void identifyLed(int led, uint32_t ms);    // spotlight one pixel, any mode, then auto-clear
 void identifyZone(int zoneIdx, uint32_t ms);
