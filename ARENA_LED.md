@@ -541,8 +541,18 @@ walker would sit on the only pixel and hold it permanently white).
 game's own ROM.
 
 `tools/capture_attract.cpp` runs `prom1.cpu` / `prom2.cpu` under PinMAME and
-writes down the lamp matrix the ROM drives, every 20 ms. `data/arena_attract.bin`
-is 44 s of that — one 64-bit lamp mask per frame, 17 KB, loaded to RAM at boot.
+writes down the lamp matrix the ROM drives, every 50 ms of **game** time.
+`data/arena_attract.bin` is 120 s of that — one 64-bit lamp mask per frame,
+19 KB, loaded to RAM at boot.
+
+> **Pace the capture on the emulated clock, never on the host's.** Headless
+> PinMAME is not throttled: on this Mac it runs Arena at **3x real time**
+> (measured — the driver is `MDRV_FRAMES_PER_SECOND(60)` and the display
+> callback fires 180 times a wall second). The first capture sampled every 20 ms
+> of wall clock, which is 60 ms of game time, and played back at 20 ms: the wall
+> ran the right sequence three times too fast. The tool now waits on
+> `OnDisplayUpdated`, which ticks once per emulated frame, so the interval is
+> right whatever the host is doing.
 
 ```sh
 # PinMAME source lives in ../gottfa-upstream/lisy_5_28 and builds natively:
@@ -562,6 +572,12 @@ orphaned.
 
 Falls back to the five generic animations when either half is missing (no
 capture on the board, or no pixel placed yet).
+
+**Lamps 1, 2 and 3 stay dark, and that is correct.** Over five minutes of
+captured attract they are never lit; L1 comes on only during the first 0.7 s,
+which is the power-on lamp test, not attract. A pixel placed on one of those
+inserts looking dead in `attract` is the ROM, not the wiring — check it with
+the wizard, which lights any pixel on demand.
 
 **One liberty is taken**, and it is the only thing here not in the ROM: each
 pixel rises over ~40 ms and falls over ~90 ms. #47 bulbs do not switch instantly,
