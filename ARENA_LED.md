@@ -343,6 +343,13 @@ another order from the dropdown (`grbw` / `rgbw` / `gbrw` / `brgw` / `rbgw` /
 **Soft start**: at boot the firmware ramps global brightness from 0 to the saved
 value over ~900 ms (`ARENA_SOFTSTART_MS`) instead of lighting 100+ pixels in one
 frame, so the inrush into the bulk caps cannot trip a PSU's over-current hiccup.
+The ramp is armed on the first *rendered frame*, not at the end of setup —
+Wi-Fi bring-up blocks for 0.5–12 s in between and would otherwise consume the
+whole window, leaving the chain to snap on at full brightness.
+
+`test` mode is usable with a **single LED**: below two pixels the walking white
+marker is suppressed, so the R → G → B → W field stays visible (otherwise the
+walker would sit on the only pixel and hold it permanently white).
 
 ### Power metering
 
@@ -463,4 +470,5 @@ Assistant `rest_command` needs no firmware change at all.
 | `src/arena_net.{h,cpp}` | Wi-Fi, mDNS, web UI, REST, OTA |
 | `data/arena.html` | web UI (LittleFS) |
 | `data/arena_map.json` | default insert map (LittleFS, editable from the UI) |
+| `tools/host_arenaphase_test.cpp` | host test for the animation clock (30 days of uptime in a second) |
 | `hardware/arena-led-bom.csv` | BOM |

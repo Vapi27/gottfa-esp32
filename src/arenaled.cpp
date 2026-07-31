@@ -36,7 +36,15 @@ static uint32_t s_bootMs    = 0;       // soft-start reference
 // the render task, where nothing else is touching the pixel buffer.
 static volatile bool s_pendLen = false;
 
-static float    s_phase     = 0.0f;    // animation clock (s, speed-scaled)
+// The animation clock. It only ever accumulates, so it must be a double: a float
+// carries 24 mantissa bits, and at ~0.017 s per frame its ulp reaches the frame
+// increment after a few days of uptime — every effect would first run ~2x too
+// fast, then freeze outright because `s_phase += dt` rounds to no change at all.
+// A wall piece runs for months, so precision here is a correctness requirement,
+// not a nicety. Effects never use it raw: phase() below reduces it modulo that
+// effect's own period FIRST, in double, and only then narrows to float — so the
+// value a sine or an fmod actually sees always stays small and exact.
+static double   s_phase     = 0.0;     // animation clock (s, speed-scaled)
 static uint32_t s_lastUs    = 0;
 static uint32_t s_lastFrame = 0;
 static uint32_t s_frames    = 0;
@@ -75,6 +83,15 @@ static inline Rgbw addSat(const Rgbw& a, const Rgbw& b) {
            (uint8_t)min(255, a.b + b.b), (uint8_t)min(255, a.w + b.w) };
 }
 static inline float fsin01(float x) { return 0.5f + 0.5f * sinf(x); }
+
+static const double TAU = 6.283185307179586;
+
+// s_phase * rate, reduced modulo `period` before narrowing to float. Every effect
+// gets its time base through this, which is what keeps them exact indefinitely
+// (and continuous — there is no global wrap point to step over).
+static inline float phase(double rate, double period) {
+  return (float)fmod(s_phase * rate, period);
+}
 
 // 0..255 -> x0.25 .. x4, geometric so the middle of the slider is x1.
 static inline float speedFactor() { return powf(2.0f, ((float)s_speed - 128.0f) / 64.0f); }
@@ -115,30 +132,32 @@ static void fill(Rgbw* buf, const Rgbw& c) {
 // ~5 % peak-to-peak). Reads as "incandescent" rather than "LED" on camera and in
 // the room, without ever looking like a broken pixel.
 static void fxClassic(Rgbw* buf) {
+  const float t1 = phase(1.7, TAU), t2 = phase(4.3, TAU);
   for (uint16_t i = 0; i < s_count; i++) {
     float p = ledPhase(i);
-    float k = 1.0f + 0.030f * sinf(s_phase * 1.7f + p)
-                   + 0.018f * sinf(s_phase * 4.3f + p * 1.7f);
+    float k = 1.0f + 0.030f * sinf(t1 + p)
+                   + 0.018f * sinf(t2 + p * 1.7f);
     buf[i] = scale(s_color, k);
   }
 }
 
 static void fxPulse(Rgbw* buf) {                       // whole field breathing
-  float k = 0.25f + 0.75f * fsin01(s_phase * 1.1f);
+  float k = 0.25f + 0.75f * fsin01(phase(1.1, TAU));
   fill(buf, scale(s_color, k));
 }
 
 static void fxWave(Rgbw* buf) {                        // travelling sine along the chain
+  const float t = phase(2.0, TAU);
   for (uint16_t i = 0; i < s_count; i++) {
     float x = (float)i / (float)s_count;
-    float k = 0.15f + 0.85f * fsin01(s_phase * 2.0f - x * 6.2831853f * 2.0f);
+    float k = 0.15f + 0.85f * fsin01(t - x * 6.2831853f * 2.0f);
     buf[i] = scale(s_color, k);
   }
 }
 
 static void fxChase(Rgbw* buf) {                       // comet with a decaying tail
   const float TAIL = 9.0f;
-  float head = fmodf(s_phase * 14.0f, (float)s_count);
+  float head = phase(14.0, (double)s_count);
   for (uint16_t i = 0; i < s_count; i++) {
     float d = head - (float)i;
     if (d < 0) d += (float)s_count;                    // wrap the tail around
@@ -176,13 +195,14 @@ static void fxZoneSweep(Rgbw* buf) {
   uint8_t nz = arenamap::count();
   if (!nz) { fxWave(buf); return; }
 
-  float pos = fmodf(s_phase * 0.6f, (float)nz);
+  float pos = phase(0.6, (double)nz);
   for (uint8_t z = 0; z < nz; z++) {
     float d = fabsf(pos - (float)z);
     if (d > nz / 2.0f) d = nz - d;                     // circular distance
     float k = (d < 1.5f) ? (1.0f - d / 1.5f) : 0.0f;
     if (k <= 0.0f) continue;
     const arenamap::Zone* zn = arenamap::zone(z);
+    if (!zn) continue;                                 // table can shrink from the HTTP task
     for (uint16_t i = zn->first; i < zn->first + zn->count && i < s_count; i++)
       buf[i] = scale(s_color, 0.10f + 0.90f * k);
   }
@@ -196,9 +216,9 @@ static void fxAttract(Rgbw* buf) {
   const uint8_t N = sizeof(FX) / sizeof(FX[0]);
   const float STEP = 14.0f, BLEND = 1.5f;              // seconds (animation clock)
 
-  float t   = s_phase / STEP;
-  uint8_t i = ((uint32_t)t) % N;
-  float frac = (t - floorf(t)) * STEP;                 // seconds into this step
+  double t   = s_phase / STEP;
+  uint8_t i  = (uint8_t)fmod(t, (double)N);
+  float frac = (float)((t - floor(t)) * STEP);         // seconds into this step
 
   FX[i](buf);
   if (frac > STEP - BLEND) {                           // crossfade into the next one
@@ -216,13 +236,14 @@ static void fxArena(Rgbw* buf) {
 
   uint8_t nz = arenamap::count();
   if (nz) {
-    float pos = fmodf(s_phase * 1.1f, (float)nz);
+    float pos = phase(1.1, (double)nz);
     for (uint8_t z = 0; z < nz; z++) {
       float d = pos - (float)z;
       if (d < 0) d += nz;                              // time since this zone was hit
       float k = expf(-d * 1.6f);                       // exponential decay after the hit
       if (k < 0.02f) continue;
       const arenamap::Zone* zn = arenamap::zone(z);
+      if (!zn) continue;                               // table can shrink from the HTTP task
       for (uint16_t i = zn->first; i < zn->first + zn->count && i < s_count; i++) {
         float ph = 1.0f - fabsf((float)(i - zn->first) / (float)max<uint16_t>(1, zn->count) - 0.5f);
         buf[i] = addSat(buf[i], scale(amber, k * ph));
@@ -230,7 +251,7 @@ static void fxArena(Rgbw* buf) {
     }
   }
 
-  float jp = fmodf(s_phase, 20.0f);                    // jackpot flash
+  float jp = phase(1.0, 20.0);                        // jackpot flash
   if (jp < 0.9f) {
     float k = fsin01(jp * 20.0f) * (1.0f - jp / 0.9f);
     const Rgbw gold = { ARENA_GOLD_R, ARENA_GOLD_G, ARENA_GOLD_B, ARENA_GOLD_W };
@@ -239,25 +260,31 @@ static void fxArena(Rgbw* buf) {
 }
 
 static void fxRainbow(Rgbw* buf) {
+  const float hueT = phase(0.08, 1.0);
   for (uint16_t i = 0; i < s_count; i++)
-    buf[i] = hsv((float)i / (float)s_count * 1.5f + s_phase * 0.08f, 1.0f, 1.0f);
+    buf[i] = hsv((float)i / (float)s_count * 1.5f + hueT, 1.0f, 1.0f);
 }
 
-// Wiring/colour-order check: the field cycles R -> G -> B -> W at 25 %, with one
-// bright pixel walking the chain so you can count LEDs and spot a dead link.
+// Wiring/colour-order check: the field cycles R -> G -> B -> W, with one bright
+// white pixel walking the chain so you can count LEDs and spot a dead link.
 static void fxTest(Rgbw* buf) {
-  uint32_t step = (uint32_t)(s_phase / 2.0f) % 4;
+  uint32_t step = (uint32_t)fmod(s_phase / 2.0, 4.0);
   Rgbw c = { 0, 0, 0, 0 };
   switch (step) {
-    case 0: c.r = 64; break;
-    case 1: c.g = 64; break;
-    case 2: c.b = 64; break;
-    default: c.w = 64; break;
+    case 0: c.r = 160; break;
+    case 1: c.g = 160; break;
+    case 2: c.b = 160; break;
+    default: c.w = 160; break;
   }
   fill(buf, c);
-  uint16_t walk = (uint16_t)(fmodf(s_phase * 5.0f, (float)s_count));
-  if (walk >= s_count) walk = s_count - 1;            // float edge case
-  buf[walk] = { 255, 255, 255, 255 };
+  // On a single-LED bench there is nowhere for the walker to walk, and drawing it
+  // would sit on the only pixel and hold it white forever — which is exactly the
+  // colour-order check this mode exists for. Field only below 2 pixels.
+  if (s_count > 1) {
+    uint16_t walk = (uint16_t)phase(5.0, (double)s_count);
+    if (walk >= s_count) walk = s_count - 1;          // float edge case
+    buf[walk] = { 255, 255, 255, 255 };
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -411,11 +438,19 @@ void setCount(uint16_t n) {
 static void applyPending() {
   if (!s_pendLen) return;
   s_pendLen = false;
+  // Blank at the OLD length first. Shrinking the count otherwise stops addressing
+  // the dropped pixels without ever telling them to go out, so the tail of the
+  // chain stays latched on whatever it last showed — lit, and no longer counted
+  // by the power meter, which is the dangerous direction for the estimate.
+  s_strip.clear();
+  s_strip.show();
   s_strip.updateLength(s_count + OFFS);
   s_strip.begin();
   s_strip.clear();
   s_strip.show();
 #if LED_CHAIN2_ENABLE
+  s_strip2.clear();
+  s_strip2.show();
   s_strip2.updateLength(s_count + OFFS);
   s_strip2.begin();
   s_strip2.clear();
@@ -512,7 +547,9 @@ void begin() {
 
   s_lastUs = micros();
   s_fpsT0  = millis();
-  s_bootMs = millis();
+  s_bootMs = 0;                         // armed on the first rendered frame, not here:
+                                        // arenanet::begin() blocks for 0.5-12 s right
+                                        // after this and would eat the whole ramp
   Serial.printf("[led] %u px on GPIO%d, order=%s mode=%s bright=%u budget=%u mA\n",
                 s_count, PIN_LED_DATA, s_order, modeName(s_mode), s_bright, s_budget);
 }
@@ -567,6 +604,7 @@ void tick() {
 #if ARENA_SOFTSTART_MS > 0
   // Soft start: ease the chain up over the first second so 100+ pixels lighting
   // at once can't trip the PSU's over-current hiccup or slam the bulk caps.
+  if (!s_bootMs) s_bootMs = now ? now : 1;   // first frame: arm the ramp here
   uint32_t sinceBoot = now - s_bootMs;
   if (sinceBoot < ARENA_SOFTSTART_MS)
     gain = (uint8_t)((uint32_t)gain * sinceBoot / ARENA_SOFTSTART_MS);
