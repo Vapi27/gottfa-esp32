@@ -109,6 +109,9 @@
 #define LED_MA_PER_CHANNEL    17.5f
 #define LED_MA_QUIESCENT       1.0f
 #define LED_POWER_BUDGET_MA   9000   // mA ceiling for the whole chain (9 A of a 15 A PSU)
+// The budget covers the LEDs ONLY. The controller draws 100-250 mA (peaks higher
+// on WiFi transmit) from the same supply and the same fuse, and never appears in
+// the estimate. Size a fuse against budget + 300 mA, not against the budget.
 
 // ---- Look & feel defaults ---------------------------------------------------
 // Vintage incandescent reference values (see ARENA_LED.md §7).
