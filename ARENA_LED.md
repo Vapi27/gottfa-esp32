@@ -297,6 +297,16 @@ Custom firmware rather than WLED — this is a mapped playfield, not a light str
 
 ### Build and flash
 
+One command, on the machine the board is plugged into — it finds the port,
+builds, uploads the UI then the firmware, and opens the monitor, printing what to
+try next on any failure:
+
+```sh
+tools/arena_flash.sh                 # or: tools/arena_flash.sh /dev/ttyUSB0
+```
+
+The same thing by hand:
+
 ```sh
 # WEMOS/LOLIN D1 Mini ESP32 (the board in use):
 pio run -e arenaled_d1mini32 -t uploadfs   # web UI + default map -> LittleFS (do this FIRST)
@@ -304,6 +314,15 @@ pio run -e arenaled_d1mini32 -t upload     # firmware
 pio device monitor -e arenaled_d1mini32    # 115200
 
 # ESP32-S3 DevKitC-1: -e arenaled     ESP32-C3: -e arenaled_c3
+# Another board:      ARENA_ENV=arenaled tools/arena_flash.sh
+```
+
+No toolchain on that machine? A merged image (bootloader + partitions +
+firmware + web UI) can be flashed with esptool alone:
+
+```sh
+pip install esptool
+esptool.py --chip esp32 --port /dev/ttyUSB0 write_flash 0x0 arena-d1mini32-full.bin
 ```
 
 Data is on **GPIO27** on the D1 Mini ESP32 (GPIO5 on S3/C3) — see
@@ -471,4 +490,5 @@ Assistant `rest_command` needs no firmware change at all.
 | `data/arena.html` | web UI (LittleFS) |
 | `data/arena_map.json` | default insert map (LittleFS, editable from the UI) |
 | `tools/host_arenaphase_test.cpp` | host test for the animation clock (30 days of uptime in a second) |
+| `tools/arena_flash.sh` | one-command build + flash + monitor, with troubleshooting output |
 | `hardware/arena-led-bom.csv` | BOM |
