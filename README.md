@@ -126,6 +126,8 @@ hotspot and a setup page pops up — see [`WIFI_SETUP.md`](WIFI_SETUP.md). Stayi
 hotspot for ever is a supported answer; the pinball is fully usable with no home network.
 
 ## Also in this repo — Arena Wall-Art LED
+**→ Full project documentation (FR): [WALL_PINBALL_PLAYFIELD.md](WALL_PINBALL_PLAYFIELD.md)**
+
 A separate, standalone firmware (`pio run -e arenaled_d1mini32`) that turns a Gottlieb **Arena**
 playfield into an illuminated wall piece: D1 Mini ESP32 (or S3/C3) + up to 150 SK6812MINI-RGBW
 on one data chain, pinball-style lighting modes mapped to the real inserts, Wi-Fi web UI + REST + OTA,
