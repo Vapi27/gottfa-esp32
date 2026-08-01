@@ -17,7 +17,8 @@ with the GottFA80 companion app.
 | LED boards | **made and in hand** — SK6812MINIRGBW-NW-P6 carrier, slot pads for the bus, single round pads for DATA in/out |
 | Controller | **WEMOS/LOLIN D1 Mini ESP32** (ESP32-WROOM-32, 4 MB), data on **GPIO27**. The board on the bench carries a **CP2104**, not the CH340C this doc assumed: `/dev/cu.usbserial-*`, MAC `68:09:47:48:7a:1c`, ESP32-D0WD-V3 rev 3.1, 4 MB flash. Batches vary — do not hard-code the bridge. |
 | Firmware | complete, builds for 4 targets, adversarially reviewed (5 defects found and fixed before first power-on) |
-| Hardware bring-up | **34 pixels chained and working** (2026-07-31) — see "Measured on hardware" below |
+| Hardware bring-up | **41 pixels chained and working** (2026-08-01) — main playfield plus the upper deck; 34 placed on inserts, the 7 newest still to map |
+| Attract mode | **Arena's own**, captured from the game ROM and replayed on the wall (§7) |
 
 ### Measured on hardware — 2026-07-31, one LED board
 
@@ -71,7 +72,10 @@ brightness, which is the easiest point to check it against).
       geometric `arena` mode confirmed running off it (current swings 56-123 mA
       as the wave crosses, which a chain-order effect would not do)
 - [x] **Arena's own attract mode**, captured from the ROM and replayed on the wall
-- [ ] Remaining inserts placed, boot preset saved
+- [x] **Arena's own attract mode** captured from the ROM and replayed (§7)
+- [x] Incandescent filament model — black-body colour, T^4 luminance, radiative decay
+- [x] Per-insert colour and per-insert renaming, edited on the plan
+- [ ] Remaining inserts placed (7 upper-deck pixels outstanding), boot preset saved
 - [ ] V2 ideas: motion sensor, audio-reactive, MQTT / Home Assistant
 
 **Next action: populate the playfield** (§3 and §8 step 4). The electrical design
@@ -632,6 +636,59 @@ order bottom-left → up the playfield → back panel:
 right-orbit, arena-letters, top-lanes, bonus-ladder, center-star, ramp, apron,
 wash`. Rename and re-cut them to your actual Arena layout — nothing in the
 firmware depends on those names.
+
+### Editing the inserts
+
+The plan does two jobs behind a mode switch in the wizard.
+
+**Place pixels** is the walk described above. **Edit inserts** selects an insert
+instead, lights whichever pixel sits on it so you can see what you are touching,
+and lets you change two things about it:
+
+**Its name.** The shipped labels are derived from the Visual Pinball table plus
+PinMAME's `GTS80_lamp2m` offset, and that is a **guess**: it matched the one
+insert checked against the real playfield and missed another, so the offset is
+not the constant it looks like. The machine's own documentation is the
+authority, and only its owner has it. A rename overrides the shipped label and
+persists in NVS; `lamp` — the index the ROM sequence is addressed by — is never
+touched, so renaming cannot break the attract mode. `/api/latch` accepts either
+name.
+
+**Its colour.** On a real playfield the colour is the moulded plastic, so it
+belongs to the insert and survives re-routing the chain. It **multiplies** the
+bulb rather than replacing it: the plastic sets the hue, the filament sets how
+hard it is lit. An insert with no colour shows the bulb's own, which is the
+right default — a wall where every insert is tinted looks like a light show, one
+where a few are looks like a playfield.
+
+    /api/insert?ins=6&name=L48&r=255&g=0&b=0&w=0
+    /api/insert?ins=6&clear=1
+
+### Lamps latched from the last game
+
+A machine that has been played does not return to a virgin attract: some lamps
+stay lit from the last game. A capture taken from a cold boot cannot contain
+that, which is why the LOCK "L" was missing on the wall while it is lit on the
+real machine — confirmed in the emulator, where a coin and a START light exactly
+that lamp.
+
+Rather than doctor the captured sequence, those lamps are held lit on top of it:
+
+    /api/latch?n=L9,L48      hold these lit through attract (machine's names)
+    /api/latch?clear=1       release them
+
+Which keeps "this is the ROM" and "this is my machine" true at the same time.
+
+### Live look controls
+
+Four settings, all in NVS, all reachable from the web UI, none needing a reflash:
+
+| | |
+|---|---|
+| **Glow** (`gi`) | general illumination behind the attract. A real Arena's GI stays lit, so inserts the ROM never drives still glow — but a wall piece that never goes fully dark is taste. 0 is properly off. |
+| **Warmth** (`warm`) | which die carries a hot filament. 0 is the pure spectral split, which is colorimetrically right and looks orange; 255 hands it to the white die. Both ends are the same black-body curve. |
+| **Filament** (`inc`) | the incandescent simulation itself. Off is a plain switch — no thermal lag, no colour ramp — which suits inserts that carry their own colours. |
+| **Speed** | scales the ROM sequence. 128 is the machine's real rate. |
 
 ### REST API
 
