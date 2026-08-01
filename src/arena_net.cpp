@@ -376,14 +376,15 @@ void begin() {
         } else {
           uint16_t hdr[2] = { 0, 0 };
           f.read((uint8_t*)hdr, 4);
-          ok = hdr[0] > 0 && hdr[1] > 0 && f.size() == (size_t)4 + (size_t)hdr[1] * 8;
+          ok = hdr[0] > 0 && hdr[1] > 0 && hdr[1] <= ARENA_ATTRACT_MAX_FRAMES &&
+               f.size() == (size_t)4 + (size_t)hdr[1] * 8;
         }
         f.close();
       }
       if (!ok) {
         LittleFS.remove(tmp);
         r->send(400, "text/plain", pf ? "not a valid pf.json (needs a non-empty inserts array)"
-                                      : "not a valid attract.bin (u16 step, u16 frames, frames x u64)");
+                                      : "not a valid attract.bin (u16 step, u16 frames <= 12288, frames x u64)");
         return;
       }
       LittleFS.remove(dst);

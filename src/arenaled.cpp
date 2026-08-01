@@ -807,7 +807,14 @@ uint32_t frameCount() { return s_frames; }
 uint16_t fps()        { return s_fps; }
 
 void save() {
-  s_prefs.putUChar("mode",   (uint8_t)s_mode);
+  // Compare-and-clear: a setter on the HTTP task can re-arm s_dirtyAt while the
+  // multi-millisecond NVS write below is in flight; clearing unconditionally at
+  // the end would discard that change until the next unrelated save.
+  const uint32_t dirtyAtEntry = s_dirtyAt;
+  // By NAME, not by number: inserting MODE_MUSIC mid-enum silently remapped
+  // every board whose NVS held mode=6 (TEST before, MUSIC after). Names survive
+  // enum surgery; the numeric key is still read once for migration.
+  s_prefs.putString("modeN", modeName(s_mode));
   s_prefs.putUChar("bright", s_bright);
   s_prefs.putUChar("speed",  s_speed);
   s_prefs.putUChar("gi",     s_gi);
@@ -818,12 +825,17 @@ void save() {
   s_prefs.putUShort("budget", s_budget);
   s_prefs.putBytes("color", &s_color, sizeof(s_color));
   s_prefs.putString("order", s_order);
-  s_dirtyAt = 0;
+  if (s_dirtyAt == dirtyAtEntry) s_dirtyAt = 0;
 }
 
 void begin() {
   s_prefs.begin("arena", false);
-  s_mode   = (Mode)s_prefs.getUChar("mode", (uint8_t)MODE_CLASSIC);
+  {
+    String mn = s_prefs.getString("modeN", "");
+    Mode m = mn.length() ? modeFromName(mn.c_str()) : MODE_COUNT;
+    if (m == MODE_COUNT) m = (Mode)s_prefs.getUChar("mode", (uint8_t)MODE_CLASSIC);
+    s_mode = (m < MODE_COUNT) ? m : MODE_CLASSIC;
+  }
   if (s_mode >= MODE_COUNT) s_mode = MODE_CLASSIC;
   s_bright = s_prefs.getUChar("bright", ARENA_BRIGHT_DEFAULT);
   s_speed  = s_prefs.getUChar("speed",  ARENA_SPEED_DEFAULT);
@@ -932,10 +944,18 @@ void tick() {
 #if ARENA_SOFTSTART_MS > 0
   // Soft start: ease the chain up over the first second so 100+ pixels lighting
   // at once can't trip the PSU's over-current hiccup or slam the bulk caps.
-  if (!s_bootMs) s_bootMs = now ? now : 1;   // first frame: arm the ramp here
-  uint32_t sinceBoot = now - s_bootMs;
-  if (sinceBoot < ARENA_SOFTSTART_MS)
-    gain = (uint8_t)((uint32_t)gain * sinceBoot / ARENA_SOFTSTART_MS);
+  // Latched once done: deriving "still ramping?" from millis() forever re-fires
+  // the ramp at every 49.7-day u32 wrap - the wall would blink to black for a
+  // second every seven weeks, reading as a mains glitch.
+  static bool rampDone = false;
+  if (!rampDone) {
+    if (!s_bootMs) s_bootMs = now ? now : 1;   // first frame: arm the ramp here
+    uint32_t sinceBoot = now - s_bootMs;
+    if (sinceBoot < ARENA_SOFTSTART_MS)
+      gain = (uint8_t)((uint32_t)gain * sinceBoot / ARENA_SOFTSTART_MS);
+    else
+      rampDone = true;
+  }
 #endif
   applyGainGamma(s_frame, gain);
   s_amps = meterAndLimit(s_frame);

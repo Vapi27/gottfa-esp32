@@ -19,6 +19,10 @@
 //  save 17 KB on a board with 200 KB free would be a poor trade.
 // ============================================================================
 
+// 12288 frames = 10 min at 50 ms = 96 KB - comfortably inside the ~190 KB free
+// heap of the non-PSRAM boards, and far beyond any attract loop worth storing.
+static const uint16_t ARENA_ATTRACT_MAX_FRAMES = 12288;
+
 namespace arenaattract {
 
 void     begin();                  // load /arena_attract.bin if present

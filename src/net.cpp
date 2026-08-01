@@ -17,6 +17,7 @@
 #include "fpgalink.h"
 #include "dispinject.h"
 #include "coiltest.h"
+#include "gamedata.h"
 #include "wifiprov.h"
 #ifndef BOARD_C3
 #include <SD.h>
@@ -84,8 +85,15 @@ static void wavJanitor() {
 static uint32_t s_holdSince = 0;
 static const uint32_t HOLD_MAX_MS = 300000;   // 5 min, then netLoop() releases
 
+// Pending post-OTA reboot: millis() at which netLoop() should restart the chip, 0 = none.
+// The delay only has to outlast one flush of a ~20-byte response; 400 ms is two orders of
+// magnitude more than that and still imperceptible to whoever is watching the upload.
+static volatile uint32_t s_otaRebootAt = 0;
+static const uint32_t OTA_REBOOT_GRACE_MS = 400;
+
 // /fsup upload slot (see the upload handler): one File, one uploader at a time.
 static bool     s_fsup_busy  = false;
+static String   s_fsup_last;    // path of the file being written, for the post-upload reload
 static uint32_t s_fsup_touch = 0;
 static File    *s_fsup_file  = nullptr;
 
@@ -1130,12 +1138,20 @@ void netBegin() {
   // --- Déploiement: OTA firmware update (POST a firmware .bin). Fails gracefully if the
   //     partition scheme has no OTA slot (Update.begin returns false) -> never bricks. To
   //     enable real OTA: set board_build.partitions to an OTA scheme + one USB flash first.
+  //     The reboot is DEFERRED to netLoop() on purpose. r->send() only QUEUES the response;
+  //     the bytes leave when the socket is next writable, which is the async task's job --
+  //     the very task this callback runs on. Sleeping here and restarting therefore killed
+  //     the task before it could flush, so every successful update answered with an empty
+  //     body and both pstore and curl reported an OTA failure that had in fact worked.
+  //     Ground-truthed on hardware 2026-07-30: real OTAs read as FAIL, and one was
+  //     diagnosed as a bricked board. Hand the restart to loopTask and let the async task
+  //     finish its write.
   server.on("/ota", HTTP_POST,
     [](AsyncWebServerRequest *r){
       bool ok = !Update.hasError();
       AsyncWebServerResponse *res = r->beginResponse(200, "text/plain", ok ? "OK — redémarrage…" : "ÉCHEC OTA (partition ?)");
       res->addHeader("Connection","close"); r->send(res);
-      if (ok) { delay(150); ESP.restart(); }
+      if (ok) s_otaRebootAt = millis() + OTA_REBOOT_GRACE_MS;
     },
     [](AsyncWebServerRequest *r, String fn, size_t idx, uint8_t *data, size_t len, bool done){
       if (!idx) { Serial.printf("[ota] begin %s\n", fn.c_str());
@@ -1150,6 +1166,8 @@ void netBegin() {
   //       GET /coiltest                -> live status + last results (JSON)
   //       GET /coiltest?do=learn[&ms=] -> build the per-coil switch signature, save it
   //       GET /coiltest?do=test[&ms=]  -> replay it and report per coil
+  //       GET /coiltest?do=test&only=inc -> retry only the coils whose precondition failed
+  //       GET /coiltest?do=test&only=0x12 -> retry a chosen subset (bit0 = coil 1)
   //       GET /coiltest?do=abort       -> stop the run in progress
   //       GET /coiltest?key=NN         -> load another game's saved signature
   //     Like the deferred-job routes, the handler only validates and arms: it answers
@@ -1163,7 +1181,22 @@ void netBegin() {
     if (act == "learn" || act == "test") {
       int key = r->hasParam("key") ? atoi(r->getParam("key")->value().c_str()) : coiltest::keyFor();
       uint8_t ms = r->hasParam("ms") ? (uint8_t)atoi(r->getParam("ms")->value().c_str()) : 0;
-      const char *err = coiltest::start(act == "learn", key, ms);
+      // only=0x1A2 runs just those coils; only=inc reruns the ones that came back
+      // "précondition non remplie", which is the loop the operator actually needs: set the
+      // playfield up, test, rearrange, retry ONLY what could not be observed. Re-running
+      // all nine would re-consume the mechanisms that had just passed.
+      uint16_t only = 0;
+      if (r->hasParam("only")) {
+        String v = r->getParam("only")->value();
+        only = (v == "inc") ? coiltest::inconclusiveMask()
+                            : (uint16_t)strtoul(v.c_str(), nullptr, 0);
+        if (v == "inc" && !only) {
+          r->send(409, "application/json",
+                  "{\"accepted\":false,\"err\":\"aucune bobine en attente de précondition\"}");
+          return;
+        }
+      }
+      const char *err = coiltest::start(act == "learn", key, ms, only);
       char j[320];
       if (err) {
         snprintf(j, sizeof(j), "{\"accepted\":false,\"err\":\"%s\"}", err);
@@ -1178,7 +1211,12 @@ void netBegin() {
       }
       return;
     }
-    if (r->hasParam("key") && !coiltest::busy())
+    // ?game=NN names the title and REMEMBERS it, for the common case where the FPGA never
+    // announces a game number (it only emits one when game_select changes). ?game=-1 clears.
+    // ?key=NN just switches the slot being looked at, without remembering anything.
+    if (r->hasParam("game") && !coiltest::busy())
+      coiltest::setGame(atoi(r->getParam("game")->value().c_str()));
+    else if (r->hasParam("key") && !coiltest::busy())
       coiltest::load(atoi(r->getParam("key")->value().c_str()));
     r->send(200, "application/json", coiltest::statusJson());
   });
@@ -1382,6 +1420,7 @@ void netBegin() {
         if (s_fsup_busy) { Serial.println("[fsup] refused: another upload is in progress"); return; }
         String path = r->hasParam("path") ? r->getParam("path")->value() : ("/" + fn);
         if (!path.startsWith("/")) path = "/" + path;
+        s_fsup_last = path;
         f = LittleFS.open(path, "w");
         s_fsup_busy = (bool)f;
         s_fsup_file = &f;
@@ -1393,6 +1432,15 @@ void netBegin() {
       if (done) {
         if (f) { f.close(); Serial.printf("[fsup] ok %u bytes\n", (unsigned)(idx+len)); }
         s_fsup_busy = false; s_fsup_file = nullptr;
+        // A game table is read once, at load. Uploading a corrected one therefore changed
+        // nothing until the next reboot or game switch, and the board went on serving the
+        // OLD names -- which looks exactly like the upload having failed. Observed while
+        // deploying the English name tables, 2026-07-30. Re-read it here so what was just
+        // sent is what is in use.
+        if (s_fsup_last.startsWith("/gd-")) {
+          int g = coiltest::keyFor();
+          if (gamedata::load(g)) Serial.printf("[fsup] fiche de jeu %d rechargée\n", g);
+        }
       }
     });
 
@@ -1435,6 +1483,13 @@ void netBegin() {
 
 volatile bool g_norloop = false;
 void netLoop() {
+  // Deferred post-OTA reboot: the async task has had time to flush the 200 by now, so the
+  // uploader sees a real answer instead of an empty body (see the /ota handler).
+  if (s_otaRebootAt && (int32_t)(millis() - s_otaRebootAt) >= 0) {
+    Serial.println("[ota] réponse envoyée, redémarrage");
+    s_otaRebootAt = 0;
+    ESP.restart();
+  }
   wifiprov::tick();          // scans/connects run HERE, never inside an HTTP handler
   ws.cleanupClients(); diag::tick();
   // Deferred work, on loopTask (priority 1) instead of the AsyncTCP service task

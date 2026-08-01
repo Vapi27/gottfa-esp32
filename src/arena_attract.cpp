@@ -35,7 +35,11 @@ void begin() {
   // A truncated or mis-sized file must not be half-loaded: a partial capture
   // would play as a wall that freezes halfway through the sequence, which reads
   // as a firmware bug rather than as a bad file.
-  if (!n || !s_step || f.size() != (size_t)4 + (size_t)n * 8) {
+  // Cap against RAM, not just self-consistency: a 500 KB capture is a valid
+  // file and an impossible malloc on a non-PSRAM board - accepting it would
+  // brick the feature silently at every boot.
+  if (!n || n > ARENA_ATTRACT_MAX_FRAMES || !s_step ||
+      f.size() != (size_t)4 + (size_t)n * 8) {
     Serial.printf("[rom] %s malformed (%u frames, %u bytes) — ignored\n",
                   PATH, n, (unsigned)f.size());
     f.close();

@@ -8,6 +8,7 @@
 #include "fpgalink.h"
 #include "tourney.h"
 #include "dispinject.h"
+#include "gamedata.h"
 #include "coiltest.h"
 
 // ===========================================================================
@@ -356,6 +357,10 @@ void diag::setInfo(const char*f,uint32_t id,const char*m,const char*i){
 void diag::onConnect(AsyncWebSocketClient*c){
   sendInfo(c); sendArr("lamps",lamps,6,c); sendArr("sw",sw,8,c);
   sendArr("sound",snd,4,c); sendArr("dip",dipv,4,c); sendSndInfo(c); sendSysInfo(c); sendTourney(c);
+  // Names from the title's own manual (gamedata.h): they land on the switch matrix, the
+  // lamp grid AND the coil pad, so "SW 43" reads "éjecteur gauche (fire pit)" everywhere
+  // instead of only inside the coil test.
+  { String n = gamedata::namesJson(); txt(c, n); }
   sendCoilTest(c);                             // learned signatures + last run's verdicts
   sendTa();                                    // live time-attack state (countdown, arm, FPGA flags)
   JsonDocument d; d["t"]="status"; d["outputs"]=outputs?1:0; d["wd"]=wd_tripped?1:0;
@@ -416,16 +421,46 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
   else if(!strcmp(cmd,"ct_learn") || !strcmp(cmd,"ct_test")) {
     bool learn = (cmd[3]=='l');
     int  key   = d["key"].is<int>() ? (int)d["key"] : coiltest::keyFor();
-    const char* err = coiltest::start(learn, key, (uint8_t)(d["ms"] | 0));
+    // "only":"inc" retries just the coils that came back "précondition non remplie", after
+    // the operator has rearranged the playfield. Re-running everything would re-consume
+    // the mechanisms that had already passed and turn their verdicts back into unknowns.
+    uint16_t only = 0;
+    if (d["only"].is<const char*>() && !strcmp(d["only"], "inc")) only = coiltest::inconclusiveMask();
+    else if (d["only"].is<int>())                                 only = (uint16_t)(int)d["only"];
+    const char* err = coiltest::start(learn, key, (uint8_t)(d["ms"] | 0), only);
     JsonDocument a; a["t"]="ctstart"; a["ok"]=err?0:1; a["learn"]=learn?1:0;
-    a["key"]=key; a["err"]=err?err:"";
+    a["key"]=key; a["only"]=only; a["err"]=err?err:"";
     String s; serializeJson(a,s); txt(nullptr,s);
+    // start() may have swapped in another title's table; re-broadcast so the labels on
+    // screen belong to the game actually being tested.
+    { String n = gamedata::namesJson(); txt(nullptr, n); }
+    sendCoilTest(nullptr);
+  }
+  // The UI is bilingual, and the per-title PROSE (preconditions, "why this can never be
+  // tested") lives on the board in both languages -- so the board has to be told which one.
+  // NAMES are never translated: they are the manual's own wording (see gamedata.h).
+  else if(!strcmp(cmd,"lang")) {
+    gamedata::setLang(d["v"] | "fr");
+    { String n = gamedata::namesJson(); txt(nullptr, n); }
     sendCoilTest(nullptr);
   }
   else if(!strcmp(cmd,"ct_abort")) { coiltest::abort(); sendCoilTest(nullptr); }
   else if(!strcmp(cmd,"ct_get"))   {                       // also: switch the loaded slot
     if(d["key"].is<int>() && !coiltest::busy()) coiltest::load((int)d["key"]);
     sendCoilTest(c);
+  }
+  // Name the title by hand and remember it. The FPGA only reports its game number when
+  // game_select CHANGES, so a board that was merely switched on says nothing and has no
+  // game table -- which is exactly when the operator most needs the names and the
+  // preconditions. -1 clears the override and hands authority back to the FPGA.
+  else if(!strcmp(cmd,"ct_game")) {
+    int g = d["g"].is<int>() ? (int)d["g"] : -1;
+    bool ok = coiltest::setGame(g);
+    JsonDocument a; a["t"]="ctgame"; a["ok"]=ok?1:0; a["g"]=coiltest::gameOverride();
+    if(!ok) a["err"]="test en cours";
+    String s; serializeJson(a,s); txt(nullptr,s);
+    { String n = gamedata::namesJson(); txt(nullptr, n); }
+    sendCoilTest(nullptr);
   }
   else if(!strcmp(cmd,"sound")) {
     if(!outputs) return; int n=d["n"]|0;
