@@ -77,6 +77,9 @@
       <input type="range" id="gi" min="0" max="255"><output id="o-gi"></output></div>
     <div class="row"><label>Warmth</label>
       <input type="range" id="warm" min="0" max="255"><output id="o-warm"></output></div>
+    <div class="row"><label>Filament</label>
+      <button id="incbtn" onclick="push('inc=' + (st.inc ? 0 : 1))">&ndash;</button>
+      <span class="hint" style="margin:0">thermal lag and colour ramp of a real bulb</span></div>
     <div class="row"><label>Power</label>
       <div class="bar"><i id="pbar" style="width:0"></i></div><output id="o-pow"></output></div>
     <p class="hint">The firmware meters every frame and dims the whole wall rather than
@@ -142,8 +145,24 @@
     </div>
 
     <div id="wz-body" style="display:none">
+      <div class="modes" style="margin-bottom:8px">
+        <button id="wz-m-place" onclick="wzSetMode('place')">Place pixels</button>
+        <button id="wz-m-edit"  onclick="wzSetMode('edit')">Edit inserts</button>
+      </div>
       <p class="hint" id="wz-say">Look at the playfield: <b>one pixel is blinking white</b>.
         Click the insert it sits under.</p>
+      <div id="wz-edit" style="display:none">
+        <div class="row"><label>Insert</label>
+          <input type="text" id="ed-name" maxlength="7" placeholder="name from your manual">
+          <button onclick="edApply()">Rename</button></div>
+        <div class="row"><label>Colour</label>
+          <input type="color" id="ed-rgb" style="width:64px;height:34px;padding:2px">
+          <output id="ed-w-o" style="width:auto">white</output>
+          <input type="range" id="ed-w" min="0" max="255" value="0">
+          <button onclick="edApply()">Set</button>
+          <button onclick="edClear()">Clear</button></div>
+        <p class="hint" id="ed-say">Click an insert on the plan to edit it.</p>
+      </div>
       <div id="wz-plan"></div>
       <div class="modes">
         <button onclick="wzSkip()">Not on an insert</button>
@@ -223,6 +242,8 @@ function render(s) {
 
   if (Date.now() < holdUntil) return;            // don't stomp a slider being dragged
   set('bright', s.bright); set('speed', s.speed); set('gi', s.gi); set('warm', s.warm);
+  $('incbtn').textContent = s.inc ? 'incandescent: ON' : 'incandescent: off';
+  $('incbtn').classList.toggle('on', !!s.inc);
   set('r', s.r); set('g', s.g); set('b', s.b); set('w', s.w);
   if (document.activeElement !== $('count'))  $('count').value  = s.count;
   if (document.activeElement !== $('budget')) $('budget').value = s.budget;
@@ -255,7 +276,7 @@ function pfLoad() {
     })
   ]).then(wzDraw).catch(() => {});
 }
-function wzStart() { $('wz-body').style.display = ''; pfLoad().then(() => wzGo(wz.at)); }
+function wzStart() { $('wz-body').style.display = ''; wzSetMode('place'); pfLoad().then(() => wzGo(wz.at)); }
 // Leaving the wizard has to put the wall back the way it was: the spotlight is
 // an overlay that outlives the panel being closed, so a wizard you merely
 // navigate away from leaves one pixel blinking white for ten minutes.
@@ -296,6 +317,55 @@ function pfOwner() {
   return o;
 }
 
+
+// --- insert editor -------------------------------------------------------
+// The plan does double duty: placing pixels, and editing what the inserts ARE.
+// The shipped labels come from the VP table plus PinMAME's lamp offset and are
+// a guess — they matched one insert against the real playfield and missed
+// another — so the machine's documentation has to be able to overrule them.
+// Colour belongs here too: on a real table it is the moulded plastic, a
+// property of the insert, not of whichever pixel happens to sit behind it.
+let wzMode = 'place', edSel = -1;
+
+function wzSetMode(m) {
+  wzMode = m;
+  $('wz-m-place').classList.toggle('on', m === 'place');
+  $('wz-m-edit').classList.toggle('on', m === 'edit');
+  $('wz-edit').style.display = m === 'edit' ? '' : 'none';
+  if (m === 'place') wzGo(wz.at); else { wzStop(); wzDraw(); }
+}
+function wzClick(i) { if (wzMode === 'place') wzAssign(i); else edSelect(i); }
+
+function edSelect(i) {
+  edSel = i;
+  const p = PF[i] || {};
+  $('ed-name').value = p.n || '';
+  const c = p.c || [0, 0, 0, 0];
+  $('ed-rgb').value = '#' + [c[0], c[1], c[2]].map(v => (+v).toString(16).padStart(2, '0')).join('');
+  $('ed-w').value = c[3] || 0;
+  $('ed-say').innerHTML = 'Editing <b>' + (p.n || '?') + '</b>' +
+    (p.d && p.d !== p.n ? ' (shipped: ' + p.d + ')' : '') +
+    '. Its lamp in the sequence never changes &mdash; only the label and the colour do.';
+  // Light the pixel sitting on it, if any, so you can see what you are editing.
+  const own = pfOwner()[i];
+  if (own !== undefined) api('/api/identify?led=' + own + '&ms=60000');
+  wzDraw();
+}
+function edApply() {
+  if (edSel < 0) { toast('click an insert first'); return; }
+  const h = $('ed-rgb').value.replace('#', '');
+  const q = '/api/insert?ins=' + edSel +
+            '&name=' + encodeURIComponent($('ed-name').value.trim()) +
+            '&r=' + parseInt(h.slice(0, 2), 16) + '&g=' + parseInt(h.slice(2, 4), 16) +
+            '&b=' + parseInt(h.slice(4, 6), 16) + '&w=' + $('ed-w').value;
+  fetch(q).then(r => r.json()).then(j => { PF = j.inserts || []; wzDraw(); toast('saved'); });
+}
+function edClear() {
+  if (edSel < 0) return;
+  fetch('/api/insert?ins=' + edSel + '&clear=1').then(r => r.json())
+    .then(j => { PF = j.inserts || []; edSelect(edSel); toast('cleared'); });
+}
+
 const PF_KIND = { i: '#ff9b21', l: '#ffc046', f: '#e0483a' };
 
 function wzDraw() {
@@ -320,10 +390,12 @@ function wzDraw() {
     // "8" could mean insert L8 or pixel 8, with nothing to tell them apart.
     // Which pixel sits there is secondary, so it goes in the tooltip and in the
     // ring, not in the label.
-    s += '<g onclick="wzAssign(' + i + ')" style="cursor:pointer">' +
+    const pc = p.c ? 'rgb(' + Math.min(255, p.c[0] + p.c[3]) + ',' + Math.min(255, p.c[1] + p.c[3]) +
+                     ',' + Math.min(255, p.c[2] + p.c[3]) + ')' : null;
+    s += '<g onclick="wzClick(' + i + ')" style="cursor:pointer">' +
          '<title>' + p.n + (taken ? ' - pixel ' + own : ' - free') + '</title>' +
-         '<circle cx="' + cx + '" cy="' + cy + '" r="30" fill="' + (taken ? col : '#241c16') +
-         '" stroke="' + (taken ? '#efe6da' : col) + '" stroke-width="' + (taken ? 5 : 3) + '"/>' +
+         '<circle cx="' + cx + '" cy="' + cy + '" r="30" fill="' + (pc || (taken ? col : '#241c16')) +
+         '" stroke="' + (i === edSel ? '#7fb3ff' : (taken ? '#efe6da' : col)) + '" stroke-width="' + (i === edSel ? 7 : (taken ? 5 : 3)) + '"/>' +
          '<text x="' + cx + '" y="' + cy + '" font-size="26" font-weight="700" text-anchor="middle" ' +
          'dominant-baseline="central" fill="' + (taken ? '#0d0b09' : '#9a8a78') + '">' +
          p.n.replace(/^L/, '') + '</text></g>';

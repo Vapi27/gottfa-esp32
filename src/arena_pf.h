@@ -37,6 +37,11 @@ struct Insert {
   float x, y;        // 0..1, origin top-left: y grows towards the flippers
 };
 
+// Colour of the plastic over an insert, 0,0,0,0 = none set (use the bulb's own
+// colour). It belongs to the INSERT, not to the pixel: on a real playfield the
+// colour is the moulded plastic, so it must survive re-routing the chain.
+struct Colour { uint8_t r, g, b, w; };
+
 void begin();                       // load the insert table + the LED assignment
 
 uint8_t        insertCount();
@@ -55,6 +60,23 @@ bool xy(uint16_t led, float& x, float& y);
 // flasher or has not been placed. This is what lets a lamp mask captured from
 // the ROM be painted straight onto the wall.
 int lampOfLed(uint16_t led);
+
+// The label an insert carries. The shipped one is derived from the VP table
+// plus PinMAME's GTS80_lamp2m offset, which is a GUESS: it matched the one
+// insert we could check against the real playfield and failed on another. The
+// machine's own documentation is the authority and only the owner has it, so
+// the label is editable and the override wins. Nothing computes with it — the
+// ROM sequence is indexed by `lamp`, never by the name.
+const char* nameOf(uint8_t ins);
+bool  setName(uint8_t ins, const char* name);   // empty string restores the shipped one
+bool  saveNames();
+
+Colour colourOf(uint8_t ins);            // 0,0,0,0 when the insert has no colour
+Colour colourOfLed(uint16_t led);
+bool   setColour(uint8_t ins, Colour c); // all zero clears it
+void   clearColours();
+String coloursJson();
+bool   saveColours();
 bool anyAssigned();
 
 String toJson();                    // {"leds":[{"i":0,"a":12},...]}

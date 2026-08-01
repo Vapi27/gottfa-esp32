@@ -67,6 +67,12 @@ uint8_t warm();
 // sequence.
 void     setLatched(uint64_t m);
 uint64_t latched();
+
+// Incandescent simulation on/off. Off is a plain switch: full level, no thermal
+// lag, no colour shift — which is what you want when the inserts carry their own
+// colours and you would rather see them cleanly than through a filament.
+void setIncandescent(bool on);
+bool incandescent();
 void    setSpeed(uint8_t s);               // 0..255 -> x0.25 .. x4
 uint8_t speed();
 void    setColor(Rgbw c);                  // base colour for CLASSIC / ATTRACT / ARENA

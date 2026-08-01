@@ -42,6 +42,7 @@ static String stateJson() {
   j += ",\"speed\":"  + String(arenaled::speed());
   j += ",\"gi\":"     + String(arenaled::gi());
   j += ",\"warm\":"   + String(arenaled::warm());
+  j += ",\"inc\":"    + String(arenaled::incandescent() ? 1 : 0);
   j += ",\"count\":"  + String(arenaled::count());
   j += ",\"max\":"    + String(LED_MAX);
   j += ",\"r\":" + String(c.r) + ",\"g\":" + String(c.g) +
@@ -130,6 +131,7 @@ void begin() {
     if (r->hasParam("speed"))  arenaled::setSpeed(param8(r, "speed", arenaled::speed()));
     if (r->hasParam("gi"))     arenaled::setGi(param8(r, "gi", arenaled::gi()));
     if (r->hasParam("warm"))   arenaled::setWarm(param8(r, "warm", arenaled::warm()));
+    if (r->hasParam("inc"))    arenaled::setIncandescent(r->getParam("inc")->value().toInt() != 0);
     if (r->hasParam("r") || r->hasParam("g") || r->hasParam("b") || r->hasParam("w")) {
       arenaled::Rgbw c = arenaled::color();
       c.r = param8(r, "r", c.r);
@@ -270,6 +272,28 @@ void begin() {
   //  /api/assign?led=N&ins=M      place one pixel (ins=none to unplace it)
   //  /api/ledmap/reset            forget every placement
   s_server.on("/api/pf", HTTP_GET, [](AsyncWebServerRequest* r) {
+    r->send(200, "application/json", arenapf::insertsJson());
+  });
+
+  // /api/insert?ins=N[&name=L48][&r=&g=&b=&w=][&clear=1]
+  // Edit one insert: its label (the machine's own, from the manual — the shipped
+  // one is a guess) and the colour of its plastic. clear=1 drops both back to
+  // the shipped label and no colour.
+  s_server.on("/api/insert", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("ins")) { r->send(400, "text/plain", "ins= required"); return; }
+    const int ins = r->getParam("ins")->value().toInt();
+    if (ins < 0 || ins >= arenapf::insertCount()) { r->send(400, "text/plain", "ins out of range"); return; }
+    if (r->hasParam("clear")) {
+      arenapf::setName((uint8_t)ins, "");
+      arenapf::setColour((uint8_t)ins, { 0, 0, 0, 0 });
+    } else {
+      if (r->hasParam("name")) arenapf::setName((uint8_t)ins, r->getParam("name")->value().c_str());
+      if (r->hasParam("r") || r->hasParam("g") || r->hasParam("b") || r->hasParam("w"))
+        arenapf::setColour((uint8_t)ins, { param8(r, "r", 0), param8(r, "g", 0),
+                                           param8(r, "b", 0), param8(r, "w", 0) });
+    }
+    arenapf::saveNames();
+    arenapf::saveColours();
     r->send(200, "application/json", arenapf::insertsJson());
   });
 

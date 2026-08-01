@@ -18,18 +18,26 @@ static const char* LEDS_PATH = "/arena_leds.json";   // legacy, read-only migrat
 static Preferences s_prefs;
 static const char* NVS_NS  = "arenapf";
 static const char* NVS_KEY = "ledmap";
+static const char* NVS_COL = "inscol";
+static const char* NVS_NAM = "insnam";
 
 static Insert  s_ins[INSERT_MAX];
 static uint8_t s_nIns = 0;
 static uint8_t s_led[LED_MAX];                       // chain index -> insert index
 static bool    s_any = false;
+static Colour  s_col[INSERT_MAX];      // per-insert plastic colour, all-zero = unset
+static char    s_nam[INSERT_MAX][NAME_LEN];  // owner's label, empty = use the shipped one
 
 uint8_t       insertCount()       { return s_nIns; }
 const Insert* insert(uint8_t i)   { return (i < s_nIns) ? &s_ins[i] : nullptr; }
 uint8_t       ledInsert(uint16_t led) { return (led < LED_MAX) ? s_led[led] : UNASSIGNED; }
 bool          anyAssigned()       { return s_any; }
 
+// Matches the label the owner sees first, then the shipped one, so /api/latch
+// keeps working with either.
 int indexOf(const char* name) {
+  for (uint8_t i = 0; i < s_nIns; i++)
+    if (s_nam[i][0] && strncmp(s_nam[i], name, NAME_LEN) == 0) return i;
   for (uint8_t i = 0; i < s_nIns; i++)
     if (strncmp(s_ins[i].name, name, NAME_LEN) == 0) return i;
   return -1;
@@ -53,6 +61,53 @@ void clearAssignment() {
   s_any = false;
 }
 
+const char* nameOf(uint8_t ins) {
+  if (ins >= s_nIns) return "";
+  return s_nam[ins][0] ? s_nam[ins] : s_ins[ins].name;
+}
+bool setName(uint8_t ins, const char* name) {
+  if (ins >= s_nIns) return false;
+  strncpy(s_nam[ins], name ? name : "", NAME_LEN - 1);
+  s_nam[ins][NAME_LEN - 1] = 0;
+  return true;
+}
+bool saveNames() { return s_prefs.putBytes(NVS_NAM, s_nam, sizeof(s_nam)) == sizeof(s_nam); }
+
+Colour colourOf(uint8_t ins) {
+  return (ins < s_nIns) ? s_col[ins] : Colour{ 0, 0, 0, 0 };
+}
+Colour colourOfLed(uint16_t led) {
+  const uint8_t a = ledInsert(led);
+  return (a == UNASSIGNED) ? Colour{ 0, 0, 0, 0 } : colourOf(a);
+}
+bool setColour(uint8_t ins, Colour c) {
+  if (ins >= s_nIns) return false;
+  s_col[ins] = c;
+  return true;
+}
+void clearColours() { memset(s_col, 0, sizeof(s_col)); }
+
+bool saveColours() {
+  return s_prefs.putBytes(NVS_COL, s_col, sizeof(s_col)) == sizeof(s_col);
+}
+// Only inserts that carry a colour, by the machine's own name: a fresh wall is
+// two bytes, and the UI never has to know the table's internal indices.
+String coloursJson() {
+  String j = "{\"colours\":[";
+  bool first = true;
+  for (uint8_t i = 0; i < s_nIns; i++) {
+    const Colour& c = s_col[i];
+    if (!(c.r | c.g | c.b | c.w)) continue;
+    if (!first) j += ',';
+    first = false;
+    j += "{\"n\":\"" + String(s_ins[i].name) + "\",\"i\":" + String(i) +
+         ",\"r\":" + String(c.r) + ",\"g\":" + String(c.g) +
+         ",\"b\":" + String(c.b) + ",\"w\":" + String(c.w) + "}";
+  }
+  j += "]}";
+  return j;
+}
+
 int lampOfLed(uint16_t led) {
   const uint8_t a = ledInsert(led);
   return (a == UNASSIGNED || a >= s_nIns) ? -1 : s_ins[a].lamp;
@@ -69,13 +124,24 @@ bool xy(uint16_t led, float& x, float& y) {
 // --- the fixed playfield table -------------------------------------------
 // Streamed back to the browser verbatim rather than re-serialised: it is
 // static data, and re-encoding 99 records would cost heap for nothing.
+// Built from memory rather than streamed from the file, so the owner's renames
+// and colours are part of the one description the UI reads. "d" is the shipped
+// label, kept so the UI can show what a rename replaced.
 String insertsJson() {
-  if (!LittleFS.exists(PF_PATH)) return String("{\"inserts\":[]}");
-  File f = LittleFS.open(PF_PATH, "r");
-  if (!f) return String("{\"inserts\":[]}");
-  String s = f.readString();
-  f.close();
-  return s;
+  String j = "{\"inserts\":[";
+  for (uint8_t i = 0; i < s_nIns; i++) {
+    if (i) j += ',';
+    const Colour& c = s_col[i];
+    j += "{\"n\":\"" + String(nameOf(i)) + "\",\"d\":\"" + String(s_ins[i].name) +
+         "\",\"l\":" + String(s_ins[i].lamp) +
+         ",\"k\":\"" + String(s_ins[i].kind) + "\"" +
+         ",\"x\":" + String(s_ins[i].x, 4) + ",\"y\":" + String(s_ins[i].y, 4);
+    if (c.r | c.g | c.b | c.w)
+      j += ",\"c\":[" + String(c.r) + "," + String(c.g) + "," + String(c.b) + "," + String(c.w) + "]";
+    j += "}";
+  }
+  j += "]}";
+  return j;
 }
 
 static bool loadInserts() {
@@ -174,8 +240,14 @@ static bool loadAssignment() {
 void begin() {
   s_prefs.begin(NVS_NS, false);
   clearAssignment();
+  clearColours();
+  memset(s_nam, 0, sizeof(s_nam));
   const bool haveTable = loadInserts();
   const bool haveMap   = haveTable && loadAssignment();
+  if (s_prefs.getBytesLength(NVS_COL) == sizeof(s_col))
+    s_prefs.getBytes(NVS_COL, s_col, sizeof(s_col));
+  if (s_prefs.getBytesLength(NVS_NAM) == sizeof(s_nam))
+    s_prefs.getBytes(NVS_NAM, s_nam, sizeof(s_nam));
   uint16_t n = 0;
   for (uint16_t i = 0; i < LED_MAX; i++) if (s_led[i] != UNASSIGNED) n++;
   Serial.printf("[pf] %u inserts%s, %u pixels placed\n",

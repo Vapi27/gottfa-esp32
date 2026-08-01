@@ -28,6 +28,7 @@ static uint8_t  s_bright    = ARENA_BRIGHT_DEFAULT;
 static uint8_t  s_gi        = ARENA_GI_DEFAULT;   // GI level under ROM attract, 0 = off
 static uint8_t  s_warm      = ARENA_WARM_DEFAULT; // 0 = spectral/orange, 255 = white-forward
 static uint64_t s_latched   = 0;                 // lamps held lit from the last game
+static bool     s_inc       = true;              // incandescent simulation
 static uint8_t  s_speed     = ARENA_SPEED_DEFAULT;
 static Rgbw     s_color     = { ARENA_WARM_R, ARENA_WARM_G, ARENA_WARM_B, ARENA_WARM_W };
 static uint16_t s_count     = LED_COUNT_DEFAULT;
@@ -324,8 +325,24 @@ static void fxRomAttract(Rgbw* buf) {
   for (uint16_t i = 0; i < s_count; i++) {
     const int lamp = arenapf::lampOfLed(i);
     const bool on  = (lamp >= 0) && ((mask >> lamp) & 1ULL);
-    T[i] = filamentStep(T[i], on, dt);
-    buf[i] = (lamp < 0) ? giC : addSat(giC, filament(T[i]));
+
+    // With the simulation off this is a plain switch: no thermal lag, no colour
+    // ramp. Worth having, because an insert that carries its own colour is
+    // usually meant to be seen as that colour rather than through a filament.
+    T[i] = s_inc ? filamentStep(T[i], on, dt) : (on ? 1.0f : 0.0f);
+    if (lamp < 0) { buf[i] = giC; continue; }
+
+    const arenapf::Colour pc = arenapf::colourOfLed(i);
+    if (pc.r | pc.g | pc.b | pc.w) {
+      // The insert's plastic decides the hue, the filament only decides how hard
+      // it is lit — which is how a real playfield works: one warm bulb behind a
+      // moulded colour, not a coloured bulb.
+      const Rgbw f = filament(T[i]);
+      const float lvl = (float)max(max(f.r, f.g), max(f.b, f.w)) / 255.0f;
+      buf[i] = addSat(giC, scale(Rgbw{ pc.r, pc.g, pc.b, pc.w }, lvl));
+    } else {
+      buf[i] = addSat(giC, filament(T[i]));
+    }
   }
 }
 
@@ -583,6 +600,8 @@ void setWarm(uint8_t w) { s_warm = w; markDirty(); }
 uint8_t warm() { return s_warm; }
 void setLatched(uint64_t m) { s_latched = m; markDirty(); }
 uint64_t latched() { return s_latched; }
+void setIncandescent(bool on) { s_inc = on; markDirty(); }
+bool incandescent() { return s_inc; }
 void setSpeed(uint8_t s) { s_speed = s; markDirty(); }
 uint8_t speed() { return s_speed; }
 void setColor(Rgbw c) { s_color = c; markDirty(); }
@@ -676,6 +695,7 @@ void save() {
   s_prefs.putUChar("gi",     s_gi);
   s_prefs.putUChar("warm",   s_warm);
   s_prefs.putBytes("latched", &s_latched, sizeof(s_latched));
+  s_prefs.putUChar("inc", s_inc ? 1 : 0);
   s_prefs.putUShort("count", s_count);
   s_prefs.putUShort("budget", s_budget);
   s_prefs.putBytes("color", &s_color, sizeof(s_color));
@@ -693,6 +713,7 @@ void begin() {
   s_warm   = s_prefs.getUChar("warm",   ARENA_WARM_DEFAULT);
   if (s_prefs.getBytesLength("latched") == sizeof(s_latched))
     s_prefs.getBytes("latched", &s_latched, sizeof(s_latched));
+  s_inc = s_prefs.getUChar("inc", 1) != 0;
   s_count  = s_prefs.getUShort("count", LED_COUNT_DEFAULT);
   s_budget = s_prefs.getUShort("budget", LED_POWER_BUDGET_MA);
   if (s_count < 1 || s_count > LED_MAX) s_count = LED_COUNT_DEFAULT;
