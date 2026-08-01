@@ -140,7 +140,18 @@ def main(path):
         46: "I CENTER ROLLOVER", 47: "T RIGHT SIDE ROLLOVER",
         48: "L.OUTSIDE / R.RETURN ROLLOVER",
     }
-    AUTHOR_FIXES = { "L1": ("L9", 9), "L9": ("L9b", -1) }
+    # "L2" is the left OUTLANE insert (far left edge, mid-low). The manual has no
+    # insert lamp 2 — lamp 2 is a relay — and Gottlieb cross-wires outlanes:
+    # L48 = L.OUTSIDE (50,000) + R.RETURN, L44 = R.OUTSIDE + L.RETURN. So the
+    # bottom-left insert IS lamp 48, same wire as the right return across from
+    # it, which is exactly how the owner described it: "animate it like the one
+    # facing it".
+    AUTHOR_FIXES = { "L1": ("L9", 9), "L9": ("L9b", -1), "L2": ("L48b", 48) }
+    FUNC_BY_NAME = {
+        "L48b": "L.OUTSIDE ROLLOVER (50,000)",
+        "L48":  "R.RETURN ROLLOVER (LIGHT SPINNER)",
+        "L44":  "L.RETURN ROLLOVER (LIGHT SPINNER)",
+    }
 
     keep = []
     for it in sorted(items, key=lambda z: (z["y"], z["x"])):
@@ -155,7 +166,9 @@ def main(path):
         if name in AUTHOR_FIXES:
             name, lamp = AUTHOR_FIXES[name]
         rec = {"n": name, "l": lamp if 0 <= lamp < 64 else -1, "k": k}
-        if lamp in FUNC:
+        if name in FUNC_BY_NAME:
+            rec["f"] = FUNC_BY_NAME[name]
+        elif lamp in FUNC:
             rec["f"] = FUNC[lamp]
         rec["x"] = round(it["x"] / bounds["RGHT"], 4)
         rec["y"] = round(it["y"] / bounds["BOTM"], 4)
