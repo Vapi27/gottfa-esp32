@@ -42,8 +42,24 @@ comme un coût produit, pas comme un détail.
 
 ## Étapes
 
-- [ ] **P0 — outillage** : ESP-IDF v5.2.3 + esp-matter installés, exemple
-      `light` compilé pour ESP32 *(en cours sur la machine de dev)*
+- [x] **P0 — outillage prouvé** (2026-08-01, VPS 24 cœurs) : exemple `light`
+      compilé pour ESP32 — `light.bin` 1,53 Mo. **Matrice de versions, payée en
+      neuf tentatives — ne pas dévier :**
+
+      | Composant | Version | Pourquoi précisément celle-là |
+      |---|---|---|
+      | esp-matter | main (2026-08) | — |
+      | ESP-IDF | **v5.4.1** | main exige `esp_driver_ledc` (≥ 5.3) ; v5.2.3 échoue |
+      | Python | **3.11** | le codegen CHIP appelle `getLevelNamesMapping` (3.11+) ; 3.10 échoue |
+      | idf-component-manager | **~=2.2** (2.5.0) | la 3.x abandonne l'interface 3 qu'IDF 5.4.1 demande |
+      | mobly (constraints CHIP) | **1.12.2** | 1.13 n'existe pas pour l'hôte ; `scripts/setup/constraints.txt` amont cassé |
+      | `scripts/tests/requirements.txt` | **neutralisé** | deps de tests hôte (bluezoo…) exigent 3.11+ et ne servent pas au firmware |
+      | Env | `IDF_PYTHON_CHECK_CONSTRAINTS=no` | CHIP installe cryptography 44, IDF 5.2/5.4 contraint <42 — faux conflit |
+      | Deps apt | liste CHIP complète **+ libevent-dev** | ot-commissioner ne compile pas sans |
+
+      Donnée qui engage le PCB : l'exemple **nu** fait déjà 1,53 Mo — avec
+      arduino-esp32 et le firmware Arena par-dessus, le module **8 Mo** n'est
+      plus une recommandation, c'est un prérequis pour garder l'OTA A/B.
 - [ ] **P1 — preuve radio** : l'exemple flashé sur une carte de rechange
       (PAS celle du mur : changer de table de partitions exige l'USB),
       appairé à Google Home et Apple Maison en VID de test
