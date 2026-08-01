@@ -370,7 +370,10 @@ const PF_KIND = { i: '#ff9b21', l: '#ffc046', f: '#e0483a' };
 
 function wzDraw() {
   const total = st.count || 0;
-  $('wz-pos').value = total ? 'LED ' + wz.at + ' / ' + (total - 1) : '-';
+  // Pixels are numbered from 0 because that is what /api/identify and the whole
+  // API take, but "LED 34 / 40" on a 41-pixel chain reads as "40 pixels" and was
+  // reported as exactly that. Say both, and never the bare last index.
+  $('wz-pos').value = total ? (wz.at + 1) + ' of ' + total : '-';
   $('wz-bar').style.width = total ? ((wz.at + 1) / total * 100) + '%' : '0';
 
   const owner = pfOwner(), placed = Object.keys(LEDMAP).length;
@@ -407,7 +410,8 @@ function wzDraw() {
   const mine = LEDMAP[wz.at];
   $('wz-goto').max = Math.max(0, total - 1);
   $('wz-say').innerHTML = total
-    ? 'Pixel <b>' + wz.at + '</b> of ' + (total - 1) + ' is blinking on the playfield &mdash; click ' +
+    ? 'Pixel <b>' + wz.at + '</b> is blinking on the playfield &mdash; the <b>' + (wz.at + 1) +
+      'th</b> of ' + total + ' (they are numbered from 0). Click ' +
       'the insert it sits under. Filled dots are already placed; the label is always the ' +
       '<b>insert</b>, and the tooltip says which pixel is on it.' +
       (mine !== undefined ? ' This one currently holds <b>' + (PF[mine] ? PF[mine].n : '?') + '</b>.' : '') +
