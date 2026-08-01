@@ -148,6 +148,31 @@ Sans signal, le mode respire doucement au lieu de s'éteindre.
 
 ---
 
+## 6 bis. Commande vocale
+
+**Siri — natif, zéro configuration côté carte.** L'app **Raccourcis** d'iOS
+sait appeler une URL, et toute l'API est en GET :
+
+1. Raccourcis → **+** → action « **Obtenir le contenu de l'URL** »
+2. URL : `http://arena.local/api/set?mode=attract` (ou `mode=off`, `mode=music`…)
+3. Nommer le raccourci « **Allume le flipper** » → c'est la phrase Siri.
+
+Un raccourci par phrase : « Allume le flipper » → `mode=attract`, « Éteins le
+flipper » → `mode=off`, « Flipper en musique » → `mode=music`, « Flipper en
+veilleuse » → `mode=night`. Fonctionne depuis l'iPhone, l'Apple Watch, et via
+un HomePod (qui relaie au téléphone). Si `arena.local` est capricieux depuis
+iOS, réserver l'IP de la carte dans la box et l'utiliser en direct.
+
+**Google Home — pas de chemin direct.** Les routines Google ne savent pas
+appeler une URL locale, et les passerelles grand public (IFTTT) sont devenues
+payantes et peu fiables. Deux vraies options :
+- **Home Assistant** (si vous en avez un) : une entité REST vers l'API, puis
+  l'intégration Google Home standard — « OK Google, allume le flipper ».
+- **Matter, sur le PCB final** : la carte se présenterait comme une lampe
+  Matter et s'appairerait nativement à Google Home, Apple Maison **et** Alexa,
+  en local, sans nuage. C'est la réponse « produit » — mais c'est un vrai
+  chantier firmware (pile ESP-IDF, partitions, appairage), pas un réglage.
+
 ## 7. Changer de jeu
 
 Le firmware est **agnostique** : un jeu = un *bundle* de deux fichiers.
