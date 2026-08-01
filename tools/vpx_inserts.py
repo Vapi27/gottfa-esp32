@@ -105,18 +105,43 @@ def main(path):
         if name.startswith("F"):  return "f"             # flasher
         return None
 
-    # Two numbers, and they are NOT the same one.
+    # The VP table's light names FOLLOW the machine's own lamp chart (Premier
+    # manual E-25440, printed p42: L3 Shoot Again, L5-L8 multipliers, L9-L11 top
+    # rollovers, L36-L39 the W-A-L-L drop targets, L44-L48 rollovers...).
+    # Verified by geometry: L36-L39 draw the drop-target diagonal mid-table,
+    # L24-L26 sit on the upper deck, L45/46/47 are the P-I-T lanes. An earlier
+    # revision added PinMAME's GTS80_lamp2m offset (+8) on the theory that VP
+    # names were internal numbering; that relabelled correct names into wrong
+    # ones and cost a day of confusion. lamp2m converts to the core matrix, not
+    # to the manual.
     #
-    #   "l" is PinMAME's internal lamp index. The captured attract sequence is a
-    #       bit mask indexed by it, so this is what the firmware must use.
-    #   "n" is what the MACHINE calls that lamp, which is what is printed in the
-    #       manual and what the owner reads off the playfield. PinMAME converts
-    #       between them in gts80.c:  GTS80_lamp2m(no) { return no + 8; }
-    #
-    # Labelling the plan with PinMAME's numbering was wrong in a way that only a
-    # person standing at the machine could catch: "your map says 1, the playfield
-    # says 9". Off by exactly 8, as the source above says it must be.
-    LAMP_OFFSET = 8
+    # One AUTHOR error in the VP table, caught at the real playfield: the object
+    # named "L1" sits in the top-rollover row — it IS the #1 TOP ROLLOVER, lamp
+    # L9 in the manual — but its name binds it to Controller.Lamp(1), the Game
+    # On RELAY. In VP nobody notices (the relay is on for the whole game); in
+    # attract the insert goes dead while the real machine chases 9-10-11. Fixed
+    # here: display L9, drive from lamp 9. The stray VP object also named "L9"
+    # (bottom-left, not a top rollover) is renamed L9b to keep names unique.
+    FUNC = {
+        3: "SHOOT AGAIN", 4: "SOUND 16",
+        5: "1X BONUS MULT", 6: "2X BONUS MULT", 7: "4X BONUS MULT", 8: "8X BONUS MULT",
+        9: "#1 TOP ROLLOVER", 10: "#2 TOP ROLLOVER", 11: "#3 TOP ROLLOVER",
+        18: "LIGHT WARRIOR PIT SPECIAL", 19: "WARRIOR PIT (RAMP)",
+        20: "RAMP VALUE (UPPER)", 21: "EXTRA BALL (UPPER)", 22: "SPECIAL (UPPER)",
+        23: "1,000,000 (UPPER)", 24: "CAPTURED #1", 25: "CAPTURED #2",
+        26: "MULTI-BALL RELEASE", 27: "SPINNER",
+        28: "CYS1 COMPLETED", 29: "CYS2 COMPLETED",
+        30: "LEFT C SPOT", 31: "LEFT Y SPOT", 32: "LEFT S SPOT",
+        33: "RIGHT C SPOT", 34: "RIGHT Y SPOT", 35: "RIGHT S SPOT",
+        36: "W DROP TARGET", 37: "A DROP TARGET", 38: "L DROP TARGET",
+        39: "L DROP TARGET", 40: "#1 GUARD SPOT", 41: "#2 GUARD SPOT",
+        42: "#3 GUARD SPOT", 43: "ADVANCE RAMP VALUE",
+        44: "R.OUTSIDE / L.RETURN ROLLOVER", 45: "P LEFT SIDE ROLLOVER",
+        46: "I CENTER ROLLOVER", 47: "T RIGHT SIDE ROLLOVER",
+        48: "L.OUTSIDE / R.RETURN ROLLOVER",
+    }
+    AUTHOR_FIXES = { "L1": ("L9", 9), "L9": ("L9b", -1) }
+
     keep = []
     for it in sorted(items, key=lambda z: (z["y"], z["x"])):
         if it["kind"] != "light":
@@ -124,16 +149,17 @@ def main(path):
         k = kind(it["name"])
         if not k:
             continue
-        m = re.match(r"^L(\d+)(.*)$", it["name"])
-        if m:
-            vp, suffix = int(m.group(1)), m.group(2)
-            rec = {"n": "L%d%s" % (vp + LAMP_OFFSET, suffix), "l": vp, "k": k}
-        else:
-            rec = {"n": it["name"][:7], "l": -1, "k": k}     # flashers: no matrix lamp
+        name = it["name"][:7]
+        m = re.match(r"^L(\d+)", name)
+        lamp = int(m.group(1)) if m else -1
+        if name in AUTHOR_FIXES:
+            name, lamp = AUTHOR_FIXES[name]
+        rec = {"n": name, "l": lamp if 0 <= lamp < 64 else -1, "k": k}
+        if lamp in FUNC:
+            rec["f"] = FUNC[lamp]
         rec["x"] = round(it["x"] / bounds["RGHT"], 4)
         rec["y"] = round(it["y"] / bounds["BOTM"], 4)
         keep.append(rec)
-
     rows = ",\n".join(json.dumps(r, separators=(",", ":")) for r in keep)
     print("{\"inserts\":[\n" + rows + "\n]}")
     print("\n--- résumé ---", file=sys.stderr)

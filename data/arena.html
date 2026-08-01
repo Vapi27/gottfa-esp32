@@ -344,6 +344,7 @@ function edSelect(i) {
   $('ed-rgb').value = '#' + [c[0], c[1], c[2]].map(v => (+v).toString(16).padStart(2, '0')).join('');
   $('ed-w').value = c[3] || 0;
   $('ed-say').innerHTML = 'Editing <b>' + (p.n || '?') + '</b>' +
+    (p.f ? ' &mdash; <b>' + p.f + '</b> (manual E-25440)' : '') +
     (p.d && p.d !== p.n ? ' (shipped: ' + p.d + ')' : '') +
     '. Its lamp in the sequence never changes &mdash; only the label and the colour do.';
   // Light the pixel sitting on it, if any, so you can see what you are editing.
@@ -396,7 +397,7 @@ function wzDraw() {
     const pc = p.c ? 'rgb(' + Math.min(255, p.c[0] + p.c[3]) + ',' + Math.min(255, p.c[1] + p.c[3]) +
                      ',' + Math.min(255, p.c[2] + p.c[3]) + ')' : null;
     s += '<g onclick="wzClick(' + i + ')" style="cursor:pointer">' +
-         '<title>' + p.n + (taken ? ' - pixel ' + own : ' - free') + '</title>' +
+         '<title>' + p.n + (p.f ? ' - ' + p.f : '') + (taken ? ' - pixel ' + own : ' - free') + '</title>' +
          '<circle cx="' + cx + '" cy="' + cy + '" r="30" fill="' + (pc || (taken ? col : '#241c16')) +
          '" stroke="' + (i === edSel ? '#7fb3ff' : (taken ? '#efe6da' : col)) + '" stroke-width="' + (i === edSel ? 7 : (taken ? 5 : 3)) + '"/>' +
          '<text x="' + cx + '" y="' + cy + '" font-size="26" font-weight="700" text-anchor="middle" ' +

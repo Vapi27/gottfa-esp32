@@ -132,8 +132,9 @@ String insertsJson() {
   for (uint8_t i = 0; i < s_nIns; i++) {
     if (i) j += ',';
     const Colour& c = s_col[i];
-    j += "{\"n\":\"" + String(nameOf(i)) + "\",\"d\":\"" + String(s_ins[i].name) +
-         "\",\"l\":" + String(s_ins[i].lamp) +
+    j += "{\"n\":\"" + String(nameOf(i)) + "\",\"d\":\"" + String(s_ins[i].name) + "\"";
+    if (s_ins[i].func[0]) j += ",\"f\":\"" + String(s_ins[i].func) + "\"";
+    j += ",\"l\":" + String(s_ins[i].lamp) +
          ",\"k\":\"" + String(s_ins[i].kind) + "\"" +
          ",\"x\":" + String(s_ins[i].x, 4) + ",\"y\":" + String(s_ins[i].y, 4);
     if (c.r | c.g | c.b | c.w)
@@ -170,6 +171,8 @@ static bool loadInserts() {
     // never compute with.
     const int l = o["l"] | -1;
     it.lamp = (l >= 0 && l < 64) ? (int8_t)l : -1;
+    strncpy(it.func, o["f"] | "", FUNC_LEN - 1);
+    it.func[FUNC_LEN - 1] = 0;
     it.x = o["x"] | 0.0f;
     it.y = o["y"] | 0.0f;
     s_nIns++;

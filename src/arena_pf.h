@@ -30,11 +30,14 @@ static const uint8_t  INSERT_MAX  = 128;
 static const uint8_t  NAME_LEN    = 8;
 static const uint8_t  UNASSIGNED  = 255;
 
+static const uint8_t FUNC_LEN = 30;
+
 struct Insert {
   char  name[NAME_LEN];
-  char  kind;        // 'i' matrix insert, 'f' flasher
-  int8_t lamp;       // matrix lamp number parsed from the name (L26a -> 26), -1 if none
-  float x, y;        // 0..1, origin top-left: y grows towards the flippers
+  char  func[FUNC_LEN];  // what the manual calls this lamp ("W DROP TARGET"), may be empty
+  char  kind;            // 'i' matrix insert, 'f' flasher
+  int8_t lamp;           // the machine's lamp number driving it, -1 if none
+  float x, y;            // 0..1, origin top-left: y grows towards the flippers
 };
 
 // Colour of the plastic over an insert, 0,0,0,0 = none set (use the bulb's own
