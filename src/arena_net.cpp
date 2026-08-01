@@ -41,6 +41,7 @@ static String stateJson() {
   j += ",\"bright\":" + String(arenaled::brightness());
   j += ",\"speed\":"  + String(arenaled::speed());
   j += ",\"gi\":"     + String(arenaled::gi());
+  j += ",\"warm\":"   + String(arenaled::warm());
   j += ",\"count\":"  + String(arenaled::count());
   j += ",\"max\":"    + String(LED_MAX);
   j += ",\"r\":" + String(c.r) + ",\"g\":" + String(c.g) +
@@ -128,6 +129,7 @@ void begin() {
     if (r->hasParam("bright")) arenaled::setBrightness(param8(r, "bright", arenaled::brightness()));
     if (r->hasParam("speed"))  arenaled::setSpeed(param8(r, "speed", arenaled::speed()));
     if (r->hasParam("gi"))     arenaled::setGi(param8(r, "gi", arenaled::gi()));
+    if (r->hasParam("warm"))   arenaled::setWarm(param8(r, "warm", arenaled::warm()));
     if (r->hasParam("r") || r->hasParam("g") || r->hasParam("b") || r->hasParam("w")) {
       arenaled::Rgbw c = arenaled::color();
       c.r = param8(r, "r", c.r);
@@ -145,6 +147,50 @@ void begin() {
     if (r->hasParam("count"))  arenaled::setCount((uint16_t)r->getParam("count")->value().toInt());
     if (r->hasParam("budget")) arenaled::setBudgetMa((uint16_t)r->getParam("budget")->value().toInt());
     r->send(200, "application/json", stateJson());
+  });
+
+  // /api/latch?n=L9,L48   lamps held lit through attract, by the MACHINE's name
+  // /api/latch?clear=1    release them all
+  // Named, not numbered: the owner reads L9 off the playfield, and the mask
+  // underneath is in PinMAME's numbering, which nobody should have to know.
+  s_server.on("/api/latch", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (r->hasParam("clear")) { arenaled::setLatched(0); arenaled::save(); }
+    else if (r->hasParam("n")) {
+      uint64_t m = 0;
+      String list = r->getParam("n")->value();
+      list.trim();
+      int start = 0;
+      while (start < (int)list.length()) {
+        int comma = list.indexOf(',', start);
+        if (comma < 0) comma = list.length();
+        String one = list.substring(start, comma);
+        one.trim();
+        start = comma + 1;
+        if (!one.length()) continue;
+        const int idx = arenapf::indexOf(one.c_str());
+        const arenapf::Insert* ins = (idx >= 0) ? arenapf::insert((uint8_t)idx) : nullptr;
+        if (!ins || ins->lamp < 0) {
+          r->send(400, "text/plain", "unknown insert: " + one);
+          return;
+        }
+        m |= (1ULL << ins->lamp);
+      }
+      arenaled::setLatched(m);
+      arenaled::save();
+    }
+    // Answer in the owner's names, not in the internal mask.
+    String out = "{\"latched\":[";
+    bool first = true;
+    const uint64_t m = arenaled::latched();
+    for (uint8_t i = 0; i < arenapf::insertCount(); i++) {
+      const arenapf::Insert* ins = arenapf::insert(i);
+      if (!ins || ins->lamp < 0 || !((m >> ins->lamp) & 1ULL)) continue;
+      if (!first) out += ',';
+      first = false;
+      out += "\"" + String(ins->name) + "\"";
+    }
+    out += "]}";
+    r->send(200, "application/json", out);
   });
 
   s_server.on("/api/save", HTTP_GET, [](AsyncWebServerRequest* r) {

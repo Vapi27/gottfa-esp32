@@ -52,6 +52,21 @@ uint8_t brightness();
 // is taste, not fidelity, so it is a live setting rather than a constant.
 void    setGi(uint8_t g);
 uint8_t gi();
+
+// Filament warmth, 0..255. 0 is the pure spectral split — colorimetrically
+// right and, on a wall, orange. 255 hands the output to the white die as soon
+// as the filament is hot. Both end points are the same black-body curve; this
+// only decides which die carries it.
+void    setWarm(uint8_t w);
+uint8_t warm();
+
+// Lamps held lit through the ROM attract, as a PinMAME-lamp bit mask.
+// A machine that has been played does not go back to a virgin attract: some
+// lamps stay latched from the last game, and a cold-boot capture cannot contain
+// them. This is that latch, made explicit and editable, rather than a doctored
+// sequence.
+void     setLatched(uint64_t m);
+uint64_t latched();
 void    setSpeed(uint8_t s);               // 0..255 -> x0.25 .. x4
 uint8_t speed();
 void    setColor(Rgbw c);                  // base colour for CLASSIC / ATTRACT / ARENA

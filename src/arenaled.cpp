@@ -26,6 +26,8 @@ static uint8_t  s_spark[LED_MAX];      // "random inserts" decay envelopes
 static Mode     s_mode      = MODE_CLASSIC;
 static uint8_t  s_bright    = ARENA_BRIGHT_DEFAULT;
 static uint8_t  s_gi        = ARENA_GI_DEFAULT;   // GI level under ROM attract, 0 = off
+static uint8_t  s_warm      = ARENA_WARM_DEFAULT; // 0 = spectral/orange, 255 = white-forward
+static uint64_t s_latched   = 0;                 // lamps held lit from the last game
 static uint8_t  s_speed     = ARENA_SPEED_DEFAULT;
 static Rgbw     s_color     = { ARENA_WARM_R, ARENA_WARM_G, ARENA_WARM_B, ARENA_WARM_W };
 static uint16_t s_count     = LED_COUNT_DEFAULT;
@@ -149,19 +151,29 @@ static void fill(Rgbw* buf, const Rgbw& c) {
 //  below t=0.35, ~85 % at full), which keeps the physical trajectory — dull red
 //  when cold, warm white when hot — and lands where the eye expects it.
 //  Regenerate with tools/filament_lut.py if the wall wants a different bulb.
-static const uint8_t FILAMENT[33][4] = {   // R,G,B,W du filament de 800 K a 2700 K
-  {  2,  0,  0,  0}, {  3,  0,  0,  0}, {  4,  0,  0,  0}, {  5,  0,  0,  0},
-  {  7,  0,  0,  0}, {  8,  0,  0,  0}, { 10,  1,  0,  0}, { 12,  1,  0,  0},
-  { 15,  1,  0,  0}, { 18,  2,  0,  0}, { 21,  3,  0,  0}, { 25,  3,  0,  0},
-  { 28,  4,  0,  2}, { 30,  5,  0,  4}, { 33,  6,  0,  7}, { 36,  7,  0, 10},
-  { 39,  8,  0, 14}, { 42,  9,  0, 19}, { 45, 11,  0, 24}, { 48, 12,  0, 30},
-  { 50, 13,  0, 38}, { 53, 15,  0, 46}, { 55, 16,  0, 56}, { 57, 17,  0, 67},
-  { 59, 19,  0, 80}, { 60, 20,  0, 94}, { 60, 21,  0,110}, { 60, 21,  0,128},
-  { 59, 22,  0,149}, { 57, 22,  0,171}, { 54, 22,  0,196}, { 50, 21,  0,224},
-  { 45, 19,  0,255},
+static const uint8_t FILAMENT_HOT[33][4] = {
+  {  2,  0,  0,  0}, {  3,  0,  0,  0}, {  3,  0,  0,  0}, {  4,  0,  0,  0},
+  {  6,  0,  0,  0}, {  7,  0,  0,  0}, {  9,  1,  0,  0}, { 10,  1,  0,  0},
+  { 13,  1,  0,  0}, { 15,  2,  0,  0}, { 18,  2,  0,  0}, { 21,  3,  0,  0},
+  { 25,  4,  0,  0}, { 29,  5,  0,  0}, { 34,  6,  0,  0}, { 39,  8,  0,  0},
+  { 45,  9,  0,  0}, { 51, 11,  0,  0}, { 59, 14,  0,  0}, { 66, 17,  0,  0},
+  { 75, 20,  0,  0}, { 84, 23,  0,  0}, { 94, 28,  0,  0}, {106, 32,  0,  0},
+  {118, 37,  0,  0}, {131, 43,  0,  0}, {145, 50,  0,  0}, {160, 57,  0,  0},
+  {176, 66,  0,  0}, {194, 75,  0,  0}, {213, 85,  0,  0}, {233, 96,  0,  0},
+  {255,108,  0,  0},
 };
-
-static const uint8_t FILAMENT_N = sizeof(FILAMENT) / sizeof(FILAMENT[0]);
+static const uint8_t FILAMENT_COOL[33][4] = {
+  {  2,  0,  0,  0}, {  3,  0,  0,  0}, {  3,  0,  0,  0}, {  4,  0,  0,  0},
+  {  6,  0,  0,  0}, {  7,  0,  0,  0}, {  9,  1,  0,  0}, { 10,  1,  0,  0},
+  { 13,  1,  0,  0}, { 15,  2,  0,  0}, { 18,  2,  0,  0}, { 21,  3,  0,  0},
+  { 23,  3,  0,  2}, { 25,  4,  0,  4}, { 27,  5,  0,  7}, { 29,  6,  0, 10},
+  { 31,  6,  0, 14}, { 33,  7,  0, 19}, { 35,  8,  0, 24}, { 36,  9,  0, 30},
+  { 37, 10,  0, 38}, { 38, 11,  0, 46}, { 39, 11,  0, 56}, { 38, 12,  0, 67},
+  { 38, 12,  0, 80}, { 37, 12,  0, 94}, { 35, 12,  0,110}, { 32, 11,  0,128},
+  { 28, 10,  0,149}, { 23,  9,  0,171}, { 17,  7,  0,196}, {  9,  4,  0,224},
+  {  0,  0,  0,255},
+};
+static const uint8_t FILAMENT_N = sizeof(FILAMENT_HOT) / sizeof(FILAMENT_HOT[0]);
 
 // Filament at normalised temperature t (0 = cold, 1 = full), interpolated.
 static Rgbw filament(float t) {
@@ -170,10 +182,21 @@ static Rgbw filament(float t) {
   const float f = t * (FILAMENT_N - 1);
   const uint8_t i = (uint8_t)f;
   const float k = f - i;
-  const uint8_t* a = FILAMENT[i];
-  const uint8_t* b = FILAMENT[i + 1];
-  return { clamp8(a[0] + (b[0] - a[0]) * k), clamp8(a[1] + (b[1] - a[1]) * k),
-           clamp8(a[2] + (b[2] - a[2]) * k), clamp8(a[3] + (b[3] - a[3]) * k) };
+  // Two physically derived end points, blended live by the warmth setting:
+  // HOT is the pure spectral split (the white die only takes the neutral part —
+  // the most orange, and what a colorimeter would ask for), COOL lets the white
+  // die carry everything above the knee. Anywhere between is a legitimate bulb;
+  // which one looks right on a wall is the owner's call, not a compile-time one.
+  const float wq = (float)s_warm / 255.0f;
+  const uint8_t* ha = FILAMENT_HOT[i];  const uint8_t* hb = FILAMENT_HOT[i + 1];
+  const uint8_t* ca = FILAMENT_COOL[i]; const uint8_t* cb = FILAMENT_COOL[i + 1];
+  float o[4];
+  for (uint8_t c = 0; c < 4; c++) {
+    const float h = ha[c] + (hb[c] - ha[c]) * k;
+    const float w = ca[c] + (cb[c] - ca[c]) * k;
+    o[c] = h + (w - h) * wq;
+  }
+  return { clamp8(o[0]), clamp8(o[1]), clamp8(o[2]), clamp8(o[3]) };
 }
 
 // Thermal step. Heating is a constant-power exponential approach; cooling is
@@ -290,7 +313,7 @@ static void fxRomAttract(Rgbw* buf) {
   if (dt > 0.2f) dt = 0.2f;                       // after a stall, do not jump
 
   // The sequence runs on the animation clock, so the speed slider works on it.
-  const uint64_t mask = arenaattract::maskAt((uint32_t)(phase(1.0, 3600.0) * 1000.0f));
+  const uint64_t mask = arenaattract::maskAt((uint32_t)(phase(1.0, 3600.0) * 1000.0f)) | s_latched;
 
   // General illumination. On a real Arena the GI bulbs stay lit through attract,
   // so an insert the ROM never drives still glows rather than sitting dark — but
@@ -556,6 +579,10 @@ void setBrightness(uint8_t b) { s_bright = b; markDirty(); }
 uint8_t brightness() { return s_bright; }
 void setGi(uint8_t g) { s_gi = g; markDirty(); }
 uint8_t gi() { return s_gi; }
+void setWarm(uint8_t w) { s_warm = w; markDirty(); }
+uint8_t warm() { return s_warm; }
+void setLatched(uint64_t m) { s_latched = m; markDirty(); }
+uint64_t latched() { return s_latched; }
 void setSpeed(uint8_t s) { s_speed = s; markDirty(); }
 uint8_t speed() { return s_speed; }
 void setColor(Rgbw c) { s_color = c; markDirty(); }
@@ -647,6 +674,8 @@ void save() {
   s_prefs.putUChar("bright", s_bright);
   s_prefs.putUChar("speed",  s_speed);
   s_prefs.putUChar("gi",     s_gi);
+  s_prefs.putUChar("warm",   s_warm);
+  s_prefs.putBytes("latched", &s_latched, sizeof(s_latched));
   s_prefs.putUShort("count", s_count);
   s_prefs.putUShort("budget", s_budget);
   s_prefs.putBytes("color", &s_color, sizeof(s_color));
@@ -661,6 +690,9 @@ void begin() {
   s_bright = s_prefs.getUChar("bright", ARENA_BRIGHT_DEFAULT);
   s_speed  = s_prefs.getUChar("speed",  ARENA_SPEED_DEFAULT);
   s_gi     = s_prefs.getUChar("gi",     ARENA_GI_DEFAULT);
+  s_warm   = s_prefs.getUChar("warm",   ARENA_WARM_DEFAULT);
+  if (s_prefs.getBytesLength("latched") == sizeof(s_latched))
+    s_prefs.getBytes("latched", &s_latched, sizeof(s_latched));
   s_count  = s_prefs.getUShort("count", LED_COUNT_DEFAULT);
   s_budget = s_prefs.getUShort("budget", LED_POWER_BUDGET_MA);
   if (s_count < 1 || s_count > LED_MAX) s_count = LED_COUNT_DEFAULT;
