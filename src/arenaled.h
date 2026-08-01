@@ -30,6 +30,7 @@ enum Mode : uint8_t {
   MODE_ARENA,       // animations that follow the playfield layout (zone-driven)
   MODE_NIGHT,       // warm white at ~10 %
   MODE_RAINBOW,     // full RGB hue sweep
+  MODE_MUSIC,       // audio-reactive: mic on GPIO34, or /api/music pushes
   MODE_TEST,        // R / G / B / W channel walk — wiring + colour-order check
   MODE_COUNT
 };
@@ -73,6 +74,10 @@ uint64_t latched();
 // colours and you would rather see them cleanly than through a filament.
 void setIncandescent(bool on);
 bool incandescent();
+
+// Feed the music mode from outside (a phone app, a PC script, anything that can
+// hit REST). Values 0..255; an external push silences the on-board mic for 2 s.
+void musicPush(uint8_t energy, uint8_t bass, uint8_t treble);
 void    setSpeed(uint8_t s);               // 0..255 -> x0.25 .. x4
 uint8_t speed();
 void    setColor(Rgbw c);                  // base colour for CLASSIC / ATTRACT / ARENA

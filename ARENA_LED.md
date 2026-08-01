@@ -679,6 +679,28 @@ Rather than doctor the captured sequence, those lamps are held lit on top of it:
 
 Which keeps "this is the ROM" and "this is my machine" true at the same time.
 
+### Music mode
+
+`music` makes the wall follow the room. Spatial, because the pixels have
+positions: **bass breathes the field, a beat ripples out from the playfield
+centre, treble sparkles random inserts**. The power limiter meters every frame,
+so a loud passage cannot overrun the supply. With no signal it breathes gently
+instead of going dark.
+
+Two ways to feed it:
+
+- **A mic on the board** (autonomous): MAX9814 (auto-gain, ~2) or MAX4466 —
+  `OUT -> GPIO34, VCC -> 3V3, GND -> GND`, then set `ARENA_MIC_ENABLE 1` in
+  `arena_config.h` and reflash. GPIO34 is ADC1, so it coexists with WiFi.
+  The flag defaults to **0**: a floating ADC pin reads WiFi noise as music and
+  the wall dances to static (measured — 290 mA of it).
+- **`/api/music?e=..&b=..&t=..`** (0..255, ~10-20 Hz): anything that can hit
+  REST drives the wall — a PC script watching an audio output, a phone app.
+  An external push silences the mic for 2 s, so both can coexist.
+
+Browser-mic from the web page is NOT offered: browsers block `getUserMedia` on
+plain HTTP, and the board cannot serve HTTPS a phone will trust.
+
 ### Live look controls
 
 Four settings, all in NVS, all reachable from the web UI, none needing a reflash:

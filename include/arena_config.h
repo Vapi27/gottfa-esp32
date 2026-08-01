@@ -83,6 +83,14 @@
 // is the on-board BOOT button; the D1 Mini ESP32 has none, so wire any NO push
 // button between D3 (GPIO0) and GND to bring the control out to the frame edge.
 // Harmless when nothing is wired: the pin idles high through its pull-up.
+// ---- Music mode audio input -------------------------------------------------
+// 1 = an electret mic module is wired to GPIO34 (ADC1, WiFi-safe): MAX9814
+// (auto-gain, best) or MAX4466 — OUT->GPIO34, VCC->3V3, GND->GND. Leave 0 with
+// no mic: a floating ADC pin reads WiFi noise as music and the wall dances to
+// static (measured: 290 mA of it). /api/music works either way.
+#define ARENA_MIC_ENABLE       0
+#define PIN_ARENA_MIC         34
+
 #define ARENA_BUTTON_ENABLE    1
 #define PIN_ARENA_BUTTON       0   // active LOW (internal pull-up)
 
@@ -143,6 +151,9 @@
 // default: the background is faithful, but a wall piece that never goes dark is
 // a matter of taste and the owner should meet it turned down rather than up.
 #define ARENA_GI_DEFAULT 90
+// Filament warmth at boot: 0 = spectral (orange), 255 = white-forward. 217 is
+// the 0.85 white share the bench settled on before this became a setting.
+#define ARENA_WARM_DEFAULT 217
 
 #define ARENA_BRIGHT_DEFAULT 180   // 0..255 global brightness
 #define ARENA_SPEED_DEFAULT  128   // 0..255 -> x0.25 .. x4 animation speed

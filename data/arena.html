@@ -88,6 +88,10 @@
 
   <section>
     <h2>Colour (classic / attract / arena)</h2>
+    <div class="presets" style="margin-bottom:8px">
+      <button onclick="push('r=0&g=0&b=0&w=255&warm=217&inc=1')">original bulb</button>
+      <button onclick="push('r=0&g=0&b=0&w=255&warm=55&inc=1')">older bulb</button>
+    </div>
     <div class="presets">
       <button class="sw" title="Amber 255/100/0"    style="background:#ff6400" data-c="255,100,0,0"></button>
       <button class="sw" title="Golden 255/140/0+W" style="background:#ff8c00" data-c="255,140,0,10"></button>
@@ -208,7 +212,7 @@
 </main>
 
 <script>
-const MODES = ['classic','attract','arena','night','rainbow','test','off'];
+const MODES = ['classic','attract','arena','night','rainbow','music','test','off'];
 const $ = id => document.getElementById(id);
 let st = {}, holdUntil = 0;
 

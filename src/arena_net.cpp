@@ -203,6 +203,13 @@ void begin() {
     r->send(200, "application/json", out);
   });
 
+  //  /api/music?e=..&b=..&t=..   0..255 — drive the music mode from anything
+  //  that can hit REST at ~20 Hz. Overrides the on-board mic for 2 s per push.
+  s_server.on("/api/music", HTTP_GET, [](AsyncWebServerRequest* r) {
+    arenaled::musicPush(param8(r, "e", 0), param8(r, "b", 0), param8(r, "t", 0));
+    r->send(200, "text/plain", "ok");
+  });
+
   s_server.on("/api/save", HTTP_GET, [](AsyncWebServerRequest* r) {
     arenaled::save();
     r->send(200, "text/plain", "saved");

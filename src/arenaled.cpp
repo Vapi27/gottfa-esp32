@@ -379,6 +379,111 @@ static void fxAttractGeneric(Rgbw* buf) {
   }
 }
 
+// ---------------------------------------------------------------------------
+//  Music mode — the wall follows the room.
+//
+//  Two sources, in priority order: an external push (/api/music — a phone app
+//  or a PC script sends energy/bass/treble at ~20 Hz) and, failing that for
+//  2 s, an electret mic module (MAX4466/MAX9814) on GPIO34 — ADC1, so it
+//  coexists with WiFi. With neither, the mode breathes gently instead of going
+//  black, so switching to it without hardware is not read as a crash.
+//
+//  The mapping is spatial, since we know where every pixel IS: bass breathes
+//  the whole field, a detected beat launches a ripple from the playfield
+//  centre, treble sparkles random inserts. The power limiter already meters
+//  every frame, so a loud passage cannot overrun the supply.
+// ---------------------------------------------------------------------------
+static float    s_musE = 0, s_musB = 0, s_musT = 0;   // 0..1 envelopes
+static uint32_t s_musExtMs  = 0;                      // last external push
+static uint32_t s_musBeatMs = 0;                      // last detected beat
+static float    s_musAvg    = 0.05f;                  // rolling energy average
+static float    s_musPeak   = 0.10f;                  // adaptive normaliser
+
+void musicPush(uint8_t e, uint8_t b, uint8_t t) {
+  s_musE = e / 255.0f; s_musB = b / 255.0f; s_musT = t / 255.0f;
+  const uint32_t now = millis();
+  // Beat detection on the pushed energy, same rule as the mic path.
+  if (s_musE > 1.4f * s_musAvg && now - s_musBeatMs > 250) s_musBeatMs = now;
+  s_musAvg += 0.05f * (s_musE - s_musAvg);
+  s_musExtMs = now;
+}
+
+#if ARENA_MIC_ENABLE
+static void musicSampleMic() {
+  // 160 reads ~ 1.6 ms per frame. Mean-removed RMS = energy; a one-pole
+  // low-pass splits a bass proxy from the rest. Crude next to an FFT, and
+  // enough: lighting needs an envelope, not a spectrum.
+  static float lp = 2048;
+  float sumSq = 0, sumLpSq = 0;
+  for (int i = 0; i < 160; i++) {
+    const float x = (float)analogRead(PIN_ARENA_MIC) - 2048.0f;
+    lp += 0.10f * (x - lp);
+    sumSq   += x * x;
+    sumLpSq += lp * lp;
+  }
+  const float rms  = sqrtf(sumSq / 160.0f)   / 2048.0f;
+  const float bass = sqrtf(sumLpSq / 160.0f) / 2048.0f;
+  // Adaptive scale: track the recent peak so quiet rooms still modulate.
+  s_musPeak = max(rms, s_musPeak * 0.998f);
+  if (s_musPeak < 0.02f) {                    // no mic wired: rail noise only
+    s_musE = s_musB = s_musT = 0;
+    return;
+  }
+  s_musE = min(1.0f, rms / s_musPeak);
+  s_musB = min(1.0f, bass / s_musPeak);
+  s_musT = min(1.0f, max(0.0f, (rms - bass) / s_musPeak));
+  const uint32_t now = millis();
+  if (s_musE > 1.4f * s_musAvg && now - s_musBeatMs > 250) s_musBeatMs = now;
+  s_musAvg += 0.05f * (s_musE - s_musAvg);
+}
+
+#endif
+
+static void fxMusic(Rgbw* buf) {
+  const uint32_t now = millis();
+#if ARENA_MIC_ENABLE
+  if (now - s_musExtMs > 2000) musicSampleMic();
+#else
+  if (now - s_musExtMs > 2000) { s_musE = s_musB = s_musT = 0; }  // idle breathe
+#endif
+
+  const bool idle = (s_musE + s_musB + s_musT) < 0.02f;
+  if (idle) {                                  // no signal: breathe, don't die
+    float k = 0.06f + 0.05f * fsin01(phase(0.5, TAU));
+    fill(buf, scale(s_color, k));
+    return;
+  }
+
+  // Bass breathes the field in the panel colour.
+  fill(buf, scale(s_color, 0.04f + 0.55f * s_musB * s_musB));
+
+  // Beat: a ripple leaves the centre of the playfield.
+  const float tb = (now - s_musBeatMs) / 1000.0f;
+  if (tb < 0.6f) {
+    const Rgbw gold = { ARENA_GOLD_R, ARENA_GOLD_G, ARENA_GOLD_B, ARENA_GOLD_W };
+    const float rip = tb * 1.9f;
+    for (uint16_t i = 0; i < s_count; i++) {
+      float x, y;
+      if (!arenapf::xy(i, x, y)) continue;
+      const float dx = x - 0.5f, dy = y - 0.55f;
+      const float dr = fabsf(sqrtf(dx * dx + dy * dy) - rip);
+      if (dr < 0.10f)
+        buf[i] = addSat(buf[i], scale(gold, (1.0f - dr / 0.10f) * (1.0f - tb / 0.6f)));
+    }
+  }
+
+  // Treble sparkles random inserts, reusing the spark decay buffer.
+  uint8_t decay = 26;
+  for (uint16_t i = 0; i < s_count; i++)
+    s_spark[i] = (s_spark[i] > decay) ? s_spark[i] - decay : 0;
+  if (s_musT > 0.15f) {
+    const int n = 1 + (int)(s_musT * 3.0f);
+    for (int k = 0; k < n; k++) s_spark[esp_random() % s_count] = 255;
+  }
+  for (uint16_t i = 0; i < s_count; i++)
+    if (s_spark[i]) buf[i] = addSat(buf[i], scale(s_color, s_spark[i] / 255.0f * 0.8f));
+}
+
 // Geometric Arena mode — used when the pixels have been placed on the playfield
 // (arenapf). Chain order is an accident of wiring; position is the real thing, so
 // once we know where each pixel *is*, the effects should be about the table and
@@ -496,6 +601,7 @@ static void renderMode(Mode m, Rgbw* buf) {
     // at 10 % an amber made of R+G reads orange and dirty, W stays clean.
     case MODE_NIGHT:   fill(buf, { ARENA_WARM_R, ARENA_WARM_G, ARENA_WARM_B, ARENA_WARM_W }); break;
     case MODE_RAINBOW: fxRainbow(buf); break;
+    case MODE_MUSIC:   fxMusic(buf);   break;
     case MODE_TEST:    fxTest(buf);    break;
     case MODE_OFF:
     default:           fill(buf, { 0, 0, 0, 0 }); break;
@@ -573,7 +679,7 @@ static neoPixelType orderType(const char* name) {
 //  Public API
 // ---------------------------------------------------------------------------
 static const char* MODE_NAMES[MODE_COUNT] = {
-  "off", "classic", "attract", "arena", "night", "rainbow", "test"
+  "off", "classic", "attract", "arena", "night", "rainbow", "music", "test"
 };
 
 const char* modeName(Mode m) { return (m < MODE_COUNT) ? MODE_NAMES[m] : "?"; }
