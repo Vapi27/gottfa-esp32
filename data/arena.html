@@ -79,7 +79,7 @@
       <input type="range" id="warm" min="0" max="255"><output id="o-warm"></output></div>
     <div class="row"><label>Filament</label>
       <button id="incbtn" onclick="push('inc=' + (st.inc ? 0 : 1))">&ndash;</button>
-      <span class="hint" style="margin:0">thermal lag and colour ramp of a real bulb</span></div>
+      <span class="hint" style="margin:0">ON = real bulb (Colour panel inert here) &middot; off = plain switch in the Colour above</span></div>
     <div class="row"><label>Power</label>
       <div class="bar"><i id="pbar" style="width:0"></i></div><output id="o-pow"></output></div>
     <p class="hint">The firmware meters every frame and dims the whole wall rather than
@@ -224,9 +224,18 @@ MODES.forEach(m => {
 function setMode(m) { push('mode=' + m); }
 
 // --- sliders: send while dragging, but pause polling so the UI doesn't fight the user ---
+// Speed has a MAGNET at 128: that is x1.00 — the machine's own rate, the one
+// the ROM attract was captured at. The detent makes "original speed" the value
+// you land on rather than one you hunt for, while the whole range stays
+// reachable. Shown as a multiplier, since "128" means nothing to a human.
+const speedLabel = v => (+v === 128) ? 'x1 (orig)' : 'x' + Math.pow(2, (v - 128) / 64).toFixed(2);
 ['bright','speed','gi','warm','r','g','b','w'].forEach(k => {
   const el = $(k);
-  el.oninput = () => { $('o-' + k).value = el.value; holdUntil = Date.now() + 1500; };
+  el.oninput = () => {
+    if (k === 'speed' && Math.abs(el.value - 128) < 11 && el.value != 128) el.value = 128;
+    $('o-' + k).value = k === 'speed' ? speedLabel(el.value) : el.value;
+    holdUntil = Date.now() + 1500;
+  };
   el.onchange = () => push(k + '=' + el.value);
 });
 document.querySelectorAll('.sw').forEach(sw => sw.onclick = () => {
@@ -267,7 +276,7 @@ function render(s) {
   if (document.activeElement !== $('budget')) $('budget').value = s.budget;
   if (document.activeElement !== $('order'))  $('order').value  = s.order;
 }
-function set(k, v) { $(k).value = v; $('o-' + k).value = v; }
+function set(k, v) { $(k).value = v; $('o-' + k).value = k === 'speed' ? speedLabel(v) : v; }
 function fmtUp(s) {
   const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
   return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;

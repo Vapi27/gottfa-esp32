@@ -319,8 +319,13 @@ static void fxRomAttract(Rgbw* buf) {
   // General illumination. On a real Arena the GI bulbs stay lit through attract,
   // so an insert the ROM never drives still glows rather than sitting dark — but
   // whether the wall should carry that permanent background is taste, so it is a
-  // slider. It is a filament too, hence the same curve, and 0 means truly off.
-  const Rgbw giC = s_gi ? filament(ARENA_GI_T * (float)s_gi / 255.0f) : Rgbw{ 0, 0, 0, 0 };
+  // slider; 0 means truly off. With the filament ON it is a bulb on the same
+  // curve. With the filament OFF the whole attract runs on the Colour panel —
+  // which is what gives that panel a meaning in this mode at all: reported as
+  // "the colour menu does not apply", and with the simulation on, it must not.
+  const Rgbw giC = !s_gi ? Rgbw{ 0, 0, 0, 0 }
+                 : s_inc ? filament(ARENA_GI_T * (float)s_gi / 255.0f)
+                         : scale(s_color, (float)s_gi / 255.0f * 0.25f);
 
   for (uint16_t i = 0; i < s_count; i++) {
     const int lamp = arenapf::lampOfLed(i);
@@ -332,7 +337,7 @@ static void fxRomAttract(Rgbw* buf) {
     T[i] = s_inc ? filamentStep(T[i], on, dt) : (on ? 1.0f : 0.0f);
     if (lamp < 0) { buf[i] = giC; continue; }
 
-    buf[i] = addSat(giC, filament(T[i]));
+    buf[i] = addSat(giC, s_inc ? filament(T[i]) : scale(s_color, T[i]));
   }
   // Insert colours are applied globally in tick(), not here: the plastic
   // filters EVERY mode's light, not just the ROM attract's.
