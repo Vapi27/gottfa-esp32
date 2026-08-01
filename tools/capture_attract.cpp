@@ -1,10 +1,14 @@
-// Run the real Arena ROM under PinMAME and record the lamp matrix it drives.
+// Run a real game ROM under PinMAME and record the lamp matrix it drives.
 //
-// The point: Arena's attract mode is a program in prom1/prom2, not something to
+//     ./capture_attract <pinmame_name> [emulated_seconds]  > raw.json
+//     python3 tools/pack_attract.py raw.json -o data/arena_attract.bin
+//
+// The point: a machine's attract mode is a program in its ROM, not something to
 // imitate by eye. Running the ROM and writing down which lamps it turns on, and
-// when, gives the original sequence exactly — and every lamp number here is the
-// same L<n> that names an insert on the playfield plan, so the capture drops
-// straight onto the wall.
+// when, gives the original sequence exactly — and the lamp numbers are the same
+// ones that name the inserts on the playfield plan, so the capture drops
+// straight onto the wall. Works for any game PinMAME emulates: put the ROM zip
+// in ~/.pinmame/roms/ and pass the PinMAME short name (arena, hollyw, genesis...).
 #include "libpinmame.h"
 #include <cstdio>
 #include <cstdlib>
@@ -40,7 +44,9 @@ void PINMAMECALLBACK OnLogMessage(PINMAME_LOG_LEVEL, const char* fmt, va_list ar
 void PINMAMECALLBACK OnSoundCommand(int, int, const void*) {}
 
 int main(int argc, char** argv) {
-  const double seconds = (argc > 1) ? atof(argv[1]) : 30.0;   // EMULATED seconds
+  if (argc < 2) { fprintf(stderr, "usage: %s <pinmame_name> [emulated_seconds]\n", argv[0]); return 2; }
+  const char* game = argv[1];
+  const double seconds = (argc > 2) ? atof(argv[2]) : 300.0;  // EMULATED seconds
 
   PinmameConfig config = {
     PINMAME_AUDIO_FORMAT_FLOAT, 48000, "",
@@ -54,8 +60,8 @@ int main(int argc, char** argv) {
   PinmameSetHandleKeyboard(0);
   PinmameSetHandleMechanics(0);
 
-  if (PinmameRun("arena") != PINMAME_STATUS_OK) {
-    fprintf(stderr, "PinmameRun(arena) failed\n");
+  if (PinmameRun(game) != PINMAME_STATUS_OK) {
+    fprintf(stderr, "PinmameRun(%s) failed — is the ROM zip in ~/.pinmame/roms/ ?\n", game);
     return 1;
   }
 

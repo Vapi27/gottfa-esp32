@@ -690,6 +690,44 @@ Four settings, all in NVS, all reachable from the web UI, none needing a reflash
 | **Filament** (`inc`) | the incandescent simulation itself. Off is a plain switch — no thermal lag, no colour ramp — which suits inserts that carry their own colours. |
 | **Speed** | scales the ROM sequence. 128 is the machine's real rate. |
 
+### Porting to another table
+
+The firmware is game-agnostic: it reads two files and never needs recompiling
+for a different machine. Everything table-specific is data, produced by one
+command:
+
+```sh
+tools/mkgame.sh "Genesis (Gottlieb 1986).vpx" genesis
+pio run -e arenaled_d1mini32 -t buildfs        # then OTA ?target=fs
+```
+
+What that runs, and what each step needs:
+
+| Step | Tool | Needs |
+|---|---|---|
+| Inserts (positions + lamp numbers) | `tools/vpx_inserts.py` | the game's **VP table** (.vpx) |
+| Attract capture (the game's own) | `tools/capture_attract` | libpinmame built once + the **ROM zip** in `~/.pinmame/roms/` |
+| Pack | `tools/pack_attract.py` | — |
+
+Per-game knowledge is optional and lives in `tools/games/<name>.json`: author
+fixes for VP-table naming errors, and the lamp chart from the machine's service
+manual (functions shown on the plan tooltips). Without it the plan still works —
+labels come from the VP object names. Arena's config documents both kinds of
+entry, and the OCR'd manual corpus in `../gottfa-tools/pdfocr/out/` (128
+Gottlieb manuals) is where the lamp charts come from.
+
+Two lessons from Arena worth carrying to every port:
+
+- **Trust the VP names until the real playfield disagrees**, then fix the
+  *object*, not the numbering: VP authors bind lights by name to
+  `Controller.Lamp(n)`, and a misnamed object is wired to the wrong lamp in a
+  way VP itself never reveals (Arena's #1 top rollover was bound to the Game On
+  relay — invisible in VP, dead on the wall).
+- **A cold-boot capture has no game-latched lamps.** If an insert is lit on the
+  real machine's attract but never in the capture, it is probably a game lamp
+  held from the last game (`/api/latch` covers it) or a mis-bound object, not a
+  wiring fault.
+
 ### REST API
 
 | Endpoint | Purpose |

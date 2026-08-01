@@ -1,0 +1,65 @@
+{
+ "_comment": "Arena (#709). author_fixes: VP-table author errors, caught at the real playfield \u2014 [new_name, real_lamp]. func: the machine's own lamp chart, Premier manual E-25440 printed p42. func_by_name overrides for cross-wired lamps (one lamp, two inserts).",
+ "pinmame": "arena",
+ "author_fixes": {
+  "L1": [
+   "L9",
+   9
+  ],
+  "L9": [
+   "L9b",
+   -1
+  ],
+  "L2": [
+   "L48b",
+   48
+  ]
+ },
+ "func": {
+  "3": "SHOOT AGAIN",
+  "4": "SOUND 16",
+  "5": "1X BONUS MULT",
+  "6": "2X BONUS MULT",
+  "7": "4X BONUS MULT",
+  "8": "8X BONUS MULT",
+  "9": "#1 TOP ROLLOVER",
+  "10": "#2 TOP ROLLOVER",
+  "11": "#3 TOP ROLLOVER",
+  "18": "LIGHT WARRIOR PIT SPECIAL",
+  "19": "WARRIOR PIT (RAMP)",
+  "20": "RAMP VALUE (UPPER)",
+  "21": "EXTRA BALL (UPPER)",
+  "22": "SPECIAL (UPPER)",
+  "23": "1,000,000 (UPPER)",
+  "24": "CAPTURED #1",
+  "25": "CAPTURED #2",
+  "26": "MULTI-BALL RELEASE",
+  "27": "SPINNER",
+  "28": "CYS1 COMPLETED",
+  "29": "CYS2 COMPLETED",
+  "30": "LEFT C SPOT",
+  "31": "LEFT Y SPOT",
+  "32": "LEFT S SPOT",
+  "33": "RIGHT C SPOT",
+  "34": "RIGHT Y SPOT",
+  "35": "RIGHT S SPOT",
+  "36": "W DROP TARGET",
+  "37": "A DROP TARGET",
+  "38": "L DROP TARGET",
+  "39": "L DROP TARGET",
+  "40": "#1 GUARD SPOT",
+  "41": "#2 GUARD SPOT",
+  "42": "#3 GUARD SPOT",
+  "43": "ADVANCE RAMP VALUE",
+  "44": "R.OUTSIDE / L.RETURN ROLLOVER",
+  "45": "P LEFT SIDE ROLLOVER",
+  "46": "I CENTER ROLLOVER",
+  "47": "T RIGHT SIDE ROLLOVER",
+  "48": "L.OUTSIDE / R.RETURN ROLLOVER"
+ },
+ "func_by_name": {
+  "L48b": "L.OUTSIDE ROLLOVER (50,000)",
+  "L48": "R.RETURN ROLLOVER (LIGHT SPINNER)",
+  "L44": "L.RETURN ROLLOVER (LIGHT SPINNER)"
+ }
+}

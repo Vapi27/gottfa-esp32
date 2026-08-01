@@ -1,8 +1,20 @@
 #!/usr/bin/env python
-"""Pull the insert layout out of a Visual Pinball .vpx table -> data/arena_pf.json.
+"""Pull the insert layout out of a Visual Pinball .vpx table -> the board's pf.json.
 
     pip install olefile
-    python tools/vpx_inserts.py "Arena (Gottlieb 1987) 1.0c.vpx" > data/arena_pf.json
+    python tools/vpx_inserts.py <table.vpx> [--config tools/games/<game>.json] > data/arena_pf.json
+
+Works for ANY VP table, not just Arena: the extraction (lights, positions,
+bounds) is game-agnostic. What is per-game lives in an optional config file:
+
+    author_fixes   VP-table author errors, caught at the real playfield:
+                   {"L1": ["L9", 9]} renames the object and sets its real lamp.
+    func           the machine's own lamp chart, from its service manual:
+                   {"9": "#1 TOP ROLLOVER", ...} — shown on the plan tooltips.
+    func_by_name   overrides for cross-wired lamps (one lamp, two inserts).
+
+Without a config the plan still works — labels come from the VP object names,
+functions are just absent until someone reads that game's manual.
 
 Why this exists: the firmware needs to know WHERE each insert is before any
 effect can be about the playfield rather than about the cable. Measuring 99
@@ -57,7 +69,7 @@ def as_text(payload):
     return payload.split(b"\x00")[0].decode("latin-1", "replace")
 
 
-def main(path):
+def main(path, cfg):
     ole = olefile.OleFileIO(path)
     streams = ole.listdir()
 
@@ -105,53 +117,15 @@ def main(path):
         if name.startswith("F"):  return "f"             # flasher
         return None
 
-    # The VP table's light names FOLLOW the machine's own lamp chart (Premier
-    # manual E-25440, printed p42: L3 Shoot Again, L5-L8 multipliers, L9-L11 top
-    # rollovers, L36-L39 the W-A-L-L drop targets, L44-L48 rollovers...).
-    # Verified by geometry: L36-L39 draw the drop-target diagonal mid-table,
-    # L24-L26 sit on the upper deck, L45/46/47 are the P-I-T lanes. An earlier
-    # revision added PinMAME's GTS80_lamp2m offset (+8) on the theory that VP
-    # names were internal numbering; that relabelled correct names into wrong
-    # ones and cost a day of confusion. lamp2m converts to the core matrix, not
-    # to the manual.
-    #
-    # One AUTHOR error in the VP table, caught at the real playfield: the object
-    # named "L1" sits in the top-rollover row — it IS the #1 TOP ROLLOVER, lamp
-    # L9 in the manual — but its name binds it to Controller.Lamp(1), the Game
-    # On RELAY. In VP nobody notices (the relay is on for the whole game); in
-    # attract the insert goes dead while the real machine chases 9-10-11. Fixed
-    # here: display L9, drive from lamp 9. The stray VP object also named "L9"
-    # (bottom-left, not a top rollover) is renamed L9b to keep names unique.
-    FUNC = {
-        3: "SHOOT AGAIN", 4: "SOUND 16",
-        5: "1X BONUS MULT", 6: "2X BONUS MULT", 7: "4X BONUS MULT", 8: "8X BONUS MULT",
-        9: "#1 TOP ROLLOVER", 10: "#2 TOP ROLLOVER", 11: "#3 TOP ROLLOVER",
-        18: "LIGHT WARRIOR PIT SPECIAL", 19: "WARRIOR PIT (RAMP)",
-        20: "RAMP VALUE (UPPER)", 21: "EXTRA BALL (UPPER)", 22: "SPECIAL (UPPER)",
-        23: "1,000,000 (UPPER)", 24: "CAPTURED #1", 25: "CAPTURED #2",
-        26: "MULTI-BALL RELEASE", 27: "SPINNER",
-        28: "CYS1 COMPLETED", 29: "CYS2 COMPLETED",
-        30: "LEFT C SPOT", 31: "LEFT Y SPOT", 32: "LEFT S SPOT",
-        33: "RIGHT C SPOT", 34: "RIGHT Y SPOT", 35: "RIGHT S SPOT",
-        36: "W DROP TARGET", 37: "A DROP TARGET", 38: "L DROP TARGET",
-        39: "L DROP TARGET", 40: "#1 GUARD SPOT", 41: "#2 GUARD SPOT",
-        42: "#3 GUARD SPOT", 43: "ADVANCE RAMP VALUE",
-        44: "R.OUTSIDE / L.RETURN ROLLOVER", 45: "P LEFT SIDE ROLLOVER",
-        46: "I CENTER ROLLOVER", 47: "T RIGHT SIDE ROLLOVER",
-        48: "L.OUTSIDE / R.RETURN ROLLOVER",
-    }
-    # "L2" is the left OUTLANE insert (far left edge, mid-low). The manual has no
-    # insert lamp 2 — lamp 2 is a relay — and Gottlieb cross-wires outlanes:
-    # L48 = L.OUTSIDE (50,000) + R.RETURN, L44 = R.OUTSIDE + L.RETURN. So the
-    # bottom-left insert IS lamp 48, same wire as the right return across from
-    # it, which is exactly how the owner described it: "animate it like the one
-    # facing it".
-    AUTHOR_FIXES = { "L1": ("L9", 9), "L9": ("L9b", -1), "L2": ("L48b", 48) }
-    FUNC_BY_NAME = {
-        "L48b": "L.OUTSIDE ROLLOVER (50,000)",
-        "L48":  "R.RETURN ROLLOVER (LIGHT SPINNER)",
-        "L44":  "L.RETURN ROLLOVER (LIGHT SPINNER)",
-    }
+    # The VP table's light names FOLLOW the machine's own lamp chart (checked on
+    # Arena by geometry against the Premier manual). Do NOT add PinMAME's
+    # GTS80_lamp2m offset: it converts to the core matrix, not to the manual —
+    # that mistake relabelled correct names into wrong ones and cost a day.
+    # Per-game corrections and the manual's lamp chart come from the config;
+    # Arena's (tools/games/arena.json) documents both kinds of fix.
+    FUNC         = {int(k): v for k, v in cfg.get("func", {}).items()}
+    AUTHOR_FIXES = {k: (v[0], v[1]) for k, v in cfg.get("author_fixes", {}).items()}
+    FUNC_BY_NAME = cfg.get("func_by_name", {})
 
     keep = []
     for it in sorted(items, key=lambda z: (z["y"], z["x"])):
@@ -183,4 +157,12 @@ def main(path):
 
 
 if __name__ == "__main__":
-    main(sys.argv[1])
+    args = sys.argv[1:]
+    cfg = {}
+    if "--config" in args:
+        i = args.index("--config")
+        cfg = json.load(open(args[i + 1]))
+        del args[i:i + 2]
+    if not args:
+        sys.exit("usage: vpx_inserts.py <table.vpx> [--config tools/games/<game>.json]")
+    main(args[0], cfg)
