@@ -332,18 +332,10 @@ static void fxRomAttract(Rgbw* buf) {
     T[i] = s_inc ? filamentStep(T[i], on, dt) : (on ? 1.0f : 0.0f);
     if (lamp < 0) { buf[i] = giC; continue; }
 
-    const arenapf::Colour pc = arenapf::colourOfLed(i);
-    if (pc.r | pc.g | pc.b | pc.w) {
-      // The insert's plastic decides the hue, the filament only decides how hard
-      // it is lit — which is how a real playfield works: one warm bulb behind a
-      // moulded colour, not a coloured bulb.
-      const Rgbw f = filament(T[i]);
-      const float lvl = (float)max(max(f.r, f.g), max(f.b, f.w)) / 255.0f;
-      buf[i] = addSat(giC, scale(Rgbw{ pc.r, pc.g, pc.b, pc.w }, lvl));
-    } else {
-      buf[i] = addSat(giC, filament(T[i]));
-    }
+    buf[i] = addSat(giC, filament(T[i]));
   }
+  // Insert colours are applied globally in tick(), not here: the plastic
+  // filters EVERY mode's light, not just the ROM attract's.
 }
 
 // Attract = the five slow animations above, auto-cycled with a crossfade so the
@@ -772,6 +764,20 @@ void tick() {
     for (uint16_t i = 0; i < s_count; i++) s_frame[i] = mix(s_prev[i], s_frame[i], k);
   } else {
     s_xfadeT0 = 0;
+  }
+
+  // Insert plastic colours. On a real playfield the colour IS the moulded
+  // plastic over a warm bulb, so it filters whatever light the mode produces —
+  // classic, attract, rainbow, all of them. The pixel's rendered level becomes
+  // the bulb intensity, the plastic sets the hue. Reported as "the colour menu
+  // does not work": it did, but only inside the ROM attract, which reads as
+  // broken everywhere else.
+  for (uint16_t i = 0; i < s_count; i++) {
+    const arenapf::Colour pc = arenapf::colourOfLed(i);
+    if (!(pc.r | pc.g | pc.b | pc.w)) continue;
+    const Rgbw& c = s_frame[i];
+    const float lvl = (float)max(max(c.r, c.g), max(c.b, c.w)) / 255.0f;
+    s_frame[i] = scale(Rgbw{ pc.r, pc.g, pc.b, pc.w }, lvl);
   }
 
   // Mapping wizard overlay — works on top of any mode, auto-expires.

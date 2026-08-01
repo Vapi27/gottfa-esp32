@@ -129,6 +129,22 @@
   </section>
 
   <section>
+    <h2>Game</h2>
+    <p class="hint">The wall plays <b id="g-atr">&ndash;</b> with <b id="g-ins">&ndash;</b> inserts
+      on the plan. To run <b>your</b> machine: pick its bundle (two files) and upload &mdash;
+      the board validates, reboots, and your pixel mapping is kept. Bundles live in the repo's
+      <code>bundles/</code> folder, or are made from your table + ROM with <code>tools/mkgame.sh</code>.</p>
+    <div class="row"><label>Plan (pf.json)</label>
+      <input type="file" id="g-pf" accept=".json">
+      <button onclick="gUp('pf')">Upload</button></div>
+    <div class="row"><label>Attract (.bin)</label>
+      <input type="file" id="g-at" accept=".bin">
+      <button onclick="gUp('attract')">Upload</button></div>
+    <p class="hint warn">A different table = different inserts: after loading a new plan,
+      re-run the wizard. Assignments pointing past the new table are dropped automatically.</p>
+  </section>
+
+  <section>
     <h2>Mapping wizard</h2>
     <p class="hint">The board lights one pixel; you click the insert it sits under on the plan.
        Every click is saved on the board, so you can stop and come back at any point.</p>
@@ -242,6 +258,8 @@ function render(s) {
 
   if (Date.now() < holdUntil) return;            // don't stomp a slider being dragged
   set('bright', s.bright); set('speed', s.speed); set('gi', s.gi); set('warm', s.warm);
+  $('g-atr').textContent = s.atr ? s.atr + ' s of ROM attract' : 'the generic attract (no capture loaded)';
+  $('g-ins').textContent = s.ins;
   $('incbtn').textContent = s.inc ? 'incandescent: ON' : 'incandescent: off';
   $('incbtn').classList.toggle('on', !!s.inc);
   set('r', s.r); set('g', s.g); set('b', s.b); set('w', s.w);
@@ -253,6 +271,19 @@ function set(k, v) { $(k).value = v; $('o-' + k).value = v; }
 function fmtUp(s) {
   const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
   return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+}
+
+// --- game bundle upload ---
+function gUp(target) {
+  const el = $(target === 'pf' ? 'g-pf' : 'g-at');
+  if (!el.files.length) { toast('pick a file first'); return; }
+  const fd = new FormData();
+  fd.append('u', el.files[0]);
+  toast('uploading...');
+  fetch('/api/game?target=' + target, { method: 'POST', body: fd })
+    .then(r => r.text().then(t => ({ ok: r.ok, t })))
+    .then(x => toast(x.ok ? 'accepted - board is rebooting, reload in ~10 s' : 'REFUSED: ' + x.t))
+    .catch(() => toast('board rebooting - reload the page in ~10 s'));
 }
 
 // --- mapping wizard ---

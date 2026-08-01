@@ -9,6 +9,7 @@
 #include "arenaled.h"
 #include "arena_map.h"
 #include "arena_pf.h"
+#include "arena_attract.h"
 
 namespace arenanet {
 
@@ -43,6 +44,13 @@ static String stateJson() {
   j += ",\"gi\":"     + String(arenaled::gi());
   j += ",\"warm\":"   + String(arenaled::warm());
   j += ",\"inc\":"    + String(arenaled::incandescent() ? 1 : 0);
+  // What the wall is running: seconds of ROM attract (0 = generic fallback)
+  // and how many inserts the plan carries. The Game panel reads these.
+  j += ",\"atr\":"    + String(arenaattract::available()
+                              ? arenaattract::frames() * arenaattract::stepMs() / 1000 : 0);
+  j += ",\"ins\":"    + String(arenapf::insertCount());
+  j += ",\"fsu\":"    + String(LittleFS.usedBytes());
+  j += ",\"fst\":"    + String(LittleFS.totalBytes());
   j += ",\"count\":"  + String(arenaled::count());
   j += ",\"max\":"    + String(LED_MAX);
   j += ",\"r\":" + String(c.r) + ",\"g\":" + String(c.g) +
@@ -332,6 +340,59 @@ void begin() {
     delay(200);
     ESP.restart();
   });
+
+  // --- Game bundle upload ---------------------------------------------------
+  //  POST /api/game?target=pf       multipart file -> /arena_pf.json
+  //  POST /api/game?target=attract  multipart file -> /arena_attract.bin
+  //
+  // This is what makes the wall a product instead of a developer project: a
+  // different machine is two files, uploaded from the browser — no PlatformIO,
+  // no littlefs rebuild, no toolchain. The file lands in a .new temp first and
+  // is VALIDATED before it replaces anything: a truncated upload or a wrong
+  // file must never cost the working setup. Then a clean reboot rather than a
+  // live swap — the render task reads these structures at 63 fps and a reboot
+  // is 3 s of dark wall, which is cheaper than a use-after-free is expensive.
+  // The pixel mapping lives in NVS and survives; a NEW table's inserts differ,
+  // so stale assignments are dropped at load when they point past the table.
+  s_server.on("/api/game", HTTP_POST,
+    [](AsyncWebServerRequest* r) {
+      const bool pf = r->hasParam("target") && r->getParam("target")->value() == "pf";
+      const char* tmp = pf ? "/arena_pf.new" : "/arena_attract.new";
+      const char* dst = pf ? "/arena_pf.json" : "/arena_attract.bin";
+      bool ok = false;
+      File f = LittleFS.open(tmp, "r");
+      if (f) {
+        if (pf) {
+          JsonDocument doc;
+          ok = !deserializeJson(doc, f) && doc["inserts"].is<JsonArray>() &&
+               doc["inserts"].as<JsonArray>().size() > 0;
+        } else {
+          uint16_t hdr[2] = { 0, 0 };
+          f.read((uint8_t*)hdr, 4);
+          ok = hdr[0] > 0 && hdr[1] > 0 && f.size() == (size_t)4 + (size_t)hdr[1] * 8;
+        }
+        f.close();
+      }
+      if (!ok) {
+        LittleFS.remove(tmp);
+        r->send(400, "text/plain", pf ? "not a valid pf.json (needs a non-empty inserts array)"
+                                      : "not a valid attract.bin (u16 step, u16 frames, frames x u64)");
+        return;
+      }
+      LittleFS.remove(dst);
+      LittleFS.rename(tmp, dst);
+      r->send(200, "text/plain", "OK, rebooting");
+      delay(200);
+      ESP.restart();
+    },
+    [](AsyncWebServerRequest* r, String fn, size_t idx, uint8_t* data, size_t len, bool done) {
+      const bool pf = r->hasParam("target") && r->getParam("target")->value() == "pf";
+      const char* tmp = pf ? "/arena_pf.new" : "/arena_attract.new";
+      if (!idx) { LittleFS.remove(tmp); }
+      File f = LittleFS.open(tmp, idx ? "a" : "w");
+      if (f) { f.write(data, len); f.close(); }
+      (void)fn; (void)done;
+    });
 
   // --- OTA: POST a firmware .bin, or the web UI with ?target=fs -------------
   //  /update             -> application partition   (firmware.bin)
