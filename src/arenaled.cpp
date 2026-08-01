@@ -337,7 +337,22 @@ static void fxRomAttract(Rgbw* buf) {
     T[i] = s_inc ? filamentStep(T[i], on, dt) : (on ? 1.0f : 0.0f);
     if (lamp < 0) { buf[i] = giC; continue; }
 
-    buf[i] = addSat(giC, s_inc ? filament(T[i]) : scale(s_color, T[i]));
+    if (s_inc) {
+      // The Colour panel is the bulb's GLASS. Pure white (W only) is clear
+      // glass — the true black-body #47, colour ramp and all. Anything else is
+      // a tinted bulb: the glass sets the hue, the filament keeps the thermal
+      // envelope (rise, fall, ember). Through deep-coloured glass the cold-red
+      // ramp is invisible on a real bulb too, so nothing of value is lost.
+      const Rgbw f = filament(T[i]);
+      if ((s_color.r | s_color.g | s_color.b) == 0) {
+        buf[i] = addSat(giC, f);
+      } else {
+        const float lvl = (float)max(max(f.r, f.g), max(f.b, f.w)) / 255.0f;
+        buf[i] = addSat(giC, scale(s_color, lvl));
+      }
+    } else {
+      buf[i] = addSat(giC, scale(s_color, T[i]));
+    }
   }
   // Insert colours are applied globally in tick(), not here: the plastic
   // filters EVERY mode's light, not just the ROM attract's.
