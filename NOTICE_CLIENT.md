@@ -1,47 +1,74 @@
-# Wall Pinball Playfield — Notice
+# Wall Pinball Playfield — Notice de montage
 
-*Votre plateau rejoue les vraies lumières de la machine d'origine.*
+*Votre plateau rejouera les vraies lumières de la machine d'origine.*
 
-## 1 · Brancher
+## Dans le kit
 
-Branchez l'alimentation 5 V fournie. Le plateau s'allume seul, en douceur.
+- La **carte de contrôle** (port USB-C)
+- Les **cartes LED** (une par insert) + le **câble** (bus d'alimentation et liaisons data)
+- Non fourni : un chargeur **USB-C 5 V / 3 A** (n'importe quel chargeur de
+  téléphone récent convient) et votre plateau.
 
-## 2 · Connecter (première fois seulement)
+## 1 · Poser les cartes LED
 
-1. Sur votre téléphone : WiFi **`Arena-LED`**, mot de passe **`pinball87`**.
-2. Ouvrez **`http://192.168.4.1`** et renseignez votre WiFi maison.
-3. Ensuite, depuis chez vous : **`http://arena.local/`**
+Une carte sous chaque insert à éclairer, LED vers le plastique.
 
-*Pas de WiFi maison ? Restez simplement sur `Arena-LED` — tout fonctionne pareil.*
+## 2 · Câbler — la règle d'or : la masse d'abord
 
-## 3 · Utiliser
+1. **Le bus** : deux fils (+5 V et GND) qui courent ensemble sous le plateau et
+   traversent les pattes latérales de chaque carte LED.
+   Au-delà de ~30 cartes, ramenez une seconde paire du bus vers la carte de
+   contrôle (« injection ») pour éviter les couleurs jaunies en bout de chaîne.
+2. **La chaîne data** : `OUT` d'une carte → `IN` de la suivante. Sauts **courts**
+   (≤ 15 cm), qui longent le bus — jamais en boucle qui s'en écarte.
+3. La **carte de contrôle** : sortie LED → `IN` de la première carte, bus sur
+   ses borniers. Puis le câble USB-C.
 
-Tout se passe sur la page web :
+## 3 · Premier allumage — par paliers
 
-- **Modes** — `attract` : le jeu de lumières **d'origine** de la machine ·
-  `classic` : blanc chaud fixe · `arena` : animations du plateau ·
-  `night` : veilleuse · `rainbow` : couleurs · `music` : suit votre musique.
-- **Réglages** — luminosité, vitesse (se cale d'elle-même sur la cadence
-  d'origine ×1), *Glow* (fond lumineux), *Warmth* (chaleur), *Filament*
-  (rendu ampoule à incandescence), couleur libre et deux presets :
-  **original bulb** (ampoule neuve) / **older bulb** (ampoule patinée).
-- **Save** — vos réglages deviennent ceux du démarrage.
+Branchez avec ~10 cartes raccordées, pas tout d'un coup :
 
-## 4 · C'est normal (pas une panne)
+1. WiFi **`Arena-LED`** (mot de passe **`pinball87`**) → **`http://192.168.4.1`**
+   → renseignez votre WiFi. Ensuite : **`http://arena.local/`**
+2. Mode **`test`** : chaque LED cycle rouge → vert → bleu → blanc, avec un
+   pixel blanc qui parcourt la chaîne. Là où il s'arrête, le raccord suivant
+   est en cause.
+3. Ça marche ? Ajoutez le tronçon suivant (courant coupé !) et recommencez.
 
-- En `attract`, **quelques inserts restent éteints** : la vraie machine fait
-  exactement pareil hors partie — ce sont des lampes de jeu.
-- Si tout **baisse d'un coup**, la protection électrique travaille : trop de
-  lampes à pleine puissance en même temps. Rien à faire.
-- Après une **coupure de courant**, tout revient tel que vous l'aviez réglé.
+## 4 · Dire au plateau où sont ses lampes (une fois)
 
-## 5 · Sécurité
+Page web → **Mapping wizard** → réglez le nombre de LEDs → **Start walking** :
+une LED clignote sur votre plateau, **cliquez l'insert correspondant sur le
+plan** — et ainsi de suite. Chaque clic est enregistré ; vous pouvez vous
+arrêter et reprendre quand vous voulez. C'est ce qui permet au plateau de
+rejouer les vraies séquences de la machine.
 
-- Uniquement l'**alimentation 5 V fournie** · fusible **3 A** — jamais plus gros.
-- Usage **intérieur**, au sec. Ne rien débrancher sous tension.
+## 5 · Utiliser
 
-## 6 · Un souci ?
+- **Modes** : `attract` (le jeu de lumières **d'origine**), `classic` (blanc
+  chaud), `arena`, `night`, `rainbow`, `music` (suit votre musique).
+- **Réglages** : luminosité, vitesse (se cale sur la cadence d'origine),
+  fond lumineux, chaleur, rendu ampoule (*Filament*), couleur libre + presets
+  **original bulb** / **older bulb**.
+- **Save** : vos réglages deviennent ceux du démarrage.
 
-- **Page introuvable** : votre box a peut-être changé — le plateau rouvre alors
-  le WiFi `Arena-LED` tout seul → refaites l'étape 2.
+## 6 · C'est normal (pas une panne)
+
+- En `attract`, **certains inserts restent éteints** : la vraie machine fait
+  pareil hors partie (lampes de jeu).
+- Si tout **baisse d'un coup** : la protection électrique limite la puissance.
+- Après une **coupure de courant**, tout revient tel quel — réglages et
+  mappage compris.
+
+## 7 · Sécurité
+
+- Chargeur **USB-C 5 V de qualité** uniquement. Usage **intérieur**, au sec.
+- **Toujours couper l'alimentation** avant de raccorder ou modifier le câblage.
+
+## 8 · Un souci ?
+
+- **Une LED reste noire et tout ce qui suit aussi** : c'est la première LED
+  noire qui est en cause (alimentation ou raccord), pas les suivantes.
+- **Page introuvable** : le plateau rouvre le WiFi `Arena-LED` de lui-même
+  quand il ne trouve plus votre réseau → refaites l'étape 3.1.
 - **Support** : formulaire de contact sur **pinballs.store**
