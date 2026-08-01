@@ -105,6 +105,18 @@ def main(path):
         if name.startswith("F"):  return "f"             # flasher
         return None
 
+    # Two numbers, and they are NOT the same one.
+    #
+    #   "l" is PinMAME's internal lamp index. The captured attract sequence is a
+    #       bit mask indexed by it, so this is what the firmware must use.
+    #   "n" is what the MACHINE calls that lamp, which is what is printed in the
+    #       manual and what the owner reads off the playfield. PinMAME converts
+    #       between them in gts80.c:  GTS80_lamp2m(no) { return no + 8; }
+    #
+    # Labelling the plan with PinMAME's numbering was wrong in a way that only a
+    # person standing at the machine could catch: "your map says 1, the playfield
+    # says 9". Off by exactly 8, as the source above says it must be.
+    LAMP_OFFSET = 8
     keep = []
     for it in sorted(items, key=lambda z: (z["y"], z["x"])):
         if it["kind"] != "light":
@@ -112,9 +124,15 @@ def main(path):
         k = kind(it["name"])
         if not k:
             continue
-        keep.append({"n": it["name"][:7], "k": k,
-                     "x": round(it["x"] / bounds["RGHT"], 4),
-                     "y": round(it["y"] / bounds["BOTM"], 4)})
+        m = re.match(r"^L(\d+)(.*)$", it["name"])
+        if m:
+            vp, suffix = int(m.group(1)), m.group(2)
+            rec = {"n": "L%d%s" % (vp + LAMP_OFFSET, suffix), "l": vp, "k": k}
+        else:
+            rec = {"n": it["name"][:7], "l": -1, "k": k}     # flashers: no matrix lamp
+        rec["x"] = round(it["x"] / bounds["RGHT"], 4)
+        rec["y"] = round(it["y"] / bounds["BOTM"], 4)
+        keep.append(rec)
 
     rows = ",\n".join(json.dumps(r, separators=(",", ":")) for r in keep)
     print("{\"inserts\":[\n" + rows + "\n]}")

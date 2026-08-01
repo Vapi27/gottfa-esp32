@@ -131,7 +131,7 @@
        Every click is saved on the board, so you can stop and come back at any point.</p>
     <div class="row">
       <button id="wz-go" onclick="wzStart()">Start walking</button>
-      <button onclick="wzStop()">Stop</button>
+      <button onclick="wzFinish()">Done</button>
       <span class="bar"><i id="wz-bar" style="width:0"></i></span>
       <output id="wz-pos" style="width:96px">&ndash;</output>
     </div>
@@ -256,7 +256,17 @@ function pfLoad() {
   ]).then(wzDraw).catch(() => {});
 }
 function wzStart() { $('wz-body').style.display = ''; pfLoad().then(() => wzGo(wz.at)); }
-function wzStop()  { api('/api/identify?clear=1'); }
+// Leaving the wizard has to put the wall back the way it was: the spotlight is
+// an overlay that outlives the panel being closed, so a wizard you merely
+// navigate away from leaves one pixel blinking white for ten minutes.
+function wzFinish() {
+  api('/api/identify?clear=1');
+  $('wz-body').style.display = 'none';
+  const placed = Object.keys(LEDMAP).length, total = st.count || 0;
+  toast(placed + ' of ' + total + ' pixels placed' +
+        (placed < total ? ' - ' + (total - placed) + ' still unassigned' : ' - chain complete'));
+}
+function wzStop() { wzFinish(); }
 
 function wzGo(n) {
   const last = Math.max(0, (st.count || 1) - 1);

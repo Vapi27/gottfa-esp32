@@ -96,13 +96,14 @@ static bool loadInserts() {
     it.name[NAME_LEN - 1] = 0;
     const char* k = o["k"] | "i";
     it.kind = k[0];
-    // "L26a" -> 26. The suffix means two physical inserts on one lamp, which is
-    // exactly right: both should light together, and both will.
-    it.lamp = -1;
-    if (it.name[0] == 'L' && isdigit((unsigned char)it.name[1])) {
-      const int n = atoi(it.name + 1);
-      if (n >= 0 && n < 64) it.lamp = (int8_t)n;
-    }
+    // Two numbers, and confusing them cost an evening. "l" is PinMAME's internal
+    // lamp index, which is what the captured ROM sequence is indexed by. The
+    // NAME carries what the machine calls that lamp (PinMAME + 8, per
+    // GTS80_lamp2m), because that is what is written in the manual and on the
+    // playfield — so it is what the plan must show and what the firmware must
+    // never compute with.
+    const int l = o["l"] | -1;
+    it.lamp = (l >= 0 && l < 64) ? (int8_t)l : -1;
     it.x = o["x"] | 0.0f;
     it.y = o["y"] | 0.0f;
     s_nIns++;
