@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="fr">
+<head>
+<meta charset="utf-8">
+<title>Wall Pinball Playfield — Notice (livret)</title>
+<style>
+  /* Livret A5 : imprimer en A5 (ou 2 pages par feuille A4 → pliage livret).
+     Chaque .page = une page imprimée. Les cadres pointillés = photos à fournir. */
+  @page { size: A5; margin: 12mm; }
+  * { box-sizing: border-box; margin: 0; }
+  body { font: 10.5pt/1.5 "Helvetica Neue", Arial, sans-serif; color: #1a1a1a; }
+  .page { page-break-after: always; padding: 4mm 0; min-height: 170mm; }
+  h1 { font-size: 20pt; letter-spacing: .04em; }
+  h2 { font-size: 13pt; margin: 0 0 4mm; padding-bottom: 2mm; border-bottom: 2px solid #c8501e; }
+  h2 .num { color: #c8501e; margin-right: 4mm; }
+  p, li { margin-bottom: 2mm; }
+  ol, ul { padding-left: 5mm; }
+  b { color: #000; }
+  code { font: 9.5pt/1 "SF Mono", Menlo, monospace; background: #f0ece6; padding: 1px 4px; border-radius: 3px; }
+  .photo { border: 2px dashed #b0a89c; border-radius: 3mm; background: #faf8f5;
+           display: flex; flex-direction: column; align-items: center; justify-content: center;
+           text-align: center; color: #8a8073; margin: 4mm 0; padding: 4mm; }
+  .photo .cam { font-size: 18pt; }
+  .photo .quoi { font-weight: 600; color: #6b6258; }
+  .photo small { font-size: 8pt; }
+  .h-160 { height: 62mm; } .h-100 { height: 40mm; } .h-70 { height: 28mm; }
+  .hint { background: #f4efe8; border-left: 3mm solid #c8501e; padding: 3mm 4mm; margin: 3mm 0; font-size: 9.5pt; }
+  .cover { display: flex; flex-direction: column; justify-content: space-between; min-height: 175mm; text-align: center; }
+  .cover .sub { color: #c8501e; font-style: italic; margin-top: 2mm; }
+  .cover .brand { font-size: 9pt; letter-spacing: .2em; color: #8a8073; }
+  table { width: 100%; border-collapse: collapse; font-size: 9.5pt; margin: 3mm 0; }
+  td, th { padding: 1.5mm 2mm; border-bottom: 1px solid #e0d8cc; text-align: left; vertical-align: top; }
+  th { color: #c8501e; font-size: 8.5pt; text-transform: uppercase; letter-spacing: .08em; }
+  .back { text-align: center; display: flex; flex-direction: column; justify-content: flex-end; min-height: 170mm; color: #6b6258; }
+  .shotlist { border: 2px solid #c8501e; border-radius: 3mm; padding: 4mm; }
+  svg text { font: 8pt "Helvetica Neue", Arial, sans-serif; }
+  @media screen { body { background: #888; }
+    .page { background: #fff; width: 148mm; margin: 8mm auto; padding: 12mm; box-shadow: 0 2px 12px rgba(0,0,0,.4); } }
+</style>
+</head>
+<body>
+
+<!-- ============ COUVERTURE ============ -->
+<div class="page cover">
+  <div>
+    <div class="brand">PINBALLS.STORE</div>
+    <h1>WALL PINBALL<br>PLAYFIELD</h1>
+    <div class="sub">Votre plateau rejoue les vraies lumières<br>de la machine d'origine.</div>
+  </div>
+  <div class="photo h-160">
+    <div class="cam">&#128247;</div>
+    <div class="quoi">PHOTO — le mur fini, allumé, dans une pièce sombre</div>
+    <small>plein cadre, mode attract, la photo qui vend</small>
+  </div>
+  <div class="brand">NOTICE DE MONTAGE</div>
+</div>
+
+<!-- ============ PAGE 1 : KIT ============ -->
+<div class="page">
+  <h2><span class="num">1</span>Dans le kit</h2>
+  <ul>
+    <li>La <b>carte de contrôle</b> (port USB-C)</li>
+    <li>Les <b>cartes LED</b> — une par insert</li>
+    <li>Le <b>câble</b> : bus d'alimentation et liaisons data</li>
+  </ul>
+  <div class="photo h-100">
+    <div class="cam">&#128247;</div>
+    <div class="quoi">PHOTO — le kit complet à plat, pièces légendées</div>
+    <small>fond neutre, vue du dessus</small>
+  </div>
+  <div class="hint"><b>Non fourni :</b> un chargeur <b>USB-C 5&nbsp;V / 3&nbsp;A</b>
+  (n'importe quel chargeur de téléphone récent) — et votre plateau.</div>
+</div>
+
+<!-- ============ PAGE 2 : POSE + CÂBLAGE ============ -->
+<div class="page">
+  <h2><span class="num">2</span>Poser, puis câbler</h2>
+  <p>Une carte LED sous chaque insert, LED vers le plastique.</p>
+  <div class="photo h-70">
+    <div class="cam">&#128247;</div>
+    <div class="quoi">PHOTO — une carte LED posée sous un insert, vue de dessous</div>
+  </div>
+  <p><b>La règle d'or : la masse d'abord.</b></p>
+  <ol>
+    <li><b>Le bus</b> : deux fils (+5&nbsp;V et GND) qui courent <b>ensemble</b> sous le
+      plateau et traversent les pattes latérales de chaque carte.
+      Au-delà de ~30 cartes, tirez une seconde paire vers la carte de contrôle
+      (« injection ») — sinon les blancs jaunissent en bout de chaîne.</li>
+    <li><b>La chaîne data</b> : <code>OUT</code> d'une carte → <code>IN</code> de la
+      suivante. Sauts <b>courts</b> (≤ 15&nbsp;cm), qui longent le bus.</li>
+    <li><b>La carte de contrôle</b> : sortie LED → <code>IN</code> de la première carte,
+      bus sur les borniers, puis le câble USB-C.</li>
+  </ol>
+  <svg viewBox="0 0 420 96" style="width:100%">
+    <rect x="4" y="30" width="86" height="40" rx="6" fill="none" stroke="#1a1a1a" stroke-width="1.6"/>
+    <text x="47" y="47" text-anchor="middle">carte de</text>
+    <text x="47" y="59" text-anchor="middle">contrôle</text>
+    <rect x="10" y="14" width="26" height="10" rx="2" fill="none" stroke="#c8501e" stroke-width="1.4"/>
+    <text x="42" y="23" fill="#c8501e">USB-C</text>
+    <g stroke="#1a1a1a" stroke-width="1.4">
+      <line x1="90" y1="40" x2="410" y2="40"/><line x1="90" y1="62" x2="410" y2="62"/>
+    </g>
+    <text x="402" y="36" text-anchor="end">bus +5&nbsp;V</text>
+    <text x="402" y="76" text-anchor="end">bus GND</text>
+    <g>
+      <rect x="130" y="44" width="34" height="16" rx="3" fill="#fff" stroke="#c8501e" stroke-width="1.6"/>
+      <rect x="200" y="44" width="34" height="16" rx="3" fill="#fff" stroke="#c8501e" stroke-width="1.6"/>
+      <rect x="270" y="44" width="34" height="16" rx="3" fill="#fff" stroke="#c8501e" stroke-width="1.6"/>
+      <text x="147" y="55" text-anchor="middle" fill="#c8501e">LED</text>
+      <text x="217" y="55" text-anchor="middle" fill="#c8501e">LED</text>
+      <text x="287" y="55" text-anchor="middle" fill="#c8501e">LED</text>
+    </g>
+    <g stroke="#c8501e" stroke-width="1.4" fill="none">
+      <path d="M90 52 Q110 52 130 52"/><path d="M164 52 Q182 52 200 52"/><path d="M234 52 Q252 52 270 52"/>
+      <path d="M304 52 L326 52" stroke-dasharray="3 3"/>
+    </g>
+    <text x="112" y="88" fill="#c8501e">data : OUT → IN, sauts courts le long du bus</text>
+  </svg>
+</div>
+
+<!-- ============ PAGE 3 : ALLUMAGE ============ -->
+<div class="page">
+  <h2><span class="num">3</span>Premier allumage — par paliers</h2>
+  <p>Branchez avec <b>~10 cartes</b> raccordées, pas tout d'un coup.</p>
+  <ol>
+    <li>Sur votre téléphone : WiFi <b><code>Arena-LED</code></b>, mot de passe
+      <b><code>pinball87</code></b> → ouvrez <b><code>http://192.168.4.1</code></b> →
+      renseignez votre WiFi. Ensuite : <b><code>http://arena.local/</code></b></li>
+    <li>Mode <b><code>test</code></b> : chaque LED cycle rouge → vert → bleu → blanc,
+      un pixel blanc parcourt la chaîne. <b>Là où il s'arrête, le raccord suivant est
+      en cause.</b></li>
+    <li>Ça marche ? Coupez le courant, ajoutez le tronçon suivant, recommencez.</li>
+  </ol>
+  <div class="photo h-100">
+    <div class="cam">&#128247;</div>
+    <div class="quoi">PHOTO — le plateau en mode test, pixel blanc visible</div>
+    <small>ou une série de 3 vignettes : 10 cartes → 30 → toutes</small>
+  </div>
+</div>
+
+<!-- ============ PAGE 4 : MAPPAGE ============ -->
+<div class="page">
+  <h2><span class="num">4</span>Dire au plateau où sont ses lampes <small>(une seule fois)</small></h2>
+  <p>Page web → <b>Mapping wizard</b> → réglez le nombre de LEDs →
+    <b>Start walking</b> : une LED clignote sur votre plateau,
+    <b>cliquez l'insert correspondant sur le plan</b>. Et ainsi de suite.</p>
+  <div class="photo h-100">
+    <div class="cam">&#128247;</div>
+    <div class="quoi">CAPTURE D'ÉCRAN — le wizard : plan du plateau + pastille cliquée</div>
+    <small>téléphone en main devant le plateau, si possible</small>
+  </div>
+  <p>Chaque clic est enregistré — arrêtez-vous et reprenez quand vous voulez.
+  C'est ce qui permet au plateau de rejouer <b>les vraies séquences de la machine</b>.</p>
+</div>
+
+<!-- ============ PAGE 5 : UTILISER ============ -->
+<div class="page">
+  <h2><span class="num">5</span>Utiliser</h2>
+  <table>
+    <tr><th>Mode</th><th>Ce qu'il joue</th></tr>
+    <tr><td><code>attract</code></td><td><b>le jeu de lumières d'origine</b> de la machine</td></tr>
+    <tr><td><code>classic</code></td><td>blanc chaud fixe, rendu incandescent</td></tr>
+    <tr><td><code>arena</code></td><td>animations qui suivent le plateau</td></tr>
+    <tr><td><code>night</code> / <code>rainbow</code></td><td>veilleuse / couleurs</td></tr>
+    <tr><td><code>music</code></td><td>suit la musique de la pièce</td></tr>
+  </table>
+  <p><b>Réglages</b> : luminosité · vitesse (se cale sur la cadence d'origine) ·
+  fond lumineux · chaleur · rendu ampoule (<i>Filament</i>) · couleur libre +
+  presets <b>original bulb</b> / <b>older bulb</b>.
+  <b>Save</b> = vos réglages au démarrage.</p>
+  <div class="photo h-70">
+    <div class="cam">&#128247;</div>
+    <div class="quoi">CAPTURE D'ÉCRAN — la page web, panneau des modes et réglages</div>
+  </div>
+  <div class="hint"><b>C'est normal :</b> en <code>attract</code> certains inserts restent
+  éteints (la vraie machine fait pareil hors partie) · si tout baisse d'un coup, la
+  protection électrique travaille · après une coupure, tout revient tel quel.</div>
+</div>
+
+<!-- ============ PAGE 6 : SÉCURITÉ + AIDE ============ -->
+<div class="page">
+  <h2><span class="num">6</span>Sécurité &amp; dépannage</h2>
+  <ul>
+    <li>Chargeur <b>USB-C 5&nbsp;V de qualité</b> uniquement. Usage <b>intérieur</b>, au sec.</li>
+    <li><b>Toujours couper l'alimentation</b> avant de toucher au câblage.</li>
+  </ul>
+  <table>
+    <tr><th>Symptôme</th><th>Réflexe</th></tr>
+    <tr><td>Une LED noire, tout ce qui suit noir</td>
+        <td><b>la première LED noire est la coupable</b> — alimentation ou raccord</td></tr>
+    <tr><td>Page introuvable</td>
+        <td>le plateau rouvre <code>Arena-LED</code> de lui-même → refaites l'étape 3.1</td></tr>
+    <tr><td>Rouge et vert échangés</td>
+        <td>réglage <code>order</code> sur la page — sans rien recâbler</td></tr>
+  </table>
+</div>
+
+<!-- ============ DOS ============ -->
+<div class="page back">
+  <div class="photo h-70" style="margin-bottom:8mm">
+    <div class="cam">&#128247;</div>
+    <div class="quoi">PHOTO — détail du plateau allumé (ambiance) ou logo</div>
+  </div>
+  <p><b>Support</b> — formulaire de contact sur <b>pinballs.store</b></p>
+  <p style="font-size:8pt">Wall Pinball Playfield · Pstore Pinball Platform</p>
+</div>
+
+<!-- ============ PAGE INTERNE — À RETIRER AVANT IMPRESSION ============ -->
+<div class="page">
+  <div class="shotlist">
+    <h2>Liste des photos à fournir <small>(page à supprimer avant impression)</small></h2>
+    <ol>
+      <li><b>Couverture</b> — le mur fini allumé, pièce sombre, mode attract, plein cadre</li>
+      <li><b>Kit</b> — toutes les pièces à plat, fond neutre, vue du dessus</li>
+      <li><b>Pose</b> — une carte LED posée sous un insert, vue de dessous</li>
+      <li><b>Allumage</b> — le plateau en mode test (ou 3 vignettes : 10 → 30 → toutes)</li>
+      <li><b>Mappage</b> — capture du wizard, pastille cliquée (téléphone devant le plateau)</li>
+      <li><b>Utilisation</b> — capture de la page web (modes + réglages)</li>
+      <li><b>Dos</b> — détail d'ambiance ou logo</li>
+    </ol>
+    <p>Pour insérer une photo : remplacer le bloc
+    <code>&lt;div class="photo"&gt;…&lt;/div&gt;</code> par
+    <code>&lt;img src="photo.jpg" style="width:100%;border-radius:3mm"&gt;</code></p>
+    <p>Impression : A5 direct, ou « 2 pages par feuille » sur A4 pour un pliage livret.</p>
+  </div>
+</div>
+
+</body>
+</html>
