@@ -1,0 +1,460 @@
+#include <WiFi.h>
+#include <LittleFS.h>
+#include <ESPmDNS.h>
+#include <ESPAsyncWebServer.h>
+#include <Preferences.h>
+#include <Update.h>
+#include "arena_config.h"
+#include "arena_net.h"
+#include "arenaled.h"
+#include "arena_map.h"
+#include "arena_pf.h"
+#include "arena_attract.h"
+
+namespace arenanet {
+
+static AsyncWebServer s_server(80);
+static Preferences    s_prefs;
+static String         s_ip   = "0.0.0.0";
+static String         s_mode = "init";
+
+const char* ip()   { return s_ip.c_str(); }
+const char* mode() { return s_mode.c_str(); }
+
+// Served when LittleFS is empty (nobody ran `pio run -e arenaled -t uploadfs` yet):
+// enough UI to prove the chain lights up and to reach the mode buttons.
+static const char FALLBACK[] PROGMEM =
+  "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'>"
+  "<title>Arena LED</title><style>body{background:#111;color:#eee;font:16px system-ui;padding:2em}"
+  "a{display:inline-block;margin:.3em;padding:.6em 1em;background:#c60;color:#fff;"
+  "text-decoration:none;border-radius:6px}</style><h1>Arena LED</h1>"
+  "<p>Web UI not uploaded yet — run <code>pio run -e arenaled -t uploadfs</code>.</p>"
+  "<p><a href='/api/set?mode=classic'>classic</a><a href='/api/set?mode=attract'>attract</a>"
+  "<a href='/api/set?mode=arena'>arena</a><a href='/api/set?mode=night'>night</a>"
+  "<a href='/api/set?mode=rainbow'>rainbow</a><a href='/api/set?mode=test'>test</a>"
+  "<a href='/api/set?mode=off'>off</a></p><p><a href='/api/state'>/api/state</a></p>";
+
+static String stateJson() {
+  arenaled::Rgbw c = arenaled::color();
+  String j = "{";
+  j += "\"fw\":\"" ARENA_FW_VERSION "\"";
+  j += ",\"mode\":\"" + String(arenaled::modeName(arenaled::mode())) + "\"";
+  j += ",\"bright\":" + String(arenaled::brightness());
+  j += ",\"speed\":"  + String(arenaled::speed());
+  j += ",\"gi\":"     + String(arenaled::gi());
+  j += ",\"warm\":"   + String(arenaled::warm());
+  j += ",\"inc\":"    + String(arenaled::incandescent() ? 1 : 0);
+  // What the wall is running: seconds of ROM attract (0 = generic fallback)
+  // and how many inserts the plan carries. The Game panel reads these.
+  j += ",\"atr\":"    + String(arenaattract::available()
+                              ? arenaattract::frames() * arenaattract::stepMs() / 1000 : 0);
+  j += ",\"ins\":"    + String(arenapf::insertCount());
+  j += ",\"fsu\":"    + String(LittleFS.usedBytes());
+  j += ",\"fst\":"    + String(LittleFS.totalBytes());
+  j += ",\"count\":"  + String(arenaled::count());
+  j += ",\"max\":"    + String(LED_MAX);
+  j += ",\"r\":" + String(c.r) + ",\"g\":" + String(c.g) +
+       ",\"b\":" + String(c.b) + ",\"w\":" + String(c.w);
+  j += ",\"amps\":"   + String(arenaled::lastAmps(), 2);
+  // Also in mA: two decimals of an amp cannot show a bench of one or three LEDs
+  // (a single pixel in TEST mode is ~4 mA, which prints as "0.00" and reads like
+  // a broken meter). mA is what the multimeter in the +5 V wire shows anyway.
+  j += ",\"ma\":"     + String(arenaled::lastAmps() * 1000.0f, 1);
+  j += ",\"budget\":" + String(arenaled::budgetMa());
+  j += ",\"order\":\""  + String(arenaled::order()) + "\"";
+  j += ",\"limited\":" + String(arenaled::limited() ? "true" : "false");
+  j += ",\"fps\":"    + String(arenaled::fps());
+  j += ",\"ip\":\""   + s_ip + "\",\"net\":\"" + s_mode + "\"";
+  j += ",\"up\":"     + String(millis() / 1000);
+  j += ",\"heap\":"   + String(ESP.getFreeHeap());
+  j += "}";
+  return j;
+}
+
+static uint8_t param8(AsyncWebServerRequest* r, const char* k, uint8_t cur) {
+  if (!r->hasParam(k)) return cur;
+  long v = r->getParam(k)->value().toInt();
+  if (v < 0) v = 0;
+  if (v > 255) v = 255;
+  return (uint8_t)v;
+}
+
+void begin() {
+  // --- WiFi: NVS credentials (set from the UI) override the compile-time ones ---
+  s_prefs.begin("arenanet", false);
+  String ssid = s_prefs.getString("ssid", ARENA_STA_SSID);
+  String pass = s_prefs.getString("pass", ARENA_STA_PASS);
+
+#ifdef ARENA_MATTER
+  // Matter owns WiFi: commissioning stores the credentials and CHIP drives
+  // esp_wifi. We only wait for an address. No SoftAP (an AP interface fights
+  // the CHIP station state machine) and no ESPmDNS (CHIP minimal mDNS holds
+  // port 5353) - reach the board by IP; proper mdns unification is P3 work.
+  Serial.println("[net] Matter owns WiFi - waiting for an address");
+  for (int i = 0; i < 60 && WiFi.localIP() == IPAddress(); i++) delay(500);
+  s_mode = "Matter";
+  s_ip = WiFi.localIP().toString();
+  Serial.printf("[net] ip=%s\n", s_ip.c_str());
+#else
+  WiFi.persistent(false);
+  bool connected = false;
+  if (ssid.length()) {
+    WiFi.mode(WIFI_STA);
+    WiFi.setHostname(ARENA_MDNS_HOST);
+    WiFi.setSleep(false);            // keep the REST latency low; the wall is mains-powered
+    Serial.printf("[net] STA connecting to '%s' ...\n", ssid.c_str());
+    WiFi.begin(ssid.c_str(), pass.c_str());
+    uint32_t t0 = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - t0 < ARENA_STA_TIMEOUT_MS) {
+      delay(250);
+      Serial.print('.');
+    }
+    Serial.println();
+    connected = (WiFi.status() == WL_CONNECTED);
+  }
+  if (connected) {
+    s_mode = "STA";
+    s_ip = WiFi.localIP().toString();
+    Serial.printf("[net] STA OK ip=%s\n", s_ip.c_str());
+  } else {
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(ARENA_AP_SSID, ARENA_AP_PASS);
+    s_mode = "SoftAP";
+    s_ip = WiFi.softAPIP().toString();
+    Serial.printf("[net] SoftAP '%s' ip=%s\n", ARENA_AP_SSID, s_ip.c_str());
+  }
+  if (MDNS.begin(ARENA_MDNS_HOST)) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.printf("[net] http://%s.local/\n", ARENA_MDNS_HOST);
+  }
+
+#endif
+
+  // --- UI ---------------------------------------------------------------
+  s_server.on("/", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (LittleFS.exists("/arena.html")) r->send(LittleFS, "/arena.html", "text/html");
+    else                                r->send_P(200, "text/html", FALLBACK);
+  });
+
+  // --- State / control ----------------------------------------------------
+  s_server.on("/api/state", HTTP_GET, [](AsyncWebServerRequest* r) {
+    r->send(200, "application/json", stateJson());
+  });
+
+  //  /api/set?mode=arena&bright=180&speed=128&r=255&g=100&b=0&w=0&count=100&budget=9000&order=grbw
+  s_server.on("/api/set", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (r->hasParam("mode")) {
+      arenaled::Mode m = arenaled::modeFromName(r->getParam("mode")->value().c_str());
+      if (m == arenaled::MODE_COUNT) { r->send(400, "text/plain", "bad mode"); return; }
+      arenaled::setMode(m);
+    }
+    if (r->hasParam("bright")) arenaled::setBrightness(param8(r, "bright", arenaled::brightness()));
+    if (r->hasParam("speed"))  arenaled::setSpeed(param8(r, "speed", arenaled::speed()));
+    if (r->hasParam("gi"))     arenaled::setGi(param8(r, "gi", arenaled::gi()));
+    if (r->hasParam("warm"))   arenaled::setWarm(param8(r, "warm", arenaled::warm()));
+    if (r->hasParam("inc"))    arenaled::setIncandescent(r->getParam("inc")->value().toInt() != 0);
+    if (r->hasParam("r") || r->hasParam("g") || r->hasParam("b") || r->hasParam("w")) {
+      arenaled::Rgbw c = arenaled::color();
+      c.r = param8(r, "r", c.r);
+      c.g = param8(r, "g", c.g);
+      c.b = param8(r, "b", c.b);
+      c.w = param8(r, "w", c.w);
+      arenaled::setColor(c);
+    }
+    if (r->hasParam("order")) {
+      if (!arenaled::setOrder(r->getParam("order")->value().c_str())) {
+        r->send(400, "text/plain", "bad order (grbw|rgbw|gbrw|brgw|rbgw|bgrw)");
+        return;
+      }
+    }
+    if (r->hasParam("count"))  arenaled::setCount((uint16_t)r->getParam("count")->value().toInt());
+    if (r->hasParam("budget")) arenaled::setBudgetMa((uint16_t)r->getParam("budget")->value().toInt());
+    r->send(200, "application/json", stateJson());
+  });
+
+  // /api/latch?n=L9,L48   lamps held lit through attract, by the MACHINE's name
+  // /api/latch?clear=1    release them all
+  // Named, not numbered: the owner reads L9 off the playfield, and the mask
+  // underneath is in PinMAME's numbering, which nobody should have to know.
+  s_server.on("/api/latch", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (r->hasParam("clear")) { arenaled::setLatched(0); arenaled::save(); }
+    else if (r->hasParam("n")) {
+      uint64_t m = 0;
+      String list = r->getParam("n")->value();
+      list.trim();
+      int start = 0;
+      while (start < (int)list.length()) {
+        int comma = list.indexOf(',', start);
+        if (comma < 0) comma = list.length();
+        String one = list.substring(start, comma);
+        one.trim();
+        start = comma + 1;
+        if (!one.length()) continue;
+        const int idx = arenapf::indexOf(one.c_str());
+        const arenapf::Insert* ins = (idx >= 0) ? arenapf::insert((uint8_t)idx) : nullptr;
+        if (!ins || ins->lamp < 0) {
+          r->send(400, "text/plain", "unknown insert: " + one);
+          return;
+        }
+        m |= (1ULL << ins->lamp);
+      }
+      arenaled::setLatched(m);
+      arenaled::save();
+    }
+    // Answer in the owner's names, not in the internal mask.
+    String out = "{\"latched\":[";
+    bool first = true;
+    const uint64_t m = arenaled::latched();
+    for (uint8_t i = 0; i < arenapf::insertCount(); i++) {
+      const arenapf::Insert* ins = arenapf::insert(i);
+      if (!ins || ins->lamp < 0 || !((m >> ins->lamp) & 1ULL)) continue;
+      if (!first) out += ',';
+      first = false;
+      out += "\"" + String(ins->name) + "\"";
+    }
+    out += "]}";
+    r->send(200, "application/json", out);
+  });
+
+  //  /api/music?e=..&b=..&t=..   0..255 — drive the music mode from anything
+  //  that can hit REST at ~20 Hz. Overrides the on-board mic for 2 s per push.
+  s_server.on("/api/music", HTTP_GET, [](AsyncWebServerRequest* r) {
+    arenaled::musicPush(param8(r, "e", 0), param8(r, "b", 0), param8(r, "t", 0));
+    r->send(200, "text/plain", "ok");
+  });
+
+  s_server.on("/api/save", HTTP_GET, [](AsyncWebServerRequest* r) {
+    arenaled::save();
+    r->send(200, "text/plain", "saved");
+  });
+
+  // --- Mapping wizard -----------------------------------------------------
+  //  /api/identify?led=42 | ?zone=3 | ?clear=1   (ms= optional, default 10 s)
+  s_server.on("/api/identify", HTTP_GET, [](AsyncWebServerRequest* r) {
+    uint32_t ms = r->hasParam("ms") ? (uint32_t)r->getParam("ms")->value().toInt() : 10000;
+    if (r->hasParam("clear"))     arenaled::clearIdentify();
+    else if (r->hasParam("led"))  arenaled::identifyLed(r->getParam("led")->value().toInt(), ms);
+    else if (r->hasParam("zone")) arenaled::identifyZone(r->getParam("zone")->value().toInt(), ms);
+    else { r->send(400, "text/plain", "led= | zone= | clear=1"); return; }
+    r->send(200, "text/plain", "ok");
+  });
+
+  // ---- Sub-paths must be registered BEFORE their parent --------------------
+  // This server matches a handler when the request URL equals its URI *or*
+  // starts with it followed by '/'. So "/api/zones" also answers
+  // "/api/zones/reset", and whichever was registered first wins. Registered the
+  // other way round, /api/zones/reset silently returned the zone list and the
+  // UI's "Reset to template" button did nothing at all - which is exactly what
+  // it had been doing, unnoticed, since there was no hardware to try it on.
+  s_server.on("/api/zones/reset", HTTP_GET, [](AsyncWebServerRequest* r) {
+    arenamap::reset();
+    arenamap::save();
+    r->send(200, "application/json", arenamap::toJson());
+  });
+
+  s_server.on("/api/ledmap/reset", HTTP_GET, [](AsyncWebServerRequest* r) {
+    arenapf::clearAssignment();
+    arenapf::save();
+    r->send(200, "text/plain", "cleared");
+  });
+
+  s_server.on("/api/zones", HTTP_GET, [](AsyncWebServerRequest* r) {
+    r->send(200, "application/json", arenamap::toJson());
+  });
+
+  //  POST /api/zones with the same JSON shape -> replace + persist the insert map.
+  s_server.on("/api/zones", HTTP_POST,
+    [](AsyncWebServerRequest* r) {
+      String* body = (String*)r->_tempObject;
+      // No body at all is almost never malformed JSON — it is the wrong content
+      // type. ESPAsyncWebServer swallows application/x-www-form-urlencoded and
+      // multipart into request params and never calls the body handler, so
+      // `curl -d` silently arrives here empty while the browser's fetch (which
+      // sends text/plain) works. Say which of the two failures this is.
+      if (!body) {
+        r->send(400, "text/plain",
+                "empty body - send the JSON raw, not form-encoded "
+                "(curl: --data-binary + -H 'Content-Type: application/json')");
+        return;
+      }
+      bool ok = arenamap::fromJson(body->c_str());
+      if (ok) ok = arenamap::save();
+      delete body; r->_tempObject = nullptr;
+      r->send(ok ? 200 : 400, "text/plain", ok ? "map saved" : "bad map json");
+    },
+    nullptr,
+    [](AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total) {
+      if (index == 0) {
+        if (r->_tempObject) delete (String*)r->_tempObject;
+        String* b = new String();
+        b->reserve(total + 1);
+        r->_tempObject = b;
+      }
+      String* body = (String*)r->_tempObject;
+      if (body) for (size_t i = 0; i < len; i++) body->concat((char)data[i]);
+    });
+
+  // --- Playfield geometry ---------------------------------------------------
+  //  /api/pf                      the 99 inserts and where they are (fixed)
+  //  /api/ledmap                  which chain index sits on which insert
+  //  /api/assign?led=N&ins=M      place one pixel (ins=none to unplace it)
+  //  /api/ledmap/reset            forget every placement
+  s_server.on("/api/pf", HTTP_GET, [](AsyncWebServerRequest* r) {
+    r->send(200, "application/json", arenapf::insertsJson());
+  });
+
+  // /api/insert?ins=N[&name=L48][&r=&g=&b=&w=][&clear=1]
+  // Edit one insert: its label (the machine's own, from the manual — the shipped
+  // one is a guess) and the colour of its plastic. clear=1 drops both back to
+  // the shipped label and no colour.
+  s_server.on("/api/insert", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("ins")) { r->send(400, "text/plain", "ins= required"); return; }
+    const int ins = r->getParam("ins")->value().toInt();
+    if (ins < 0 || ins >= arenapf::insertCount()) { r->send(400, "text/plain", "ins out of range"); return; }
+    if (r->hasParam("clear")) {
+      arenapf::setName((uint8_t)ins, "");
+      arenapf::setColour((uint8_t)ins, { 0, 0, 0, 0 });
+    } else {
+      if (r->hasParam("name")) arenapf::setName((uint8_t)ins, r->getParam("name")->value().c_str());
+      if (r->hasParam("r") || r->hasParam("g") || r->hasParam("b") || r->hasParam("w"))
+        arenapf::setColour((uint8_t)ins, { param8(r, "r", 0), param8(r, "g", 0),
+                                           param8(r, "b", 0), param8(r, "w", 0) });
+    }
+    arenapf::saveNames();
+    arenapf::saveColours();
+    r->send(200, "application/json", arenapf::insertsJson());
+  });
+
+  s_server.on("/api/ledmap", HTTP_GET, [](AsyncWebServerRequest* r) {
+    r->send(200, "application/json", arenapf::toJson());
+  });
+
+  // Saved on every click. Placing 99 inserts is a long session under a
+  // playfield; losing it to a power cut at pixel 80 is not acceptable, and the
+  // write is a few hundred bytes onto a partition that is otherwise idle.
+  s_server.on("/api/assign", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("led")) { r->send(400, "text/plain", "led= [&ins=N|none]"); return; }
+    const int led = r->getParam("led")->value().toInt();
+    uint8_t ins = arenapf::UNASSIGNED;
+    if (r->hasParam("ins")) {
+      const String v = r->getParam("ins")->value();
+      if (v != "none" && v.length()) ins = (uint8_t)v.toInt();
+    }
+    if (!arenapf::setLedInsert((uint16_t)led, ins)) {
+      r->send(400, "text/plain", "led or ins out of range");
+      return;
+    }
+    arenapf::save();
+    r->send(200, "application/json", arenapf::toJson());
+  });
+
+  // --- WiFi provisioning: /api/wifi?ssid=...&pass=... then reboot ---------
+  s_server.on("/api/wifi", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("ssid")) {
+      r->send(400, "text/plain", "ssid= [&pass=]");
+      return;
+    }
+    s_prefs.putString("ssid", r->getParam("ssid")->value());
+    s_prefs.putString("pass", r->hasParam("pass") ? r->getParam("pass")->value() : String(""));
+    r->send(200, "text/plain", "saved, rebooting");
+    delay(200);
+    ESP.restart();
+  });
+
+  // --- Game bundle upload ---------------------------------------------------
+  //  POST /api/game?target=pf       multipart file -> /arena_pf.json
+  //  POST /api/game?target=attract  multipart file -> /arena_attract.bin
+  //
+  // This is what makes the wall a product instead of a developer project: a
+  // different machine is two files, uploaded from the browser — no PlatformIO,
+  // no littlefs rebuild, no toolchain. The file lands in a .new temp first and
+  // is VALIDATED before it replaces anything: a truncated upload or a wrong
+  // file must never cost the working setup. Then a clean reboot rather than a
+  // live swap — the render task reads these structures at 63 fps and a reboot
+  // is 3 s of dark wall, which is cheaper than a use-after-free is expensive.
+  // The pixel mapping lives in NVS and survives; a NEW table's inserts differ,
+  // so stale assignments are dropped at load when they point past the table.
+  s_server.on("/api/game", HTTP_POST,
+    [](AsyncWebServerRequest* r) {
+      const bool pf = r->hasParam("target") && r->getParam("target")->value() == "pf";
+      const char* tmp = pf ? "/arena_pf.new" : "/arena_attract.new";
+      const char* dst = pf ? "/arena_pf.json" : "/arena_attract.bin";
+      bool ok = false;
+      File f = LittleFS.open(tmp, "r");
+      if (f) {
+        if (pf) {
+          JsonDocument doc;
+          ok = !deserializeJson(doc, f) && doc["inserts"].is<JsonArray>() &&
+               doc["inserts"].as<JsonArray>().size() > 0;
+        } else {
+          uint16_t hdr[2] = { 0, 0 };
+          f.read((uint8_t*)hdr, 4);
+          ok = hdr[0] > 0 && hdr[1] > 0 && hdr[1] <= ARENA_ATTRACT_MAX_FRAMES &&
+               f.size() == (size_t)4 + (size_t)hdr[1] * 8;
+        }
+        f.close();
+      }
+      if (!ok) {
+        LittleFS.remove(tmp);
+        r->send(400, "text/plain", pf ? "not a valid pf.json (needs a non-empty inserts array)"
+                                      : "not a valid attract.bin (u16 step, u16 frames <= 12288, frames x u64)");
+        return;
+      }
+      LittleFS.remove(dst);
+      LittleFS.rename(tmp, dst);
+      r->send(200, "text/plain", "OK, rebooting");
+      delay(200);
+      ESP.restart();
+    },
+    [](AsyncWebServerRequest* r, String fn, size_t idx, uint8_t* data, size_t len, bool done) {
+      const bool pf = r->hasParam("target") && r->getParam("target")->value() == "pf";
+      const char* tmp = pf ? "/arena_pf.new" : "/arena_attract.new";
+      if (!idx) { LittleFS.remove(tmp); }
+      File f = LittleFS.open(tmp, idx ? "a" : "w");
+      if (f) { f.write(data, len); f.close(); }
+      (void)fn; (void)done;
+    });
+
+  // --- OTA: POST a firmware .bin, or the web UI with ?target=fs -------------
+  //  /update             -> application partition   (firmware.bin)
+  //  /update?target=fs   -> filesystem partition    (littlefs.bin)
+  //
+  // The second one matters more than it looks: without it the only way to change
+  // the web UI is a USB cable, and this board spends its life behind a playfield.
+  // The filesystem has to be unmounted before it is overwritten, so everything
+  // served from LittleFS is gone until the reboot at the end — expected, not a
+  // failure. Note the reply below often never reaches the client: the restart
+  // beats the TCP flush, so curl reports HTTP 000 on a *successful* update.
+  // Verify by uptime, not by the response (ARENA_LED.md §4 B).
+  s_server.on("/update", HTTP_POST,
+    [](AsyncWebServerRequest* r) {
+      bool ok = !Update.hasError();
+      r->send(ok ? 200 : 500, "text/plain", ok ? "OK, rebooting" : "FAIL");
+      if (ok) { delay(200); ESP.restart(); }
+    },
+    [](AsyncWebServerRequest* r, String fn, size_t idx, uint8_t* data, size_t len, bool done) {
+      if (!idx) {
+        const bool fs = r->hasParam("target") && r->getParam("target")->value() == "fs";
+        Serial.printf("[ota] start %s -> %s\n", fn.c_str(), fs ? "filesystem" : "app");
+        if (fs) LittleFS.end();                      // cannot be mounted while it is rewritten
+        if (!Update.begin(UPDATE_SIZE_UNKNOWN, fs ? U_SPIFFS : U_FLASH)) Update.printError(Serial);
+      }
+      if (Update.write(data, len) != len) Update.printError(Serial);
+      if (done) {
+        if (Update.end(true)) Serial.printf("[ota] ok %u bytes\n", (unsigned)(idx + len));
+        else Update.printError(Serial);
+      }
+    });
+
+  s_server.serveStatic("/", LittleFS, "/");
+  s_server.onNotFound([](AsyncWebServerRequest* r) { r->send(404, "text/plain", "404"); });
+  s_server.begin();
+  Serial.println("[net] http server up");
+}
+
+void loop() {
+  // Nothing periodic: ESPAsyncWebServer runs on its own task and the LED engine
+  // is driven from the main loop. Kept so main.cpp reads the same as the others.
+}
+
+}  // namespace arenanet
