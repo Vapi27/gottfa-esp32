@@ -29,6 +29,7 @@ static uint8_t  s_gi        = ARENA_GI_DEFAULT;   // GI level under ROM attract,
 static uint8_t  s_warm      = ARENA_WARM_DEFAULT; // 0 = spectral/orange, 255 = white-forward
 static uint64_t s_latched   = 0;                 // lamps held lit from the last game
 static bool     s_inc       = true;              // incandescent simulation
+static volatile bool s_paused = false;           // BLE pairing in progress
 static uint8_t  s_speed     = ARENA_SPEED_DEFAULT;
 static Rgbw     s_color     = { ARENA_WARM_R, ARENA_WARM_G, ARENA_WARM_B, ARENA_WARM_W };
 static uint16_t s_count     = LED_COUNT_DEFAULT;
@@ -718,6 +719,7 @@ void setWarm(uint8_t w) { s_warm = w; markDirty(); }
 uint8_t warm() { return s_warm; }
 void setLatched(uint64_t m) { s_latched = m; markDirty(); }
 uint64_t latched() { return s_latched; }
+void setPaused(bool p) { s_paused = p; }
 void setIncandescent(bool on) { s_inc = on; markDirty(); }
 bool incandescent() { return s_inc; }
 void setSpeed(uint8_t s) { s_speed = s; markDirty(); }
@@ -881,6 +883,7 @@ void begin() {
 }
 
 void tick() {
+  if (s_paused) return;
   uint32_t now = millis();
   if (now - s_lastFrame < (uint32_t)(1000 / LED_FRAME_HZ)) return;
   s_lastFrame = now;

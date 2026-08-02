@@ -60,9 +60,34 @@ comme un coût produit, pas comme un détail.
       Donnée qui engage le PCB : l'exemple **nu** fait déjà 1,53 Mo — avec
       arduino-esp32 et le firmware Arena par-dessus, le module **8 Mo** n'est
       plus une recommandation, c'est un prérequis pour garder l'OTA A/B.
-- [ ] **P1 — preuve radio** : l'exemple flashé sur une carte de rechange
-      (PAS celle du mur : changer de table de partitions exige l'USB),
-      appairé à Google Home et Apple Maison en VID de test
+- [x] **P1 — preuve radio** (2026-08-01) : exemple `light` appairé à Apple
+      Maison en VID de test, Siri On/Off/Level vérifiés au port série
+- [x] **P2+P3 — LE VRAI FIRMWARE APPAIRÉ** (2026-08-02) : Arena complet +
+      Matter dans un binaire, appairé à Maison, Siri le pilote. 18 builds ;
+      les leçons durement payées, dans l'ordre où elles ont mordu :
+      1. arduino-esp32 épinglé **3.2.0** (jumeau d'IDF v5.4.1)
+      2. sa lib Matter embarquée **excisée** (elle exige l'esp_matter du
+         registre, pas notre build source)
+      3. macros lwip `INADDR_*` dé-définies dans le seul fichier voyant les
+         deux mondes
+      4. **`btInUse()` surchargé** — Arduino libère la RAM du contrôleur BT
+         au boot si le sketch ne s'en sert pas, tuant le BLE de CHIP
+      5. **SoftAP compilé absent** + bouchon linker — compilé présent, CHIP
+         l'active et ses tampons balise affament la puce (abort mesuré)
+      6. **serveur web différé** après l'IP — AsyncWebServer pendant la
+         crypto PASE = abort OOM
+      7. **rendu LED gelé** pendant la connexion BLE (événements CHIP)
+      8. **capture attract (19 Ko) différée** après l'appairage
+      9. **8 s de grâce après l'IP** — l'IP arrive AVANT la fin de
+         l'appairage ; dépenser la RAM à cet instant re-crée le bug n°6
+      10. **l'IP se lit via `esp_netif`**, jamais `WiFi.localIP()` — sous
+          Matter, Arduino jure qu'il n'y a pas de réseau pendant que CHIP
+          route Siri dessus
+      11. `erase_flash` **obligatoire** avant le premier flash Matter ;
+          ensuite, flash d'app seule = l'appairage survit (fabric en NVS)
+      Verdict matériel : 58 Ko de tas libre en régime établi sur le
+      WROOM-32 — ça marche, mais le **S3 + PSRAM du PCB final** n'est plus
+      un confort, c'est la marge de sécurité du produit.
 - [ ] **P2 — portage** : le firmware Arena devient un composant du projet
       IDF (arduino-esp32 en composant, `data/` en LittleFS, mêmes clés NVS —
       le mappage du client survit à la migration)

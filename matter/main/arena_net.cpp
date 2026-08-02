@@ -1,4 +1,5 @@
 #include <WiFi.h>
+#include <esp_netif.h>
 #include <LittleFS.h>
 #include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
@@ -19,6 +20,9 @@ static String         s_ip   = "0.0.0.0";
 static String         s_mode = "init";
 
 const char* ip()   { return s_ip.c_str(); }
+
+
+
 const char* mode() { return s_mode.c_str(); }
 
 // Served when LittleFS is empty (nobody ran `pio run -e arenaled -t uploadfs` yet):
@@ -79,57 +83,7 @@ static uint8_t param8(AsyncWebServerRequest* r, const char* k, uint8_t cur) {
   return (uint8_t)v;
 }
 
-void begin() {
-  // --- WiFi: NVS credentials (set from the UI) override the compile-time ones ---
-  s_prefs.begin("arenanet", false);
-  String ssid = s_prefs.getString("ssid", ARENA_STA_SSID);
-  String pass = s_prefs.getString("pass", ARENA_STA_PASS);
-
-#ifdef ARENA_MATTER
-  // Matter owns WiFi: commissioning stores the credentials and CHIP drives
-  // esp_wifi. We only wait for an address. No SoftAP (an AP interface fights
-  // the CHIP station state machine) and no ESPmDNS (CHIP minimal mDNS holds
-  // port 5353) - reach the board by IP; proper mdns unification is P3 work.
-  Serial.println("[net] Matter owns WiFi - waiting for an address");
-  for (int i = 0; i < 60 && WiFi.localIP() == IPAddress(); i++) delay(500);
-  s_mode = "Matter";
-  s_ip = WiFi.localIP().toString();
-  Serial.printf("[net] ip=%s\n", s_ip.c_str());
-#else
-  WiFi.persistent(false);
-  bool connected = false;
-  if (ssid.length()) {
-    WiFi.mode(WIFI_STA);
-    WiFi.setHostname(ARENA_MDNS_HOST);
-    WiFi.setSleep(false);            // keep the REST latency low; the wall is mains-powered
-    Serial.printf("[net] STA connecting to '%s' ...\n", ssid.c_str());
-    WiFi.begin(ssid.c_str(), pass.c_str());
-    uint32_t t0 = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - t0 < ARENA_STA_TIMEOUT_MS) {
-      delay(250);
-      Serial.print('.');
-    }
-    Serial.println();
-    connected = (WiFi.status() == WL_CONNECTED);
-  }
-  if (connected) {
-    s_mode = "STA";
-    s_ip = WiFi.localIP().toString();
-    Serial.printf("[net] STA OK ip=%s\n", s_ip.c_str());
-  } else {
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(ARENA_AP_SSID, ARENA_AP_PASS);
-    s_mode = "SoftAP";
-    s_ip = WiFi.softAPIP().toString();
-    Serial.printf("[net] SoftAP '%s' ip=%s\n", ARENA_AP_SSID, s_ip.c_str());
-  }
-  if (MDNS.begin(ARENA_MDNS_HOST)) {
-    MDNS.addService("http", "tcp", 80);
-    Serial.printf("[net] http://%s.local/\n", ARENA_MDNS_HOST);
-  }
-
-#endif
-
+static void startServer() {
   // --- UI ---------------------------------------------------------------
   s_server.on("/", HTTP_GET, [](AsyncWebServerRequest* r) {
     if (LittleFS.exists("/arena.html")) r->send(LittleFS, "/arena.html", "text/html");
@@ -449,6 +403,63 @@ void begin() {
   s_server.serveStatic("/", LittleFS, "/");
   s_server.onNotFound([](AsyncWebServerRequest* r) { r->send(404, "text/plain", "404"); });
   s_server.begin();
+}
+
+void begin() {
+  // --- WiFi: NVS credentials (set from the UI) override the compile-time ones ---
+  s_prefs.begin("arenanet", false);
+  String ssid = s_prefs.getString("ssid", ARENA_STA_SSID);
+  String pass = s_prefs.getString("pass", ARENA_STA_PASS);
+
+#ifdef ARENA_MATTER
+  // Matter owns WiFi: commissioning stores the credentials and CHIP drives
+  // esp_wifi. We only wait for an address. No SoftAP (an AP interface fights
+  // the CHIP station state machine) and no ESPmDNS (CHIP minimal mDNS holds
+  // port 5353) - reach the board by IP; proper mdns unification is P3 work.
+  // No blocking wait and NO web server yet: the PASE handshake at pairing
+  // time needs every byte of heap this chip has (measured: abort() on the BLE
+  // connect with the server up), and a web server without an address serves
+  // nobody. matterTick() below brings it up the moment WiFi is provisioned.
+  Serial.println("[net] Matter owns WiFi - server deferred until an address");
+  s_mode = "Matter";
+  s_ip = "0.0.0.0";
+  return;
+#else
+  WiFi.persistent(false);
+  bool connected = false;
+  if (ssid.length()) {
+    WiFi.mode(WIFI_STA);
+    WiFi.setHostname(ARENA_MDNS_HOST);
+    WiFi.setSleep(false);            // keep the REST latency low; the wall is mains-powered
+    Serial.printf("[net] STA connecting to '%s' ...\n", ssid.c_str());
+    WiFi.begin(ssid.c_str(), pass.c_str());
+    uint32_t t0 = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - t0 < ARENA_STA_TIMEOUT_MS) {
+      delay(250);
+      Serial.print('.');
+    }
+    Serial.println();
+    connected = (WiFi.status() == WL_CONNECTED);
+  }
+  if (connected) {
+    s_mode = "STA";
+    s_ip = WiFi.localIP().toString();
+    Serial.printf("[net] STA OK ip=%s\n", s_ip.c_str());
+  } else {
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(ARENA_AP_SSID, ARENA_AP_PASS);
+    s_mode = "SoftAP";
+    s_ip = WiFi.softAPIP().toString();
+    Serial.printf("[net] SoftAP '%s' ip=%s\n", ARENA_AP_SSID, s_ip.c_str());
+  }
+  if (MDNS.begin(ARENA_MDNS_HOST)) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.printf("[net] http://%s.local/\n", ARENA_MDNS_HOST);
+  }
+
+#endif
+
+  startServer();
   Serial.println("[net] http server up");
 }
 
@@ -456,5 +467,20 @@ void loop() {
   // Nothing periodic: ESPAsyncWebServer runs on its own task and the LED engine
   // is driven from the main loop. Kept so main.cpp reads the same as the others.
 }
+
+#ifdef ARENA_MATTER
+// Called from loop(): once commissioning hands us a network, raise the HTTP
+// server. Until then the wall renders and Matter owns the radio.
+void matterTick() {
+  static bool up = false;
+  esp_netif_t *n = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  esp_netif_ip_info_t info;
+  if (up || !n || esp_netif_get_ip_info(n, &info) != ESP_OK || info.ip.addr == 0) return;
+  up = true;
+  s_ip = IPAddress(info.ip.addr).toString();
+  Serial.printf("[net] ip=%s - starting the web server\n", s_ip.c_str());
+  startServer();
+}
+#endif
 
 }  // namespace arenanet

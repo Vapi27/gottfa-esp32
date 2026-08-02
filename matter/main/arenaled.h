@@ -72,6 +72,11 @@ uint64_t latched();
 // Incandescent simulation on/off. Off is a plain switch: full level, no thermal
 // lag, no colour shift — which is what you want when the inserts carry their own
 // colours and you would rather see them cleanly than through a filament.
+// Pause the render loop entirely - no frames, no pixel pushes. Used while a
+// phone is connected over BLE for Matter pairing: the PASE crypto wants the
+// CPU and RAM, and the RMT traffic wants neither competitor nor spectator.
+void setPaused(bool p);
+
 void setIncandescent(bool on);
 bool incandescent();
 

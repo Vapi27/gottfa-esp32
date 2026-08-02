@@ -53,7 +53,20 @@ static esp_err_t attribute_update_cb(attribute::callback_type_t type,
   return ESP_OK;
 }
 
-static void event_cb(const ChipDeviceEvent *, intptr_t) {}
+static void event_cb(const ChipDeviceEvent *event, intptr_t) {
+  // Freeze the wall while a phone holds a BLE link: pairing crypto gets the
+  // whole chip, and the strip resumes the instant the link drops.
+  switch (event->Type) {
+  case chip::DeviceLayer::DeviceEventType::kCHIPoBLEConnectionEstablished:
+    arenaled::setPaused(true);
+    break;
+  case chip::DeviceLayer::DeviceEventType::kCHIPoBLEConnectionClosed:
+    arenaled::setPaused(false);
+    break;
+  default:
+    break;
+  }
+}
 
 void arena_matter_init() {
   node::config_t node_config;

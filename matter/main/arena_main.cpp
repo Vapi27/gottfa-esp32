@@ -1,4 +1,16 @@
 #include <Arduino.h>
+#include <WiFi.h>
+#include <esp_netif.h>
+
+// Under Matter, CHIP owns the WiFi - Arduino never started it, so
+// WiFi.localIP() reports 0.0.0.0 forever even while CHIP happily routes
+// Matter traffic (Siri worked while the web server never rose: this is why).
+// Read the address at the esp_netif level, where it actually lives.
+static bool netHasIp() {
+  esp_netif_t *n = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  esp_netif_ip_info_t info;
+  return n && esp_netif_get_ip_info(n, &info) == ESP_OK && info.ip.addr != 0;
+}
 #include <LittleFS.h>
 #include "arena_config.h"
 #include "arenaled.h"
@@ -58,7 +70,10 @@ void setup() {
 
   arenamap::begin();      // named zones: /arena_map.json, else the built-in template
   arenapf::begin();       // playfield geometry: inserts + which pixel sits on which
+#ifndef ARENA_MATTER
   arenaattract::begin();  // Arena's own attract sequence, captured from the ROM
+#endif                     // under Matter: deferred until provisioned - its 19 KB
+                           // belong to the PASE crypto during commissioning
   arenaled::begin();      // NVS settings + chain init; pixels go dark-then-live
 #ifdef ARENA_MATTER
   arena_matter_init();    // Matter d abord: c est lui qui possede le WiFi
@@ -71,6 +86,24 @@ void setup() {
 }
 
 void loop() {
+#ifdef ARENA_MATTER
+  // Grace period: the IP arrives BEFORE commissioning is finished - the phone
+  // still has the operational CASE handshake to run over that fresh network.
+  // Spending RAM on the web server or the attract capture at that instant is
+  // the same starvation bug as the PASE abort, one step later. Eight seconds
+  // of stable IP means commissioning is done (or this is a normal reboot).
+  static uint32_t ipSinceMs = 0;
+  if (!netHasIp()) {
+    ipSinceMs = 0;
+  } else {
+    if (!ipSinceMs) ipSinceMs = millis();
+    if (millis() - ipSinceMs > 8000) {
+      arenanet::matterTick();
+      static bool atrLoaded = false;
+      if (!atrLoaded) { atrLoaded = true; arenaattract::begin(); }
+    }
+  }
+#endif
 #if ARENA_BUTTON_ENABLE
   buttonPoll();
 #endif
