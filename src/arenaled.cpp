@@ -374,6 +374,17 @@ static void push(const Rgbw* buf) {
   if (s_showUs > s_showExpUs + s_showExpUs / 2 + 200) {   // >1.5x + margin
     s_lateShow++;
     s_lastLateMs = millis();
+    // Print it as it happens: watching the serial monitor next to the wall is the
+    // most direct correlation there is. A line at the same instant as a flash means
+    // timing; a flash with no line means the refresh was fine and the fault is
+    // electrical. Rate-limited so a bad spell cannot flood the port.
+    static uint32_t lastPrint = 0;
+    if (millis() - lastPrint > 200) {
+      lastPrint = millis();
+      Serial.printf("[led] LATE refresh %lu us (expected %lu) at %lu ms\n",
+                    (unsigned long)s_showUs, (unsigned long)s_showExpUs,
+                    (unsigned long)millis());
+    }
   }
 #if LED_CHAIN2_ENABLE
   for (uint16_t i = 0; i < s_count; i++)
@@ -632,7 +643,16 @@ static void renderFrame() {
   uint32_t gap = now - s_lastFrame;
   if (s_frames) {                          // ignore the first frame after boot
     if (gap > s_maxGapMs) s_maxGapMs = gap;
-    if (gap > period * 2) { s_lateFrame++; s_lastLateMs = now; }
+    if (gap > period * 2) {
+      s_lateFrame++;
+      s_lastLateMs = now;
+      static uint32_t lastPrint = 0;
+      if (now - lastPrint > 200) {
+        lastPrint = now;
+        Serial.printf("[led] MISSED slot: %lu ms gap (period %lu) at %lu ms\n",
+                      (unsigned long)gap, (unsigned long)period, (unsigned long)now);
+      }
+    }
   }
   s_lastFrame = now;
 
