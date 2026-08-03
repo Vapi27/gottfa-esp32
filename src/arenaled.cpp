@@ -34,7 +34,9 @@ static uint32_t s_bootMs    = 0;       // soft-start reference
 // that reallocates or re-initialises the strip is therefore NOT done inline from
 // a request — it is flagged here and applied at the top of the next tick(), on
 // the render task, where nothing else is touching the pixel buffer.
-static volatile bool s_pendLen = false;
+static volatile bool s_pendLen   = false;
+static volatile int8_t s_pendOrder = -1;   // index into ORDERS, -1 = nothing pending
+static uint8_t  s_hz = LED_FRAME_HZ;
 
 // The animation clock. It only ever accumulates, so it must be a double: a float
 // carries 24 mantissa bits, and at ~0.017 s per frame its ulp reaches the frame
@@ -53,6 +55,10 @@ static uint32_t s_fpsT0     = 0, s_fpsN = 0;
 static float    s_amps      = 0.0f;
 static bool     s_limited   = false;
 
+// Signal-health instrumentation (see arenaled.h).
+static uint32_t s_showUs = 0, s_showMaxUs = 0, s_showExpUs = 0;
+static uint32_t s_lateShow = 0, s_lateFrame = 0, s_maxGapMs = 0, s_lastLateMs = 0;
+
 static uint32_t s_xfadeT0   = 0;       // mode-change crossfade
 static const uint32_t XFADE_MS = 500;
 
@@ -62,6 +68,10 @@ static uint32_t s_idUntil   = 0;
 
 static Preferences s_prefs;
 static uint32_t s_dirtyAt   = 0;       // debounce NVS writes
+
+#if ARENA_RENDER_TASK
+static void renderTask(void*);         // defined below; started at the end of begin()
+#endif
 
 // ---------------------------------------------------------------------------
 //  Small helpers
@@ -228,9 +238,11 @@ static void fxAttract(Rgbw* buf) {
   }
 }
 
-// Arena mode: a "ball" runs the zones in chain order, each hit flashes its zone
-// and decays; every ~20 s the whole playfield flashes (jackpot).
-static void fxArena(Rgbw* buf) {
+// Playfield mode: a "ball" runs the mapped zones in chain order, each hit flashes
+// its zone and decays; every ~20 s the whole playfield flashes (jackpot). Which
+// zone is which comes from the insert map, so this follows whatever machine the
+// boards are fitted to — nothing here knows about any particular game.
+static void fxPlayfield(Rgbw* buf) {
   const Rgbw amber = { ARENA_AMBER_R, ARENA_AMBER_G, ARENA_AMBER_B, ARENA_AMBER_W };
   fill(buf, scale(s_color, 0.14f));
 
@@ -300,7 +312,7 @@ static void renderMode(Mode m, Rgbw* buf) {
   switch (m) {
     case MODE_CLASSIC: fxClassic(buf); break;
     case MODE_ATTRACT: fxAttract(buf); break;
-    case MODE_ARENA:   fxArena(buf);   break;
+    case MODE_PLAYFIELD: fxPlayfield(buf); break;
     // Night is deliberately the warm-white die whatever the current colour is:
     // at 10 % an amber made of R+G reads orange and dirty, W stays clean.
     case MODE_NIGHT:   fill(buf, { ARENA_WARM_R, ARENA_WARM_G, ARENA_WARM_B, ARENA_WARM_W }); break;
@@ -350,7 +362,30 @@ static void push(const Rgbw* buf) {
   if (OFFS) s_strip.setPixelColor(0, 0, 0, 0, 0);
   for (uint16_t i = 0; i < s_count; i++)
     s_strip.setPixelColor(i + OFFS, buf[i].r, buf[i].g, buf[i].b, buf[i].w);
+
+  // 32 bits per RGBW pixel at 800 kHz = 40 us, plus the ~300 us reset latch.
+  // show() blocks until the transmit completes, so a duration well past that
+  // means the refresh was interrupted while the chain was listening.
+  s_showExpUs = (uint32_t)(s_count + OFFS) * 40u + 300u;
+  uint32_t t0 = micros();
   s_strip.show();
+  s_showUs = micros() - t0;
+  if (s_showUs > s_showMaxUs) s_showMaxUs = s_showUs;
+  if (s_showUs > s_showExpUs + s_showExpUs / 2 + 200) {   // >1.5x + margin
+    s_lateShow++;
+    s_lastLateMs = millis();
+    // Print it as it happens: watching the serial monitor next to the wall is the
+    // most direct correlation there is. A line at the same instant as a flash means
+    // timing; a flash with no line means the refresh was fine and the fault is
+    // electrical. Rate-limited so a bad spell cannot flood the port.
+    static uint32_t lastPrint = 0;
+    if (millis() - lastPrint > 200) {
+      lastPrint = millis();
+      Serial.printf("[led] LATE refresh %lu us (expected %lu) at %lu ms\n",
+                    (unsigned long)s_showUs, (unsigned long)s_showExpUs,
+                    (unsigned long)millis());
+    }
+  }
 #if LED_CHAIN2_ENABLE
   for (uint16_t i = 0; i < s_count; i++)
     s_strip2.setPixelColor(i + OFFS, s_strip.getPixelColor(i + OFFS));
@@ -381,16 +416,24 @@ static neoPixelType orderType(const char* name) {
 // ---------------------------------------------------------------------------
 //  Public API
 // ---------------------------------------------------------------------------
+// Two parallel tables: the lowercase token is the stable API/NVS contract, the
+// label is what a customer reads. Never print the token in the UI.
 static const char* MODE_NAMES[MODE_COUNT] = {
-  "off", "classic", "attract", "arena", "night", "rainbow", "test"
+  "off", "classic", "attract", "playfield", "night", "rainbow", "test"
+};
+static const char* MODE_LABELS[MODE_COUNT] = {
+  "Off", "Classic", "Attract", "Playfield", "Night", "Rainbow", "Wiring test"
 };
 
-const char* modeName(Mode m) { return (m < MODE_COUNT) ? MODE_NAMES[m] : "?"; }
+const char* modeName(Mode m)  { return (m < MODE_COUNT) ? MODE_NAMES[m]  : "?"; }
+const char* modeLabel(Mode m) { return (m < MODE_COUNT) ? MODE_LABELS[m] : "?"; }
 
 Mode modeFromName(const char* s) {
   if (!s) return MODE_COUNT;
   for (uint8_t i = 0; i < MODE_COUNT; i++)
     if (strcasecmp(s, MODE_NAMES[i]) == 0) return (Mode)i;
+  // Accept the pre-1.1 name so saved presets and old links keep working.
+  if (strcasecmp(s, "arena") == 0) return MODE_PLAYFIELD;
   return MODE_COUNT;
 }
 
@@ -436,6 +479,14 @@ void setCount(uint16_t n) {
 
 // Runs on the render task only.
 static void applyPending() {
+  if (s_pendOrder >= 0) {
+    neoPixelType t = ORDERS[s_pendOrder].type + NEO_KHZ800;
+    s_pendOrder = -1;
+    s_strip.updateType(t);
+#if LED_CHAIN2_ENABLE
+    s_strip2.updateType(t);
+#endif
+  }
   if (!s_pendLen) return;
   s_pendLen = false;
   // Blank at the OLD length first. Shrinking the count otherwise stops addressing
@@ -471,14 +522,20 @@ bool setOrder(const char* s) {
     if (strcasecmp(s, ORDERS[i].name) != 0) continue;
     strncpy(s_order, ORDERS[i].name, sizeof(s_order) - 1);
     s_order[sizeof(s_order) - 1] = '\0';
-    s_strip.updateType(ORDERS[i].type + NEO_KHZ800);
-#if LED_CHAIN2_ENABLE
-    s_strip2.updateType(ORDERS[i].type + NEO_KHZ800);
-#endif
+    s_pendOrder = (int8_t)i;      // re-typed on the render task, never from here
     markDirty();
     return true;
   }
   return false;
+}
+
+uint8_t hz() { return s_hz; }
+
+void setHz(uint8_t v) {
+  if (v < 10) v = 10;
+  if (v > 60) v = 60;
+  s_hz = v;
+  markDirty();
 }
 
 void identifyLed(int led, uint32_t ms) {
@@ -496,6 +553,23 @@ void identifyZone(int zoneIdx, uint32_t ms) {
 void clearIdentify() { s_idLed = s_idZone = -1; s_idUntil = 0; }
 int  identifyingLed() { return s_idLed; }
 
+Health health() {
+  Health h;
+  h.showUs      = s_showUs;
+  h.showMaxUs   = s_showMaxUs;
+  h.showExpUs   = s_showExpUs;
+  h.lateShow    = s_lateShow;
+  h.lateFrame   = s_lateFrame;
+  h.maxGapMs    = s_maxGapMs;
+  h.sinceLateMs = s_lastLateMs ? (millis() - s_lastLateMs) : 0;
+  h.frames      = s_frames;
+  return h;
+}
+
+void resetHealth() {
+  s_showMaxUs = s_lateShow = s_lateFrame = s_maxGapMs = s_lastLateMs = 0;
+}
+
 float    lastAmps()   { return s_amps; }
 bool     limited()    { return s_limited; }
 uint32_t frameCount() { return s_frames; }
@@ -507,6 +581,7 @@ void save() {
   s_prefs.putUChar("speed",  s_speed);
   s_prefs.putUShort("count", s_count);
   s_prefs.putUShort("budget", s_budget);
+  s_prefs.putUChar("hz", s_hz);
   s_prefs.putBytes("color", &s_color, sizeof(s_color));
   s_prefs.putString("order", s_order);
   s_dirtyAt = 0;
@@ -520,6 +595,8 @@ void begin() {
   s_speed  = s_prefs.getUChar("speed",  ARENA_SPEED_DEFAULT);
   s_count  = s_prefs.getUShort("count", LED_COUNT_DEFAULT);
   s_budget = s_prefs.getUShort("budget", LED_POWER_BUDGET_MA);
+  s_hz     = s_prefs.getUChar("hz", LED_FRAME_HZ);
+  if (s_hz < 10 || s_hz > 60) s_hz = LED_FRAME_HZ;
   if (s_count < 1 || s_count > LED_MAX) s_count = LED_COUNT_DEFAULT;
   if (s_prefs.getBytesLength("color") == sizeof(s_color))
     s_prefs.getBytes("color", &s_color, sizeof(s_color));
@@ -550,13 +627,33 @@ void begin() {
   s_bootMs = 0;                         // armed on the first rendered frame, not here:
                                         // arenanet::begin() blocks for 0.5-12 s right
                                         // after this and would eat the whole ramp
-  Serial.printf("[led] %u px on GPIO%d, order=%s mode=%s bright=%u budget=%u mA\n",
-                s_count, PIN_LED_DATA, s_order, modeName(s_mode), s_bright, s_budget);
+  Serial.printf("[led] %u px on GPIO%d, order=%s mode=%s bright=%u budget=%u mA hz=%u\n",
+                s_count, PIN_LED_DATA, s_order, modeName(s_mode), s_bright, s_budget, s_hz);
+#if ARENA_RENDER_TASK
+  xTaskCreatePinnedToCore(renderTask, "arenaled", ARENA_RENDER_STACK, nullptr,
+                          ARENA_RENDER_PRIO, nullptr, ARENA_RENDER_CORE);
+  Serial.printf("[led] render task on core %d prio %d\n", ARENA_RENDER_CORE, ARENA_RENDER_PRIO);
+#endif
 }
 
-void tick() {
+static void renderFrame() {
   uint32_t now = millis();
-  if (now - s_lastFrame < (uint32_t)(1000 / LED_FRAME_HZ)) return;
+  uint32_t period = (uint32_t)(1000 / s_hz);
+  if (now - s_lastFrame < period) return;
+  uint32_t gap = now - s_lastFrame;
+  if (s_frames) {                          // ignore the first frame after boot
+    if (gap > s_maxGapMs) s_maxGapMs = gap;
+    if (gap > period * 2) {
+      s_lateFrame++;
+      s_lastLateMs = now;
+      static uint32_t lastPrint = 0;
+      if (now - lastPrint > 200) {
+        lastPrint = now;
+        Serial.printf("[led] MISSED slot: %lu ms gap (period %lu) at %lu ms\n",
+                      (unsigned long)gap, (unsigned long)period, (unsigned long)now);
+      }
+    }
+  }
   s_lastFrame = now;
 
   applyPending();       // strip length changes land here, not in an HTTP handler
@@ -619,6 +716,23 @@ void tick() {
 
   // NVS is flash: coalesce a burst of slider moves into a single write.
   if (s_dirtyAt && now - s_dirtyAt > 3000) save();
+}
+
+#if ARENA_RENDER_TASK
+// Own task, own core, above the web stack: a page load can no longer stall a
+// refresh long enough for the chain to latch a half-written frame.
+static void renderTask(void*) {
+  for (;;) {
+    renderFrame();
+    vTaskDelay(1);           // 1 ms — far finer than the 16 ms frame gate
+  }
+}
+#endif
+
+void tick() {
+#if !ARENA_RENDER_TASK
+  renderFrame();             // single-core: the main loop drives it
+#endif
 }
 
 }  // namespace arenaled

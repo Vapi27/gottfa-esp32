@@ -27,7 +27,7 @@ enum Mode : uint8_t {
   MODE_OFF = 0,     // all pixels dark (the chain stays powered/refreshed)
   MODE_CLASSIC,     // static warm white with a subtle incandescent flicker
   MODE_ATTRACT,     // slow pulses / waves / chases / random inserts, auto-cycled
-  MODE_ARENA,       // animations that follow the playfield layout (zone-driven)
+  MODE_PLAYFIELD,   // animations that follow the playfield layout (zone-driven)
   MODE_NIGHT,       // warm white at ~10 %
   MODE_RAINBOW,     // full RGB hue sweep
   MODE_TEST,        // R / G / B / W channel walk — wiring + colour-order check
@@ -39,7 +39,8 @@ void tick();                          // call from loop()
 
 void        setMode(Mode m);
 Mode        mode();
-const char* modeName(Mode m);
+const char* modeName(Mode m);              // API token, lowercase ("playfield")
+const char* modeLabel(Mode m);             // UI label, capitalised ("Playfield")
 Mode        modeFromName(const char* s);   // MODE_COUNT if unknown
 void        nextMode();                    // front-panel button: cycle usable modes
 
@@ -54,6 +55,9 @@ uint16_t count();
 void    setBudgetMa(uint16_t ma);          // power ceiling for the whole chain
 uint16_t budgetMa();
 
+void     setHz(uint8_t hz);                // refresh rate 10..60 (lower = less bus traffic)
+uint8_t  hz();
+
 // Pixel colour order, e.g. "grbw" (SK6812 default) / "rgbw" / "gbrw" / ...
 // Changing it re-types the chain live — no reflash, no reboot.
 bool        setOrder(const char* s);       // false if the string is not a known order
@@ -64,6 +68,27 @@ void identifyLed(int led, uint32_t ms);    // spotlight one pixel, any mode, the
 void identifyZone(int zoneIdx, uint32_t ms);
 void clearIdentify();
 int  identifyingLed();                     // -1 when idle
+
+// --- signal health ----------------------------------------------------------
+// The chain gives no feedback, so a corrupted frame can never be detected in
+// software. What CAN be measured is the only firmware-side cause of one: a
+// refresh that stalled. show() is blocking and its duration is near-constant
+// (~40 us per pixel), so a transmit that runs long means the bit stream was
+// starved mid-frame — exactly the condition that makes the chain latch garbage.
+// Counters that stay at zero while the wall still flashes prove the fault is
+// electrical, not timing. That is the whole point of them.
+struct Health {
+  uint32_t showUs;       // last refresh transmit time
+  uint32_t showMaxUs;    // worst seen since reset
+  uint32_t showExpUs;    // what it should take for the current chain length
+  uint32_t lateShow;     // transmits that ran long -> possible starved refresh
+  uint32_t lateFrame;    // render slots missed entirely
+  uint32_t maxGapMs;     // worst gap between refreshes
+  uint32_t sinceLateMs;  // age of the last late event (0 = none seen)
+  uint32_t frames;
+};
+Health health();
+void     resetHealth();
 
 // --- telemetry --------------------------------------------------------------
 float    lastAmps();       // A estimated for the frame just pushed

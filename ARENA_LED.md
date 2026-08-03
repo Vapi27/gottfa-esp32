@@ -524,7 +524,84 @@ walk it up while watching the current.
 **7 — Map and save.** Use the mapping wizard to name the zones, save the map,
 pick your boot mode and brightness, then **Save as boot default**.
 
-## 9. Future (V2)
+## 9. Whole-chain colour glitches
+
+**Symptom: every so often the whole string flashes white (or a wrong colour) for
+a fraction of a second, as if a frame had been dropped.** That reading is exactly
+right. The pixel protocol is self-clocked and has no error checking: one bit
+disturbed early in a frame shifts every pixel after it, so a single glitched bit
+near the start of the chain repaints the *entire* wall for one frame (~16 ms).
+There are only two families of cause.
+
+**A — the refresh was starved.** The bit stream must not stall mid-frame. If the
+WiFi/TCP stack delays the refresh long enough, the chain latches a half-written
+frame. Since v1.1 the renderer has its own task pinned to core 1 above the web
+stack, which removes the usual source of this on a dual-core ESP32.
+
+**B — the data signal is marginal.** 3.3 V driving a 5 V chain sits right on the
+threshold (§4); a bit lands ambiguously and the shift register takes it wrong.
+Long data hops, a hop routed away from its ground return, or a missing series
+resistor all make it worse.
+
+### A rare glitch cannot be eyeballed — measure it
+
+If it happens every few minutes, watching for 30 s proves nothing: seeing no
+flash is the expected outcome either way. So the firmware instruments the only
+firmware-side cause instead.
+
+`show()` is blocking and its duration is near-constant — 40 µs per RGBW pixel
+plus a ~300 µs latch, so ~4.3 ms for 100 pixels. A transmit that runs
+significantly longer means the bit stream was interrupted while the chain was
+listening, which is exactly the condition that makes it latch garbage. The UI
+shows this live under **LED Chain**, and `GET /api/health` returns it as JSON
+(`?reset=1` zeroes the counters):
+
+| Field | Meaning |
+|---|---|
+| `showUs` / `showExpUs` / `showMaxUs` | last, expected, worst refresh transmit time |
+| `lateShow` | transmits that ran >1.5× expected — **a starved refresh** |
+| `lateFrame` | render slots missed entirely |
+| `maxGapMs` | worst gap between two refreshes |
+| `sinceLateMs` | age of the last late event |
+
+**Reset the counters, leave it running for as long as it takes to see a few
+flashes, then read them.** The verdict does not need interpretation:
+
+- `lateShow` and `lateFrame` still **0** while the wall flashed → the refresh was
+  never starved, so the fault is **electrical**. Go to §4: diode in the +5 V feed,
+  shorter hops, 330 Ω at the ESP.
+- counters **climbing**, and roughly matching how often you see a flash → **timing**.
+  Lower the refresh rate to 30 Hz, keep the web page closed when not in use.
+
+This is a real distinction, not a formality: the two fixes have nothing in common.
+Note what it cannot do — the chain has no return path, so no firmware can detect a
+corrupted frame. It measures the cause, never the effect.
+
+### Telling them apart — the radio window
+
+As a cross-check, the UI has **Radio Off 5 min** (`GET /api/radiotest?sec=300`, up
+to 300 s).
+It kills the radio, leaves the LEDs running, and reboots at the end of the window:
+
+| During the window | Conclusion | Fix |
+|---|---|---|
+| flashes **stop** | the radio was starving the refresh | lower the refresh rate (LED Chain → Refresh Rate, try 30 Hz), keep the page closed when not in use |
+| flashes **continue** | electrical | §4 option A (drop the bus to ~4.4 V) or option B (repeater pixel); shorten the data hops, run each hop alongside the bus, fit the 330 Ω at the ESP |
+
+Do this before changing anything else — the two fixes have nothing in common, and
+guessing costs an afternoon.
+
+### If it is electrical
+
+In order of how much they buy you per minute spent: put a diode in the +5 V feed
+so the chain runs at ~4.3 V (instant, one part, §4 A); shorten the ESP → LED 1 wire
+and twist it with its ground; check the 330 Ω is at the *ESP* end; make sure every
+board-to-board hop runs along the bus rather than looping away from it; then the
+repeater pixel (§4 B) if the chain must stay at 5.0 V.
+
+---
+
+## 10. Future (V2)
 
 Motion sensor (PIR on a spare GPIO → wake from night mode), audio-reactive mode
 (I2S MEMS mic), ambient light sensor for auto-brightness, IR remote,
@@ -546,5 +623,6 @@ Assistant `rest_command` needs no firmware change at all.
 | `data/arena.html` | web UI (LittleFS) |
 | `data/arena_map.json` | default insert map (LittleFS, editable from the UI) |
 | `tools/host_arenaphase_test.cpp` | host test for the animation clock (30 days of uptime in a second) |
+| `data/logo.png` | Pinballs Store logo used by the web UI (replaceable) |
 | `tools/arena_flash.sh` | one-command build + flash + monitor, with troubleshooting output |
 | `hardware/arena-led-bom.csv` | BOM |

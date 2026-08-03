@@ -6,7 +6,7 @@
 {"n":"pop-bumpers","f":30,"c":9},
 {"n":"spinner","f":39,"c":4},
 {"n":"right-orbit","f":43,"c":8},
-{"n":"arena-letters","f":51,"c":5},
+{"n":"letters","f":51,"c":5},
 {"n":"top-lanes","f":56,"c":6},
 {"n":"bonus-ladder","f":62,"c":10},
 {"n":"center-star","f":72,"c":6},

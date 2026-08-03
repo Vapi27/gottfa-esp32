@@ -4,6 +4,7 @@
 #include <ESPAsyncWebServer.h>
 #include <Preferences.h>
 #include <Update.h>
+#include <esp_system.h>
 #include "arena_config.h"
 #include "arena_net.h"
 #include "arenaled.h"
@@ -15,28 +16,92 @@ static AsyncWebServer s_server(80);
 static Preferences    s_prefs;
 static String         s_ip   = "0.0.0.0";
 static String         s_mode = "init";
+static String         s_ap;              // SoftAP SSID, suffixed per device
+static String         s_name;            // customer-visible device name
+static String         s_host;            // mDNS host derived from the name
+static uint8_t        s_radioPhase = 0;  // 0 idle · 1 arming · 2 radio off
+static uint32_t       s_radioAt    = 0;
+static uint16_t       s_radioSec   = 0;
+static const char*    s_reset      = "?";   // why the last boot happened
+static uint32_t       s_boots      = 0;     // boots since the last factory reset
+
+// A brief white flash across the WHOLE string is also what a controller reset
+// looks like: the data pin goes high-impedance while the chain is listening, the
+// pixels latch noise, and the firmware then repaints. So the reset cause and a
+// boot counter are first-class diagnostics here, not housekeeping. If the counter
+// climbs every time the wall flashes, nothing about the LED signal is wrong — the
+// controller is dropping out (brownout on a weak USB feed, watchdog, panic).
+static const char* resetReasonName(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:  return "power-on";
+    case ESP_RST_EXT:      return "external reset";
+    case ESP_RST_SW:       return "software restart";
+    case ESP_RST_PANIC:    return "PANIC (crash)";
+    case ESP_RST_INT_WDT:  return "interrupt watchdog";
+    case ESP_RST_TASK_WDT: return "task watchdog";
+    case ESP_RST_WDT:      return "watchdog";
+    case ESP_RST_BROWNOUT: return "BROWNOUT (supply dipped)";
+    case ESP_RST_DEEPSLEEP:return "deep sleep wake";
+    case ESP_RST_SDIO:     return "SDIO";
+    default:               return "unknown";
+  }
+}
 
 const char* ip()   { return s_ip.c_str(); }
 const char* mode() { return s_mode.c_str(); }
+
+// Last two bytes of the eFuse MAC. Stable for the life of the board, and the
+// only thing distinguishing two units out of the same batch.
+static String deviceSuffix() {
+  char b[5];
+  snprintf(b, sizeof(b), "%04X", (uint16_t)(ESP.getEfuseMac() >> 32));
+  return String(b);
+}
+
+static String deviceId() {
+  uint64_t m = ESP.getEfuseMac();
+  char b[13];
+  snprintf(b, sizeof(b), "%04X%08X", (uint16_t)(m >> 32), (uint32_t)m);
+  return String(b);
+}
+
+// A customer types "Arena Wall" as the device name; mDNS needs "arena-wall".
+static String hostFromName(const String& n) {
+  String h;
+  for (size_t i = 0; i < n.length() && h.length() < 24; i++) {
+    char c = n[i];
+    if (c >= 'A' && c <= 'Z') c += 32;
+    if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) h += c;
+    else if ((c == ' ' || c == '-' || c == '_') && h.length() && h[h.length()-1] != '-') h += '-';
+  }
+  while (h.length() && h[h.length()-1] == '-') h.remove(h.length() - 1);
+  return h.length() ? h : String(ARENA_MDNS_HOST);
+}
 
 // Served when LittleFS is empty (nobody ran `pio run -e arenaled -t uploadfs` yet):
 // enough UI to prove the chain lights up and to reach the mode buttons.
 static const char FALLBACK[] PROGMEM =
   "<!doctype html><meta name=viewport content='width=device-width,initial-scale=1'>"
-  "<title>Arena LED</title><style>body{background:#111;color:#eee;font:16px system-ui;padding:2em}"
-  "a{display:inline-block;margin:.3em;padding:.6em 1em;background:#c60;color:#fff;"
-  "text-decoration:none;border-radius:6px}</style><h1>Arena LED</h1>"
-  "<p>Web UI not uploaded yet — run <code>pio run -e arenaled -t uploadfs</code>.</p>"
-  "<p><a href='/api/set?mode=classic'>classic</a><a href='/api/set?mode=attract'>attract</a>"
-  "<a href='/api/set?mode=arena'>arena</a><a href='/api/set?mode=night'>night</a>"
-  "<a href='/api/set?mode=rainbow'>rainbow</a><a href='/api/set?mode=test'>test</a>"
-  "<a href='/api/set?mode=off'>off</a></p><p><a href='/api/state'>/api/state</a></p>";
+  "<title>" PRODUCT_BRAND " " PRODUCT_NAME "</title>"
+  "<style>body{background:#0d0b09;color:#efe6da;font:16px system-ui;padding:2em}"
+  "h1{color:#ffc046;font-size:20px;letter-spacing:.12em;text-transform:uppercase}"
+  "a{display:inline-block;margin:.3em;padding:.6em 1em;background:#ff9b21;color:#150f08;"
+  "font-weight:600;text-decoration:none;border-radius:6px}</style>"
+  "<h1>" PRODUCT_BRAND " &mdash; " PRODUCT_NAME "</h1>"
+  "<p>Web interface not installed. Run <code>pio run -t uploadfs</code>, "
+  "or use the controls below.</p>"
+  "<p><a href='/api/set?mode=classic'>Classic</a><a href='/api/set?mode=attract'>Attract</a>"
+  "<a href='/api/set?mode=playfield'>Playfield</a><a href='/api/set?mode=night'>Night</a>"
+  "<a href='/api/set?mode=rainbow'>Rainbow</a><a href='/api/set?mode=test'>Wiring test</a>"
+  "<a href='/api/set?mode=off'>Off</a></p><p><a href='/api/state'>/api/state</a></p>";
 
 static String stateJson() {
   arenaled::Rgbw c = arenaled::color();
   String j = "{";
   j += "\"fw\":\"" ARENA_FW_VERSION "\"";
-  j += ",\"mode\":\"" + String(arenaled::modeName(arenaled::mode())) + "\"";
+  j += ",\"mode\":\""  + String(arenaled::modeName(arenaled::mode()))  + "\"";
+  j += ",\"modeLabel\":\"" + String(arenaled::modeLabel(arenaled::mode())) + "\"";
+  j += ",\"name\":\""  + s_name + "\"";
   j += ",\"bright\":" + String(arenaled::brightness());
   j += ",\"speed\":"  + String(arenaled::speed());
   j += ",\"count\":"  + String(arenaled::count());
@@ -45,6 +110,7 @@ static String stateJson() {
        ",\"b\":" + String(c.b) + ",\"w\":" + String(c.w);
   j += ",\"amps\":"   + String(arenaled::lastAmps(), 2);
   j += ",\"budget\":" + String(arenaled::budgetMa());
+  j += ",\"hz\":"     + String(arenaled::hz());
   j += ",\"order\":\""  + String(arenaled::order()) + "\"";
   j += ",\"limited\":" + String(arenaled::limited() ? "true" : "false");
   j += ",\"fps\":"    + String(arenaled::fps());
@@ -68,12 +134,21 @@ void begin() {
   s_prefs.begin("arenanet", false);
   String ssid = s_prefs.getString("ssid", ARENA_STA_SSID);
   String pass = s_prefs.getString("pass", ARENA_STA_PASS);
+  s_name = s_prefs.getString("name", PRODUCT_NAME);
+  s_reset = resetReasonName(esp_reset_reason());
+  s_boots = s_prefs.getUInt("boots", 0) + 1;
+  s_prefs.putUInt("boots", s_boots);
+  Serial.printf("[dev] boot #%lu — last reset: %s\n", (unsigned long)s_boots, s_reset);
+  s_ap   = String(ARENA_AP_PREFIX) + "-" + deviceSuffix();
+  s_host = hostFromName(s_prefs.getString("name", ""));
+  Serial.printf("[dev] %s %s v%s  id=%s  name='%s'\n", PRODUCT_BRAND, PRODUCT_MODEL,
+                ARENA_FW_VERSION, deviceId().c_str(), s_name.c_str());
 
   WiFi.persistent(false);
   bool connected = false;
   if (ssid.length()) {
     WiFi.mode(WIFI_STA);
-    WiFi.setHostname(ARENA_MDNS_HOST);
+    WiFi.setHostname(s_host.c_str());
     WiFi.setSleep(false);            // keep the REST latency low; the wall is mains-powered
     Serial.printf("[net] STA connecting to '%s' ...\n", ssid.c_str());
     WiFi.begin(ssid.c_str(), pass.c_str());
@@ -91,14 +166,17 @@ void begin() {
     Serial.printf("[net] STA OK ip=%s\n", s_ip.c_str());
   } else {
     WiFi.mode(WIFI_AP);
-    WiFi.softAP(ARENA_AP_SSID, ARENA_AP_PASS);
+    WiFi.softAP(s_ap.c_str(), ARENA_AP_PASS);
     s_mode = "SoftAP";
     s_ip = WiFi.softAPIP().toString();
-    Serial.printf("[net] SoftAP '%s' ip=%s\n", ARENA_AP_SSID, s_ip.c_str());
+    Serial.printf("[net] SoftAP '%s' ip=%s\n", s_ap.c_str(), s_ip.c_str());
   }
-  if (MDNS.begin(ARENA_MDNS_HOST)) {
+  if (MDNS.begin(s_host.c_str())) {
     MDNS.addService("http", "tcp", 80);
-    Serial.printf("[net] http://%s.local/\n", ARENA_MDNS_HOST);
+    MDNS.addServiceTxt("http", "tcp", "brand", PRODUCT_BRAND);
+    MDNS.addServiceTxt("http", "tcp", "model", PRODUCT_MODEL);
+    MDNS.addServiceTxt("http", "tcp", "fw", ARENA_FW_VERSION);
+    Serial.printf("[net] http://%s.local/\n", s_host.c_str());
   }
 
   // --- UI ---------------------------------------------------------------
@@ -137,6 +215,7 @@ void begin() {
     }
     if (r->hasParam("count"))  arenaled::setCount((uint16_t)r->getParam("count")->value().toInt());
     if (r->hasParam("budget")) arenaled::setBudgetMa((uint16_t)r->getParam("budget")->value().toInt());
+    if (r->hasParam("hz"))     arenaled::setHz((uint8_t)r->getParam("hz")->value().toInt());
     r->send(200, "application/json", stateJson());
   });
 
@@ -200,6 +279,92 @@ void begin() {
     ESP.restart();
   });
 
+  // --- Identity: everything a support request needs in one call ------------
+  s_server.on("/api/info", HTTP_GET, [](AsyncWebServerRequest* r) {
+    String j = "{\"brand\":\"" PRODUCT_BRAND "\",\"product\":\"" PRODUCT_NAME "\"";
+    j += ",\"model\":\"" PRODUCT_MODEL "\",\"fw\":\"" ARENA_FW_VERSION "\"";
+    j += ",\"built\":\"" __DATE__ " " __TIME__ "\"";
+    j += ",\"id\":\""   + deviceId() + "\"";
+    j += ",\"name\":\"" + s_name + "\"";
+    j += ",\"host\":\"" + s_host + ".local\"";
+    j += ",\"ap\":\""   + s_ap + "\"";
+    j += ",\"net\":\""  + s_mode + "\",\"ip\":\"" + s_ip + "\"";
+    j += ",\"chip\":\"" + String(ESP.getChipModel()) + "\"";
+    j += ",\"cores\":"   + String(ESP.getChipCores());
+    j += ",\"flash\":"   + String(ESP.getFlashChipSize());
+    j += ",\"heap\":"    + String(ESP.getFreeHeap());
+    j += ",\"maxLeds\":" + String(LED_MAX);
+    j += ",\"pin\":"     + String(PIN_LED_DATA);
+    j += ",\"reset\":\"" + String(s_reset) + "\"";
+    j += ",\"boots\":"    + String(s_boots);
+    j += ",\"up\":"      + String(millis() / 1000) + "}";
+    r->send(200, "application/json", j);
+  });
+
+  // --- Device name: shown in the UI and used for mDNS (reboot to re-announce) ---
+  s_server.on("/api/name", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("v")) { r->send(400, "text/plain", "v=<name>"); return; }
+    String v = r->getParam("v")->value();
+    v.trim();
+    if (v.length() > 31) v = v.substring(0, 31);
+    s_prefs.putString("name", v);
+    s_name = v.length() ? v : String(PRODUCT_NAME);
+    r->send(200, "application/json",
+            String("{\"name\":\"") + s_name + "\",\"host\":\"" + hostFromName(v) +
+            ".local\",\"note\":\"reboot to re-announce mDNS\"}");
+  });
+
+  // --- Factory reset: wipe every stored setting and the insert map ----------
+  s_server.on("/api/factory", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("confirm")) {
+      r->send(400, "text/plain", "add ?confirm=1 — this erases all settings, WiFi and the insert map");
+      return;
+    }
+    s_prefs.clear();                       // WiFi + device name + boot counter
+    Preferences p;
+    if (p.begin("arena", false)) { p.clear(); p.end(); }   // mode/brightness/colour/count
+    LittleFS.remove(ARENA_MAP_PATH);
+    r->send(200, "text/plain", "factory reset — rebooting");
+    delay(300);
+    ESP.restart();
+  });
+
+  // --- Signal health: the counters that decide timing vs electrical ---------
+  //   /api/health          read      /api/health?reset=1   zero the counters
+  s_server.on("/api/health", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (r->hasParam("reset")) arenaled::resetHealth();
+    arenaled::Health h = arenaled::health();
+    String j = "{\"showUs\":"     + String(h.showUs);
+    j += ",\"showMaxUs\":"        + String(h.showMaxUs);
+    j += ",\"showExpUs\":"        + String(h.showExpUs);
+    j += ",\"lateShow\":"         + String(h.lateShow);
+    j += ",\"lateFrame\":"        + String(h.lateFrame);
+    j += ",\"maxGapMs\":"         + String(h.maxGapMs);
+    j += ",\"sinceLateMs\":"      + String(h.sinceLateMs);
+    j += ",\"frames\":"           + String(h.frames);
+    j += ",\"up\":"               + String(millis() / 1000) + "}";
+    r->send(200, "application/json", j);
+  });
+
+  // --- Radio-off test: the one experiment that separates the two causes of a
+  //     whole-chain colour glitch. If the flashes STOP while the radio is off,
+  //     the refresh was being starved by the WiFi/TCP stack; if they continue,
+  //     the fault is electrical (data level margin, wiring, grounding).
+  //     The unit reboots at the end of the window to bring the radio back cleanly.
+  s_server.on("/api/radiotest", HTTP_GET, [](AsyncWebServerRequest* r) {
+    uint32_t sec = r->hasParam("sec") ? (uint32_t)r->getParam("sec")->value().toInt() : 30;
+    if (sec < 5)   sec = 5;
+    if (sec > 300) sec = 300;
+    s_radioSec = (uint16_t)sec;
+    s_radioAt  = millis() + 400;          // let this response leave first
+    s_radioPhase = 1;
+    r->send(200, "text/plain",
+            String("WiFi off for ") + sec + " s — watch the LEDs now.\n"
+            "Flashes stop  -> the radio was starving the refresh (firmware/timing).\n"
+            "Flashes stay  -> electrical: data level margin, wiring or grounding.\n"
+            "The unit reboots when the window ends.");
+  });
+
   // --- OTA: POST a firmware .bin (fails gracefully if there is no OTA slot) ---
   s_server.on("/update", HTTP_POST,
     [](AsyncWebServerRequest* r) {
@@ -226,8 +391,22 @@ void begin() {
 }
 
 void loop() {
-  // Nothing periodic: ESPAsyncWebServer runs on its own task and the LED engine
-  // is driven from the main loop. Kept so main.cpp reads the same as the others.
+  // Only the radio-off diagnostic window needs servicing here: the web server has
+  // its own task, and (on dual-core parts) so does the renderer.
+  if (!s_radioPhase) return;
+  if ((int32_t)(millis() - s_radioAt) < 0) return;
+
+  if (s_radioPhase == 1) {
+    Serial.printf("[net] radio OFF for %u s (glitch test)\n", s_radioSec);
+    WiFi.disconnect(true, false);
+    WiFi.mode(WIFI_OFF);
+    s_radioPhase = 2;
+    s_radioAt = millis() + (uint32_t)s_radioSec * 1000;
+  } else {
+    Serial.println("[net] test window over — rebooting to restore the radio");
+    delay(50);
+    ESP.restart();
+  }
 }
 
 }  // namespace arenanet
