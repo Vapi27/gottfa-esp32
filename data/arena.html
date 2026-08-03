@@ -337,6 +337,7 @@ function loadInfo() {
     const rows = [
       ['Model', i.model], ['Firmware', 'v' + i.fw], ['Built', i.built],
       ['Device ID', i.id], ['Access point', i.ap], ['Network', i.net + ' · ' + i.ip],
+      ['Boot count', i.boots], ['Last reset', i.reset],
       ['Controller', i.chip + ' · ' + (i.flash / 1048576) + ' MB'],
       ['Data pin', 'GPIO' + i.pin], ['Max LEDs', i.maxLeds],
     ];

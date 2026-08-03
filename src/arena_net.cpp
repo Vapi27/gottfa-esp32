@@ -4,6 +4,7 @@
 #include <ESPAsyncWebServer.h>
 #include <Preferences.h>
 #include <Update.h>
+#include <esp_system.h>
 #include "arena_config.h"
 #include "arena_net.h"
 #include "arenaled.h"
@@ -21,6 +22,30 @@ static String         s_host;            // mDNS host derived from the name
 static uint8_t        s_radioPhase = 0;  // 0 idle · 1 arming · 2 radio off
 static uint32_t       s_radioAt    = 0;
 static uint16_t       s_radioSec   = 0;
+static const char*    s_reset      = "?";   // why the last boot happened
+static uint32_t       s_boots      = 0;     // boots since the last factory reset
+
+// A brief white flash across the WHOLE string is also what a controller reset
+// looks like: the data pin goes high-impedance while the chain is listening, the
+// pixels latch noise, and the firmware then repaints. So the reset cause and a
+// boot counter are first-class diagnostics here, not housekeeping. If the counter
+// climbs every time the wall flashes, nothing about the LED signal is wrong — the
+// controller is dropping out (brownout on a weak USB feed, watchdog, panic).
+static const char* resetReasonName(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:  return "power-on";
+    case ESP_RST_EXT:      return "external reset";
+    case ESP_RST_SW:       return "software restart";
+    case ESP_RST_PANIC:    return "PANIC (crash)";
+    case ESP_RST_INT_WDT:  return "interrupt watchdog";
+    case ESP_RST_TASK_WDT: return "task watchdog";
+    case ESP_RST_WDT:      return "watchdog";
+    case ESP_RST_BROWNOUT: return "BROWNOUT (supply dipped)";
+    case ESP_RST_DEEPSLEEP:return "deep sleep wake";
+    case ESP_RST_SDIO:     return "SDIO";
+    default:               return "unknown";
+  }
+}
 
 const char* ip()   { return s_ip.c_str(); }
 const char* mode() { return s_mode.c_str(); }
@@ -110,6 +135,10 @@ void begin() {
   String ssid = s_prefs.getString("ssid", ARENA_STA_SSID);
   String pass = s_prefs.getString("pass", ARENA_STA_PASS);
   s_name = s_prefs.getString("name", PRODUCT_NAME);
+  s_reset = resetReasonName(esp_reset_reason());
+  s_boots = s_prefs.getUInt("boots", 0) + 1;
+  s_prefs.putUInt("boots", s_boots);
+  Serial.printf("[dev] boot #%lu — last reset: %s\n", (unsigned long)s_boots, s_reset);
   s_ap   = String(ARENA_AP_PREFIX) + "-" + deviceSuffix();
   s_host = hostFromName(s_prefs.getString("name", ""));
   Serial.printf("[dev] %s %s v%s  id=%s  name='%s'\n", PRODUCT_BRAND, PRODUCT_MODEL,
@@ -266,6 +295,8 @@ void begin() {
     j += ",\"heap\":"    + String(ESP.getFreeHeap());
     j += ",\"maxLeds\":" + String(LED_MAX);
     j += ",\"pin\":"     + String(PIN_LED_DATA);
+    j += ",\"reset\":\"" + String(s_reset) + "\"";
+    j += ",\"boots\":"    + String(s_boots);
     j += ",\"up\":"      + String(millis() / 1000) + "}";
     r->send(200, "application/json", j);
   });
@@ -289,7 +320,7 @@ void begin() {
       r->send(400, "text/plain", "add ?confirm=1 — this erases all settings, WiFi and the insert map");
       return;
     }
-    s_prefs.clear();                       // WiFi + device name
+    s_prefs.clear();                       // WiFi + device name + boot counter
     Preferences p;
     if (p.begin("arena", false)) { p.clear(); p.end(); }   // mode/brightness/colour/count
     LittleFS.remove(ARENA_MAP_PATH);
