@@ -134,7 +134,14 @@
       <button onclick="apply()">Apply</button>
       <button onclick="api('/api/save').then(()=>toast('Saved as the boot default'))">Save as Boot Default</button>
       <button onclick="setMode('test')">Wiring Test</button>
-      <button onclick="radioTest()">Glitch Test (Wi-Fi off 30 s)</button>
+      <button onclick="radioTest()">Radio Off 5 min</button>
+      <button onclick="api('/api/health?reset=1').then(()=>{toast('Counters cleared');health()})">Reset Counters</button>
+    </p>
+    <p class="hint" id="health" style="font-variant-numeric:tabular-nums">–</p>
+    <p class="hint">Refresh health, not LED health: the chain cannot report back, so this counts the
+       only firmware-side cause of a whole-string flash — a refresh that stalled. Leave it running.
+       <b>Late refreshes stay at 0 while the wall still flashes → the fault is electrical</b>
+       (data level margin, wiring), not timing.
     </p>
   </section>
 
@@ -229,11 +236,24 @@ function apply() {
 }
 // Whole-chain colour glitches have two possible causes; this tells them apart.
 function radioTest() {
-  if (!confirm('Turn the Wi-Fi off for 30 seconds and watch the LEDs?\n\n' +
+  if (!confirm('Turn the Wi-Fi off for 5 minutes?\n\n' +
+               'For a rare glitch, watch for the whole window — a short one proves nothing.\n' +
                'Flashes stop → the radio was starving the refresh.\n' +
                'Flashes continue → electrical (data level margin, wiring, grounding).\n\n' +
                'The unit reboots when the window ends.')) return;
-  api('/api/radiotest?sec=30').then(() => toast('Wi-Fi off — watch the LEDs for 30 s')).catch(() => {});
+  api('/api/radiotest?sec=300').then(() => toast('Wi-Fi off for 5 min — watch the LEDs')).catch(() => {});
+}
+function health() {
+  fetch('/api/health').then(r => r.json()).then(h => {
+    const late = h.lateShow + h.lateFrame;
+    const ago = h.sinceLateMs ? fmtUp(Math.round(h.sinceLateMs / 1000)) + ' ago' : 'never';
+    $('health').innerHTML =
+      `Refresh <b>${(h.showUs/1000).toFixed(2)} ms</b> (expected ${(h.showExpUs/1000).toFixed(2)}, ` +
+      `worst ${(h.showMaxUs/1000).toFixed(2)}) · worst gap <b>${h.maxGapMs} ms</b> · ` +
+      `late refreshes <b class="${late ? 'warn' : 'ok'}">${h.lateShow}</b> · ` +
+      `missed slots <b class="${h.lateFrame ? 'warn' : 'ok'}">${h.lateFrame}</b> · ` +
+      `last late ${ago} · ${h.frames.toLocaleString()} frames in ${fmtUp(h.up)}`;
+  }).catch(() => {});
 }
 
 function render(s) {
@@ -358,8 +378,9 @@ function ota(inp) {
 }
 
 const poll = () => fetch('/api/state').then(r => r.json()).then(render).catch(() => {});
-poll(); loadZones(); loadInfo();
+poll(); loadZones(); loadInfo(); health();
 setInterval(poll, 1500);
+setInterval(health, 5000);
 </script>
 </body>
 </html>

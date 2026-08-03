@@ -298,6 +298,23 @@ void begin() {
     ESP.restart();
   });
 
+  // --- Signal health: the counters that decide timing vs electrical ---------
+  //   /api/health          read      /api/health?reset=1   zero the counters
+  s_server.on("/api/health", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (r->hasParam("reset")) arenaled::resetHealth();
+    arenaled::Health h = arenaled::health();
+    String j = "{\"showUs\":"     + String(h.showUs);
+    j += ",\"showMaxUs\":"        + String(h.showMaxUs);
+    j += ",\"showExpUs\":"        + String(h.showExpUs);
+    j += ",\"lateShow\":"         + String(h.lateShow);
+    j += ",\"lateFrame\":"        + String(h.lateFrame);
+    j += ",\"maxGapMs\":"         + String(h.maxGapMs);
+    j += ",\"sinceLateMs\":"      + String(h.sinceLateMs);
+    j += ",\"frames\":"           + String(h.frames);
+    j += ",\"up\":"               + String(millis() / 1000) + "}";
+    r->send(200, "application/json", j);
+  });
+
   // --- Radio-off test: the one experiment that separates the two causes of a
   //     whole-chain colour glitch. If the flashes STOP while the radio is off,
   //     the refresh was being starved by the WiFi/TCP stack; if they continue,

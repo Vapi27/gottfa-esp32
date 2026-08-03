@@ -55,6 +55,10 @@ static uint32_t s_fpsT0     = 0, s_fpsN = 0;
 static float    s_amps      = 0.0f;
 static bool     s_limited   = false;
 
+// Signal-health instrumentation (see arenaled.h).
+static uint32_t s_showUs = 0, s_showMaxUs = 0, s_showExpUs = 0;
+static uint32_t s_lateShow = 0, s_lateFrame = 0, s_maxGapMs = 0, s_lastLateMs = 0;
+
 static uint32_t s_xfadeT0   = 0;       // mode-change crossfade
 static const uint32_t XFADE_MS = 500;
 
@@ -358,7 +362,19 @@ static void push(const Rgbw* buf) {
   if (OFFS) s_strip.setPixelColor(0, 0, 0, 0, 0);
   for (uint16_t i = 0; i < s_count; i++)
     s_strip.setPixelColor(i + OFFS, buf[i].r, buf[i].g, buf[i].b, buf[i].w);
+
+  // 32 bits per RGBW pixel at 800 kHz = 40 us, plus the ~300 us reset latch.
+  // show() blocks until the transmit completes, so a duration well past that
+  // means the refresh was interrupted while the chain was listening.
+  s_showExpUs = (uint32_t)(s_count + OFFS) * 40u + 300u;
+  uint32_t t0 = micros();
   s_strip.show();
+  s_showUs = micros() - t0;
+  if (s_showUs > s_showMaxUs) s_showMaxUs = s_showUs;
+  if (s_showUs > s_showExpUs + s_showExpUs / 2 + 200) {   // >1.5x + margin
+    s_lateShow++;
+    s_lastLateMs = millis();
+  }
 #if LED_CHAIN2_ENABLE
   for (uint16_t i = 0; i < s_count; i++)
     s_strip2.setPixelColor(i + OFFS, s_strip.getPixelColor(i + OFFS));
@@ -526,6 +542,23 @@ void identifyZone(int zoneIdx, uint32_t ms) {
 void clearIdentify() { s_idLed = s_idZone = -1; s_idUntil = 0; }
 int  identifyingLed() { return s_idLed; }
 
+Health health() {
+  Health h;
+  h.showUs      = s_showUs;
+  h.showMaxUs   = s_showMaxUs;
+  h.showExpUs   = s_showExpUs;
+  h.lateShow    = s_lateShow;
+  h.lateFrame   = s_lateFrame;
+  h.maxGapMs    = s_maxGapMs;
+  h.sinceLateMs = s_lastLateMs ? (millis() - s_lastLateMs) : 0;
+  h.frames      = s_frames;
+  return h;
+}
+
+void resetHealth() {
+  s_showMaxUs = s_lateShow = s_lateFrame = s_maxGapMs = s_lastLateMs = 0;
+}
+
 float    lastAmps()   { return s_amps; }
 bool     limited()    { return s_limited; }
 uint32_t frameCount() { return s_frames; }
@@ -594,7 +627,13 @@ void begin() {
 
 static void renderFrame() {
   uint32_t now = millis();
-  if (now - s_lastFrame < (uint32_t)(1000 / s_hz)) return;
+  uint32_t period = (uint32_t)(1000 / s_hz);
+  if (now - s_lastFrame < period) return;
+  uint32_t gap = now - s_lastFrame;
+  if (s_frames) {                          // ignore the first frame after boot
+    if (gap > s_maxGapMs) s_maxGapMs = gap;
+    if (gap > period * 2) { s_lateFrame++; s_lastLateMs = now; }
+  }
   s_lastFrame = now;
 
   applyPending();       // strip length changes land here, not in an HTTP handler

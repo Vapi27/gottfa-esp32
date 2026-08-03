@@ -543,9 +543,44 @@ threshold (§4); a bit lands ambiguously and the shift register takes it wrong.
 Long data hops, a hop routed away from its ground return, or a missing series
 resistor all make it worse.
 
-### Telling them apart — one experiment
+### A rare glitch cannot be eyeballed — measure it
 
-The web UI has **Glitch Test (Wi-Fi off 30 s)** (or `GET /api/radiotest?sec=30`).
+If it happens every few minutes, watching for 30 s proves nothing: seeing no
+flash is the expected outcome either way. So the firmware instruments the only
+firmware-side cause instead.
+
+`show()` is blocking and its duration is near-constant — 40 µs per RGBW pixel
+plus a ~300 µs latch, so ~4.3 ms for 100 pixels. A transmit that runs
+significantly longer means the bit stream was interrupted while the chain was
+listening, which is exactly the condition that makes it latch garbage. The UI
+shows this live under **LED Chain**, and `GET /api/health` returns it as JSON
+(`?reset=1` zeroes the counters):
+
+| Field | Meaning |
+|---|---|
+| `showUs` / `showExpUs` / `showMaxUs` | last, expected, worst refresh transmit time |
+| `lateShow` | transmits that ran >1.5× expected — **a starved refresh** |
+| `lateFrame` | render slots missed entirely |
+| `maxGapMs` | worst gap between two refreshes |
+| `sinceLateMs` | age of the last late event |
+
+**Reset the counters, leave it running for as long as it takes to see a few
+flashes, then read them.** The verdict does not need interpretation:
+
+- `lateShow` and `lateFrame` still **0** while the wall flashed → the refresh was
+  never starved, so the fault is **electrical**. Go to §4: diode in the +5 V feed,
+  shorter hops, 330 Ω at the ESP.
+- counters **climbing**, and roughly matching how often you see a flash → **timing**.
+  Lower the refresh rate to 30 Hz, keep the web page closed when not in use.
+
+This is a real distinction, not a formality: the two fixes have nothing in common.
+Note what it cannot do — the chain has no return path, so no firmware can detect a
+corrupted frame. It measures the cause, never the effect.
+
+### Telling them apart — the radio window
+
+As a cross-check, the UI has **Radio Off 5 min** (`GET /api/radiotest?sec=300`, up
+to 300 s).
 It kills the radio, leaves the LEDs running, and reboots at the end of the window:
 
 | During the window | Conclusion | Fix |

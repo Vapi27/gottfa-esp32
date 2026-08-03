@@ -69,6 +69,27 @@ void identifyZone(int zoneIdx, uint32_t ms);
 void clearIdentify();
 int  identifyingLed();                     // -1 when idle
 
+// --- signal health ----------------------------------------------------------
+// The chain gives no feedback, so a corrupted frame can never be detected in
+// software. What CAN be measured is the only firmware-side cause of one: a
+// refresh that stalled. show() is blocking and its duration is near-constant
+// (~40 us per pixel), so a transmit that runs long means the bit stream was
+// starved mid-frame — exactly the condition that makes the chain latch garbage.
+// Counters that stay at zero while the wall still flashes prove the fault is
+// electrical, not timing. That is the whole point of them.
+struct Health {
+  uint32_t showUs;       // last refresh transmit time
+  uint32_t showMaxUs;    // worst seen since reset
+  uint32_t showExpUs;    // what it should take for the current chain length
+  uint32_t lateShow;     // transmits that ran long -> possible starved refresh
+  uint32_t lateFrame;    // render slots missed entirely
+  uint32_t maxGapMs;     // worst gap between refreshes
+  uint32_t sinceLateMs;  // age of the last late event (0 = none seen)
+  uint32_t frames;
+};
+Health health();
+void     resetHealth();
+
 // --- telemetry --------------------------------------------------------------
 float    lastAmps();       // A estimated for the frame just pushed
 bool     limited();        // true if the power limiter had to scale the last frame
