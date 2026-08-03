@@ -2,26 +2,36 @@
 #include <Arduino.h>
 
 // ============================================================================
-//  Arena Wall-Art LED — configuration
-//  Gottlieb "Arena" playfield turned into an illuminated wall decoration.
+//  Pinballs Store — Playfield LED : configuration
+//  Turns any pinball playfield into an illuminated wall piece. First fitted to a
+//  Gottlieb "Arena"; nothing here is specific to that machine.
 //  Target MCU: WEMOS/LOLIN D1 Mini ESP32 (also ESP32-S3 DevKitC-1 / ESP32-C3),
 //  driving up to 150 SK6812MINI-RGBW on one data chain.
 //  Decorative only: no gameplay electronics, no FPGA, no SPI bridge.
 //  Full hardware/build notes: ../ARENA_LED.md
 // ============================================================================
 
-#define ARENA_FW_NAME    "Arena Wall-Art LED"
-#define ARENA_FW_VERSION "1.0.0"
-#define ARENA_MDNS_HOST  "arena"            // -> http://arena.local/
+// ---- Product identity -------------------------------------------------------
+// This firmware ships on boards, so nothing user-facing is tied to one machine:
+// a Gottlieb Arena playfield is simply the first thing it was fitted to. Game
+// specifics live in the insert map (data), never in the firmware.
+#define PRODUCT_BRAND    "Pinballs Store"
+#define PRODUCT_NAME     "Playfield LED"
+#define PRODUCT_MODEL    "PS-LED150"        // up to 150 SK6812 RGBW pixels
+#define ARENA_FW_NAME    PRODUCT_BRAND " " PRODUCT_NAME
+#define ARENA_FW_VERSION "1.1.0"
+#define ARENA_MDNS_HOST  "pinled"           // default -> http://pinled.local/
+                                            // (overridden by the device name set in the UI)
 
 // ---- WiFi -------------------------------------------------------------------
-// Leave the STA fields empty to boot straight into the SoftAP (join 'Arena-LED',
-// password below, then open http://192.168.4.1/). Credentials set from the web UI
-// are stored in NVS and win over these compile-time defaults.
+// Leave the STA fields empty to boot straight into the SoftAP. The AP name gets a
+// per-device suffix from the MAC (e.g. 'Pinballs-LED-7A3C') so several units in
+// the same room never collide. Credentials set from the web UI are stored in NVS
+// and win over these compile-time defaults.
 #define ARENA_STA_SSID       ""
 #define ARENA_STA_PASS       ""
 #define ARENA_STA_TIMEOUT_MS 12000
-#define ARENA_AP_SSID        "Arena-LED"
+#define ARENA_AP_PREFIX      "Pinballs-LED"
 #define ARENA_AP_PASS        "pinball87"    // >= 8 chars
 
 // ---- LED chain --------------------------------------------------------------
@@ -32,7 +42,24 @@
 // just the boot value and is changed live from the web UI (persisted in NVS).
 #define LED_MAX              150
 #define LED_COUNT_DEFAULT    100
-#define LED_FRAME_HZ          60   // render/refresh rate (150 px RGBW = 4.8 ms/frame on the wire)
+#define LED_FRAME_HZ          60   // default render/refresh rate (runtime-adjustable, 10..60)
+
+// ---- Render task -------------------------------------------------------------
+// The pixel protocol is self-clocked: one long-enough gap in the bit stream and
+// the chain latches whatever it has, which shows up as a brief flash of wrong
+// colour across the WHOLE string (a corrupted bit early in the frame shifts every
+// pixel after it). On a dual-core ESP32 the cure is to stop sharing a task with
+// the web stack: rendering gets its own task, pinned to core 1, at a priority
+// above AsyncTCP, so serving a page cannot delay a refresh. Single-core parts
+// (C3) keep rendering from loop().
+#if defined(BOARD_C3)
+#define ARENA_RENDER_TASK      0
+#else
+#define ARENA_RENDER_TASK      1
+#define ARENA_RENDER_PRIO      4   // > AsyncTCP (3), << WiFi (22+)
+#define ARENA_RENDER_CORE      1   // core 0 is where the radio lives
+#define ARENA_RENDER_STACK  4096
+#endif
 
 // Data pin, per target. Any output-capable GPIO works (the chain is driven by the
 // RMT peripheral), but the choice has to dodge each chip's reserved pins.

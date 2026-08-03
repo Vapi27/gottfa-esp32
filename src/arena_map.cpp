@@ -16,7 +16,7 @@ static const Zone DEFAULT_ZONES[] = {
   { "pop-bumpers",     30,  9 },
   { "spinner",         39,  4 },
   { "right-orbit",     43,  8 },
-  { "arena-letters",   51,  5 },
+  { "letters",         51,  5 },
   { "top-lanes",       56,  6 },
   { "bonus-ladder",    62, 10 },
   { "center-star",     72,  6 },

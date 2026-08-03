@@ -27,7 +27,7 @@ enum Mode : uint8_t {
   MODE_OFF = 0,     // all pixels dark (the chain stays powered/refreshed)
   MODE_CLASSIC,     // static warm white with a subtle incandescent flicker
   MODE_ATTRACT,     // slow pulses / waves / chases / random inserts, auto-cycled
-  MODE_ARENA,       // animations that follow the playfield layout (zone-driven)
+  MODE_PLAYFIELD,   // animations that follow the playfield layout (zone-driven)
   MODE_NIGHT,       // warm white at ~10 %
   MODE_RAINBOW,     // full RGB hue sweep
   MODE_TEST,        // R / G / B / W channel walk — wiring + colour-order check
@@ -39,7 +39,8 @@ void tick();                          // call from loop()
 
 void        setMode(Mode m);
 Mode        mode();
-const char* modeName(Mode m);
+const char* modeName(Mode m);              // API token, lowercase ("playfield")
+const char* modeLabel(Mode m);             // UI label, capitalised ("Playfield")
 Mode        modeFromName(const char* s);   // MODE_COUNT if unknown
 void        nextMode();                    // front-panel button: cycle usable modes
 
@@ -53,6 +54,9 @@ void    setCount(uint16_t n);              // live LED count (1..LED_MAX)
 uint16_t count();
 void    setBudgetMa(uint16_t ma);          // power ceiling for the whole chain
 uint16_t budgetMa();
+
+void     setHz(uint8_t hz);                // refresh rate 10..60 (lower = less bus traffic)
+uint8_t  hz();
 
 // Pixel colour order, e.g. "grbw" (SK6812 default) / "rgbw" / "gbrw" / ...
 // Changing it re-types the chain live — no reflash, no reboot.

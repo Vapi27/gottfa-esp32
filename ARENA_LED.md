@@ -524,7 +524,49 @@ walk it up while watching the current.
 **7 — Map and save.** Use the mapping wizard to name the zones, save the map,
 pick your boot mode and brightness, then **Save as boot default**.
 
-## 9. Future (V2)
+## 9. Whole-chain colour glitches
+
+**Symptom: every so often the whole string flashes white (or a wrong colour) for
+a fraction of a second, as if a frame had been dropped.** That reading is exactly
+right. The pixel protocol is self-clocked and has no error checking: one bit
+disturbed early in a frame shifts every pixel after it, so a single glitched bit
+near the start of the chain repaints the *entire* wall for one frame (~16 ms).
+There are only two families of cause.
+
+**A — the refresh was starved.** The bit stream must not stall mid-frame. If the
+WiFi/TCP stack delays the refresh long enough, the chain latches a half-written
+frame. Since v1.1 the renderer has its own task pinned to core 1 above the web
+stack, which removes the usual source of this on a dual-core ESP32.
+
+**B — the data signal is marginal.** 3.3 V driving a 5 V chain sits right on the
+threshold (§4); a bit lands ambiguously and the shift register takes it wrong.
+Long data hops, a hop routed away from its ground return, or a missing series
+resistor all make it worse.
+
+### Telling them apart — one experiment
+
+The web UI has **Glitch Test (Wi-Fi off 30 s)** (or `GET /api/radiotest?sec=30`).
+It kills the radio, leaves the LEDs running, and reboots at the end of the window:
+
+| During the window | Conclusion | Fix |
+|---|---|---|
+| flashes **stop** | the radio was starving the refresh | lower the refresh rate (LED Chain → Refresh Rate, try 30 Hz), keep the page closed when not in use |
+| flashes **continue** | electrical | §4 option A (drop the bus to ~4.4 V) or option B (repeater pixel); shorten the data hops, run each hop alongside the bus, fit the 330 Ω at the ESP |
+
+Do this before changing anything else — the two fixes have nothing in common, and
+guessing costs an afternoon.
+
+### If it is electrical
+
+In order of how much they buy you per minute spent: put a diode in the +5 V feed
+so the chain runs at ~4.3 V (instant, one part, §4 A); shorten the ESP → LED 1 wire
+and twist it with its ground; check the 330 Ω is at the *ESP* end; make sure every
+board-to-board hop runs along the bus rather than looping away from it; then the
+repeater pixel (§4 B) if the chain must stay at 5.0 V.
+
+---
+
+## 10. Future (V2)
 
 Motion sensor (PIR on a spare GPIO → wake from night mode), audio-reactive mode
 (I2S MEMS mic), ambient light sensor for auto-brightness, IR remote,
@@ -546,5 +588,6 @@ Assistant `rest_command` needs no firmware change at all.
 | `data/arena.html` | web UI (LittleFS) |
 | `data/arena_map.json` | default insert map (LittleFS, editable from the UI) |
 | `tools/host_arenaphase_test.cpp` | host test for the animation clock (30 days of uptime in a second) |
+| `data/logo.png` | Pinballs Store logo used by the web UI (replaceable) |
 | `tools/arena_flash.sh` | one-command build + flash + monitor, with troubleshooting output |
 | `hardware/arena-led-bom.csv` | BOM |
