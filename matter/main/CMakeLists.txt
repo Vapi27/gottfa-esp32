@@ -16,6 +16,19 @@
 # declarations, so it carries #undefs no other file needs.
 set(ARENA_SRC "../../src")
 
+# Les bibliotheques par GLOB, et versees dans SRCS.
+# Piege d'ESP-IDF : quand SRCS est fourni, SRC_DIRS est **purement ignore**,
+# sans un mot. Le CMakeLists donnait les deux, donc ESPAsyncWebServer n'etait
+# plus compile du tout - cinq references non resolues a l'edition de liens, dont
+# le constructeur d'AsyncWebServer, apres une reconstruction complete de CHIP.
+file(GLOB ARENA_LIB_SRCS
+     "../libs/AsyncTCP/src/*.cpp"
+     "../libs/ESPAsyncWebServer/src/*.cpp"
+     "../../lib/Adafruit_NeoPixel/*.cpp"  "../../lib/Adafruit_NeoPixel/*.c"
+     "../../lib/Adafruit_GFX/*.cpp"       "../../lib/Adafruit_GFX/*.c"
+     "../../lib/Adafruit_SSD1306/*.cpp"
+     "../../lib/Adafruit_BusIO/*.cpp")
+
 idf_component_register(
     SRCS "arena_matter.cpp"
          "${ARENA_SRC}/arena_main.cpp"
@@ -25,13 +38,7 @@ idf_component_register(
          "${ARENA_SRC}/arena_map.cpp"
          "${ARENA_SRC}/arena_attract.cpp"
          "${ARENA_SRC}/arena_oled.cpp"
-    # SRC_DIRS pour les bibliotheques : ce sont des repertoires feuilles, tout ce
-    # qu'ils contiennent leur appartient. Les enumerer fichier par fichier a
-    # coute une serie d'erreurs de lien - il manquait Middleware.cpp et deux
-    # autres. SRCS reste reserve a src/, qui heberge aussi l'application GottFA.
-    SRC_DIRS "../libs/AsyncTCP/src" "../libs/ESPAsyncWebServer/src"
-             "../../lib/Adafruit_NeoPixel" "../../lib/Adafruit_GFX"
-             "../../lib/Adafruit_SSD1306" "../../lib/Adafruit_BusIO"
+         ${ARENA_LIB_SRCS}
     INCLUDE_DIRS "." "${ARENA_SRC}" "../../include" "../libs/ESPAsyncWebServer/src" "../../lib/Adafruit_NeoPixel"
                  "../../lib/Adafruit_GFX" "../../lib/Adafruit_SSD1306" "../../lib/Adafruit_BusIO"
                  "../libs/AsyncTCP/src" "../libs/ArduinoJson/src"
