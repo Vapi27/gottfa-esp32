@@ -93,7 +93,10 @@ static void drawQr() {
   // thing anyone drops when squeezing a QR onto a small screen.
   const uint8_t px = (ARENA_OLED_H >= ARENA_QR_SIDE * 2) ? 2 : 1;
   const int16_t side = ARENA_QR_SIDE * px;
-  const int16_t x0 = (ARENA_OLED_W - side) / 2 - 24;   // leave room for the text
+  // Colle a gauche, pas centre : le QR est carre donc plafonne par la HAUTEUR
+  // du panneau (29 modules sur 32 pixels, il ne peut pas grandir). Toute la
+  // largeur restante va aux chiffres, qu'on peut alors ecrire en grand.
+  const int16_t x0 = 2;
   const int16_t y0 = (ARENA_OLED_H - side) / 2;
 
   // Contraste bas pour le QR. A pleine luminosite un OLED "bave" : chaque pixel
@@ -116,18 +119,19 @@ static void drawQr() {
   // written on five lines starting at y0+2, and the last three landed BELOW the
   // glass - checked on paper, never on hardware, because no panel is fitted.
   // Three short lines fit a 32-pixel panel; five only fit a 64.
-  const int16_t tx = x0 + side + 4;
-  s_d.setTextSize(1);
+  // Chiffres en taille 2 : 12 px par caractere, donc 7 au plus dans les ~95 px
+  // qui restent a droite du QR. Deux lignes de 16 px remplissent exactement les
+  // 32 px du panneau. Le code se lit alors a bout de bras, ce qui est le but -
+  // c'est lui qu'on tape quand l'appareil photo renonce.
+  const int16_t tx = x0 + side + 6;
+  s_d.setTextSize(2);
   if (ARENA_OLED_H >= 64) {
-    s_d.setCursor(tx, y0 + 2);   s_d.print(F("Add to"));
-    s_d.setCursor(tx, y0 + 12);  s_d.print(F("Home:"));
-    s_d.setCursor(tx, y0 + 26);  s_d.print(F("3497"));
-    s_d.setCursor(tx, y0 + 36);  s_d.print(F("011"));
-    s_d.setCursor(tx, y0 + 46);  s_d.print(F("2332"));
+    s_d.setCursor(tx, 6);   s_d.print(F("3497"));
+    s_d.setCursor(tx, 24);  s_d.print(F("011"));
+    s_d.setCursor(tx, 42);  s_d.print(F("2332"));
   } else {
-    s_d.setCursor(tx, y0 + 1);   s_d.print(F("3497"));
-    s_d.setCursor(tx, y0 + 11);  s_d.print(F("011"));
-    s_d.setCursor(tx, y0 + 21);  s_d.print(F("2332"));
+    s_d.setCursor(tx, 0);   s_d.print(F("3497011"));
+    s_d.setCursor(tx, 16);  s_d.print(F("2332"));
   }
 }
 
