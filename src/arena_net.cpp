@@ -5,6 +5,12 @@
 #include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
 #include <Preferences.h>
+// esp_read_mac : dans esp_mac.h depuis IDF 5, dans esp_system.h avant.
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+#include <esp_mac.h>
+#else
+#include <esp_system.h>
+#endif
 #include <Update.h>
 #include <esp_ota_ops.h>
 #include <esp_partition.h>   // ecriture directe de la partition fichiers
@@ -38,6 +44,27 @@ namespace arenanet {
 
 static AsyncWebServer s_server(80);
 static Preferences    s_prefs;
+
+// Identite de la carte. La MAC est gravee en usine, donc unique sans reglage ni
+// numero de serie a gerer : deux murs sortis de la meme image ne peuvent pas se
+// confondre. Le proprietaire peut ensuite mettre "Volcano" ou "Arena".
+static String         s_name;
+static String         s_mac;
+
+const String& wallName() { return s_name; }
+
+// Un nom d'hote mDNS n'accepte ni espace ni accent ni majuscule.
+static String hostify(const String& in) {
+  String o;
+  for (size_t i = 0; i < in.length(); i++) {
+    char c = in[i];
+    if (c >= 'A' && c <= 'Z') c += 32;
+    if ((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9')) o += c;
+    else if (o.length() && o[o.length()-1] != '-')       o += '-';
+  }
+  while (o.length() && o[o.length()-1] == '-') o.remove(o.length()-1);
+  return o.length() ? o : String("playfield");
+}
 static String         s_ip   = "0.0.0.0";
 static String         s_mode = "init";
 
@@ -237,6 +264,11 @@ static String stateJson() {
   // fil inverse - et il n'y a pas de port serie sur un mur accroche.
   j += ",\"oled\":" + String(arenaoled::found() ? "true" : "false");
   j += ",\"bustype\":"  + String((int32_t)espShowBusType);
+  // Qui est ce mur. Indispensable des qu'il y en a plusieurs : c'est ce qui
+  // permet de balayer le reseau et de dire lequel est lequel.
+  j += ",\"name\":\"" + s_name + "\"";
+  j += ",\"mac\":\""  + s_mac  + "\"";
+
   // OTA en mode pull : ou en est le telechargement declenche par /api/otapull.
   j += ",\"otast\":\""  + s_pullStatus + "\"";
   j += ",\"otadone\":"  + String(s_pullDone);
@@ -502,6 +534,24 @@ static void startServer() {
     r->send(200, "application/json", arenapf::toJson());
   });
 
+  // --- Nom du mur : /api/name?v=Volcano ----------------------------------
+  // C'est ce qui rend quatre murs utilisables. Sans nom, un balayage du reseau
+  // ne rend que des adresses IP interchangeables, et l'app Maison affiche
+  // quatre accessoires au libelle identique.
+  s_server.on("/api/name", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (r->hasParam("v")) {
+      String v = r->getParam("v")->value();
+      v.trim();
+      if (v.length() > 24) v = v.substring(0, 24);
+      if (v.length()) { s_name = v; s_prefs.putString("name", v); }
+      else            { s_prefs.remove("name"); }   // vide = retour au nom d'usine
+      arenaoled::poke();
+    }
+    r->send(200, "application/json",
+            String("{\"name\":\"") + s_name + "\",\"mac\":\"" + s_mac +
+            "\",\"note\":\"nom mDNS et point d acces au prochain demarrage\"}");
+  });
+
   // --- WiFi provisioning: /api/wifi?ssid=...&pass=... then reboot ---------
   s_server.on("/api/wifi", HTTP_GET, [](AsyncWebServerRequest* r) {
     if (!r->hasParam("ssid")) {
@@ -759,6 +809,17 @@ static void startServer() {
 void begin() {
   // --- WiFi: NVS credentials (set from the UI) override the compile-time ones ---
   s_prefs.begin("arenanet", false);
+  {
+    uint8_t m[6] = {0};
+    esp_read_mac(m, ESP_MAC_WIFI_STA);
+    char sfx[16]; snprintf(sfx, sizeof(sfx), "%02X%02X", m[4], m[5]);
+    char mac[20]; snprintf(mac, sizeof(mac), "%02X:%02X:%02X:%02X:%02X:%02X",
+                           m[0], m[1], m[2], m[3], m[4], m[5]);
+    s_mac  = mac;
+    s_name = s_prefs.getString("name", "");
+    if (!s_name.length()) s_name = String("Playfield-") + sfx;
+    Serial.printf("[net] mur '%s' (%s)\n", s_name.c_str(), s_mac.c_str());
+  }
   String ssid = s_prefs.getString("ssid", ARENA_STA_SSID);
   String pass = s_prefs.getString("pass", ARENA_STA_PASS);
 
@@ -780,7 +841,7 @@ void begin() {
   bool connected = false;
   if (ssid.length()) {
     WiFi.mode(WIFI_STA);
-    WiFi.setHostname(ARENA_MDNS_HOST);
+    WiFi.setHostname(hostify(s_name).c_str());
     WiFi.setSleep(false);            // keep the REST latency low; the wall is mains-powered
     Serial.printf("[net] STA connecting to '%s' ...\n", ssid.c_str());
     WiFi.begin(ssid.c_str(), pass.c_str());
@@ -798,14 +859,20 @@ void begin() {
     Serial.printf("[net] STA OK ip=%s\n", s_ip.c_str());
   } else {
     WiFi.mode(WIFI_AP);
-    WiFi.softAP(ARENA_AP_SSID, ARENA_AP_PASS);
+    WiFi.softAP(s_name.c_str(), ARENA_AP_PASS);
     s_mode = "SoftAP";
     s_ip = WiFi.softAPIP().toString();
-    Serial.printf("[net] SoftAP '%s' ip=%s\n", ARENA_AP_SSID, s_ip.c_str());
+    Serial.printf("[net] SoftAP '%s' ip=%s\n", s_name.c_str(), s_ip.c_str());
   }
-  if (MDNS.begin(ARENA_MDNS_HOST)) {
-    MDNS.addService("http", "tcp", 80);
-    Serial.printf("[net] http://%s.local/\n", ARENA_MDNS_HOST);
+  // Nom d'hote propre a la carte : sans ca, quatre murs se disputent arena.local
+  // et mDNS en renomme trois en arena-2, arena-3... au petit bonheur.
+  {
+    String h = hostify(s_name);
+    if (MDNS.begin(h.c_str())) {
+      MDNS.addService("http", "tcp", 80);
+      MDNS.addServiceTxt("http", "tcp", "wall", s_name.c_str());
+      Serial.printf("[net] http://%s.local/\n", h.c_str());
+    }
   }
 
 #endif

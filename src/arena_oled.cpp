@@ -106,7 +106,10 @@ static void drawQr() {
     s_d.setTextColor(SSD1306_WHITE);
     s_d.setTextSize(1);
     s_d.setCursor(0, 0);
-    s_d.print(F("Code d'appairage"));
+    // Le nom du mur en tete, pas un titre : quand on appaire le troisieme d'une
+    // serie, il faut voir sans ambiguite devant lequel on se trouve - les
+    // quatre partagent le meme code d'appairage.
+    s_d.print(arenanet::wallName());
     s_d.setTextSize(2);
     s_d.setCursor(4, 10);
     s_d.print(F("3497-011"));
@@ -199,10 +202,12 @@ static void draw() {
       s_d.setCursor(0, 22); s_d.print(F("the pairing code"));
       break;
     case IT_INFO:
+      // Le nom d'abord : avec plusieurs murs sur le reseau, c'est la seule
+      // chose qui dit devant lequel on se trouve.
       s_d.setTextSize(1);
-      s_d.print(arenanet::ip());
+      s_d.print(arenanet::wallName());
       s_d.setCursor(0, 22);
-      s_d.print(F("v" ARENA_FW_VERSION));
+      s_d.print(arenanet::ip());
       break;
     default: break;
   }
