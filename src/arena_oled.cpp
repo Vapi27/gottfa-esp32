@@ -306,7 +306,9 @@ void begin() {
   Serial.printf("[oled] SSD1306 %dx%d on SDA%d/SCL%d, encoder %d/%d/%d\n",
                 ARENA_OLED_W, ARENA_OLED_H, PIN_ARENA_OLED_SDA, PIN_ARENA_OLED_SCL,
                 PIN_ARENA_ENC_A, PIN_ARENA_ENC_B, PIN_ARENA_ENC_SW);
-  poke();                       // greet whoever just powered the wall on
+  // Au demarrage : le code d'appairage pendant la mise au point, le menu sinon.
+  if (ARENA_OLED_BOOT_QR) showQr();
+  else                    poke();   // greet whoever just powered the wall on
 }
 
 bool found() { return s_found; }
@@ -336,7 +338,8 @@ void tick() {
   static uint32_t lastDraw = 0;
   if (now - lastDraw > 400) { lastDraw = now; draw(); }
 
-  if (now - s_lastIn > ARENA_OLED_SLEEP_MS) sleepNow();
+  // 0 = jamais. Voir le bandeau dans arena_config.h.
+  if (ARENA_OLED_SLEEP_MS && now - s_lastIn > ARENA_OLED_SLEEP_MS) sleepNow();
 }
 
 }  // namespace arenaoled

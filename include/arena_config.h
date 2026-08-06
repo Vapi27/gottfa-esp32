@@ -110,9 +110,19 @@
 #define ARENA_OLED_W         128
 #define ARENA_OLED_H          32   // 64 si tu montes le grand panneau
 #define ARENA_OLED_ADDR     0x3C   // 0x3D sur quelques modules
-// L'ecran s'eteint apres ce delai sans action. C'est une piece accrochee au mur
-// pour des annees : un menu statique laisse allume se grave dans le verre.
-#define ARENA_OLED_SLEEP_MS 30000
+// L'ecran s'eteint apres ce delai sans action. 0 = ne s'eteint jamais.
+//
+// ############ PHASE DE TEST - A REMETTRE A 30000 AVANT DE LIVRER ############
+// Un OLED qui affiche une image fixe la GRAVE dans son verre. Le QR d'appairage
+// laisse en permanence est le pire cas possible : contraste maximal, motif fixe.
+// Acceptable quelques heures sur un panneau d'essai, destructeur sur une piece
+// vendue et accrochee pour des annees.
+#define ARENA_OLED_SLEEP_MS     0
+
+// Ecran affiche au demarrage : 1 = le code d'appairage, 0 = le menu.
+// Meme remarque - c'est un reglage de mise au point, pas un defaut de produit.
+#define ARENA_OLED_BOOT_QR      1
+// ###########################################################################
 
 #if defined(ARENA_BOARD_D1MINI32)
 #define PIN_ARENA_OLED_SDA    21
