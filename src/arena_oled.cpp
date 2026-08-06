@@ -88,51 +88,54 @@ static uint8_t wheelIndexOfCurrent() {
 //  Drawing
 // ---------------------------------------------------------------------------
 static void drawQr() {
-  // 1 px per module on a 32-pixel panel, 2 px on a 64. The quiet zone is baked
-  // into the bitmap: without it a phone will not lock on, and it is the first
-  // thing anyone drops when squeezing a QR onto a small screen.
-  const uint8_t px = (ARENA_OLED_H >= ARENA_QR_SIDE * 2) ? 2 : 1;
-  const int16_t side = ARENA_QR_SIDE * px;
-  // Colle a gauche, pas centre : le QR est carre donc plafonne par la HAUTEUR
-  // du panneau (29 modules sur 32 pixels, il ne peut pas grandir). Toute la
-  // largeur restante va aux chiffres, qu'on peut alors ecrire en grand.
+  s_d.clearDisplay();
+
+  // Sur un panneau de 32 pixels de haut, le QR est INUTILISABLE, et ce n'est pas
+  // une question de reglage : le code fait 29 modules, donc 1 pixel par module,
+  // donc des modules de l'ordre du dixieme de millimetre. Pour les resoudre un
+  // iPhone doit s'approcher plus pres que sa distance minimale de mise au point,
+  // et il n'y arrive jamais. Constate sur la vraie machine : "l'iphone n'arrive
+  // pas a faire le focus". Aucun firmware ne corrige une limite optique.
+  //
+  // Donc ici on n'affiche PAS de QR : toute la surface va au code en chiffres,
+  // qui s'appaire a la main dans l'app Maison sans le moindre appareil photo.
+  // Le QR reste dessine sur un panneau de 64, ou il passe a 2 px/module.
+  if (ARENA_OLED_H < 64) {
+    s_d.ssd1306_command(SSD1306_SETCONTRAST);
+    s_d.ssd1306_command(0xCF);
+    s_d.setTextColor(SSD1306_WHITE);
+    s_d.setTextSize(1);
+    s_d.setCursor(0, 0);
+    s_d.print(F("Code d'appairage"));
+    s_d.setTextSize(2);
+    s_d.setCursor(4, 10);
+    s_d.print(F("3497-011"));
+    s_d.setTextSize(2);
+    s_d.setCursor(28, 26);
+    s_d.print(F("2332"));
+    s_d.display();
+    return;
+  }
+
+  const int16_t side = ARENA_QR_SIDE;
   const int16_t x0 = 2;
   const int16_t y0 = (ARENA_OLED_H - side) / 2;
 
-  // Contraste bas pour le QR. A pleine luminosite un OLED "bave" : chaque pixel
-  // allume deborde sur ses voisins eteints, les modules se rejoignent et
-  // l'appareil photo ne distingue plus la grille. Un QR se scanne mieux terne.
-  // Signale a l'usage : "too bright for scanning".
   s_d.ssd1306_command(SSD1306_SETCONTRAST);
   s_d.ssd1306_command(0x20);
-
   s_d.fillRect(x0, y0, side, side, SSD1306_BLACK);
-  for (uint8_t r = 0; r < ARENA_QR_SIDE; r++)
-    for (uint8_t c = 0; c < ARENA_QR_SIDE; c++)
-      if (ARENA_QR[r][c >> 3] & (0x80 >> (c & 7)))
-        s_d.fillRect(x0 + c * px, y0 + r * px, px, px, SSD1306_WHITE);
+  for (int16_t y = 0; y < side; y++)
+    for (int16_t x = 0; x < side; x++)
+      if (ARENA_QR[y][x >> 3] & (0x80 >> (x & 7)))
+        s_d.drawPixel(x0 + x, y0 + y, SSD1306_WHITE);
 
-  // The manual code beside it, always. A phone that will not read a 29-module
-  // QR off an OLED is a support call; eleven digits typed by hand are not.
-  //
-  // The layout has to follow the panel. On the 0.91" strip (128x32) the code was
-  // written on five lines starting at y0+2, and the last three landed BELOW the
-  // glass - checked on paper, never on hardware, because no panel is fitted.
-  // Three short lines fit a 32-pixel panel; five only fit a 64.
-  // Chiffres en taille 2 : 12 px par caractere, donc 7 au plus dans les ~95 px
-  // qui restent a droite du QR. Deux lignes de 16 px remplissent exactement les
-  // 32 px du panneau. Le code se lit alors a bout de bras, ce qui est le but -
-  // c'est lui qu'on tape quand l'appareil photo renonce.
   const int16_t tx = x0 + side + 6;
+  s_d.setTextColor(SSD1306_WHITE);
   s_d.setTextSize(2);
-  if (ARENA_OLED_H >= 64) {
-    s_d.setCursor(tx, 6);   s_d.print(F("3497"));
-    s_d.setCursor(tx, 24);  s_d.print(F("011"));
-    s_d.setCursor(tx, 42);  s_d.print(F("2332"));
-  } else {
-    s_d.setCursor(tx, 0);   s_d.print(F("3497011"));
-    s_d.setCursor(tx, 16);  s_d.print(F("2332"));
-  }
+  s_d.setCursor(tx, 6);   s_d.print(F("3497"));
+  s_d.setCursor(tx, 24);  s_d.print(F("011"));
+  s_d.setCursor(tx, 42);  s_d.print(F("2332"));
+  s_d.display();
 }
 
 static void drawBar(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t v);
