@@ -843,8 +843,17 @@ function wzDraw() {
   const W = 1000, H = 2074;              // 960 x 1991 table units, normalised
   let s = '<svg viewBox="' + pfViewBox() +
           '" style="width:100%;max-width:430px;display:block;margin:8px auto">';
+  // L'artwork REEL de la machine, extrait de la table Visual Pinball par
+  // tools/vpx_bind.py. Le schema abstrait obligeait le proprietaire a deviner a
+  // quoi correspondait chaque pastille ; ici il reconnait sa rampe, ses cibles,
+  // ses bumpers. Les coordonnees sont deja normalisees 0..1 sur les bornes de la
+  // table, donc l'image se pose telle quelle sous les pastilles.
+  // 178 ko en 560 px de large : servi une fois puis garde en cache, alors que
+  // l'original de la table fait 13,9 Mo.
+  s += '<image href="/playfield.jpg" x="0" y="0" width="' + W + '" height="' + H +
+       '" preserveAspectRatio="none" opacity="0.85"/>';
   s += '<rect x="0" y="0" width="' + W + '" height="' + H +
-       '" rx="64" fill="#141009" stroke="#2c241d" stroke-width="4"/>';
+       '" rx="64" fill="none" stroke="#2c241d" stroke-width="4"/>';
   s += '<text x="' + (W / 2) + '" y="-6" fill="#5b4c3c" font-size="38" text-anchor="middle">back panel</text>';
   s += '<text x="' + (W / 2) + '" y="' + (H + 26) + '" fill="#5b4c3c" font-size="38" text-anchor="middle">flippers</text>';
   // Two passes: what is on the plan has to be known in full before any circle can

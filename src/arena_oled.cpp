@@ -104,13 +104,35 @@ static void drawQr() {
 
   // The manual code beside it, always. A phone that will not read a 29-module
   // QR off an OLED is a support call; eleven digits typed by hand are not.
+  //
+  // The layout has to follow the panel. On the 0.91" strip (128x32) the code was
+  // written on five lines starting at y0+2, and the last three landed BELOW the
+  // glass - checked on paper, never on hardware, because no panel is fitted.
+  // Three short lines fit a 32-pixel panel; five only fit a 64.
   const int16_t tx = x0 + side + 4;
   s_d.setTextSize(1);
-  s_d.setCursor(tx, y0 + 2);              s_d.print(F("Add to"));
-  s_d.setCursor(tx, y0 + 12);             s_d.print(F("Home:"));
-  s_d.setCursor(tx, y0 + 24);             s_d.print(F("3497"));
-  s_d.setCursor(tx, y0 + 34);             s_d.print(F("011"));
-  s_d.setCursor(tx, y0 + 44);             s_d.print(F("2332"));
+  if (ARENA_OLED_H >= 64) {
+    s_d.setCursor(tx, y0 + 2);   s_d.print(F("Add to"));
+    s_d.setCursor(tx, y0 + 12);  s_d.print(F("Home:"));
+    s_d.setCursor(tx, y0 + 26);  s_d.print(F("3497"));
+    s_d.setCursor(tx, y0 + 36);  s_d.print(F("011"));
+    s_d.setCursor(tx, y0 + 46);  s_d.print(F("2332"));
+  } else {
+    s_d.setCursor(tx, y0 + 1);   s_d.print(F("3497"));
+    s_d.setCursor(tx, y0 + 11);  s_d.print(F("011"));
+    s_d.setCursor(tx, y0 + 21);  s_d.print(F("2332"));
+  }
+}
+
+static void drawBar(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t v);
+
+// Sur un panneau de 32 px, un nombre en taille 2 pose a y=12 occupe jusqu'a
+// y=28, et une barre a y=H-7 commence a 25 : trois pixels de chevauchement.
+// La barre passe donc a DROITE du nombre sur les panneaux courts, et reste en
+// pied de page sur les grands, ou il y a la place.
+static void drawValueBar(uint8_t v) {
+  if (ARENA_OLED_H >= 64) drawBar(0, ARENA_OLED_H - 9, ARENA_OLED_W, 9, v);
+  else                    drawBar(62, 14, ARENA_OLED_W - 64, 12, v);
 }
 
 static void drawBar(int16_t x, int16_t y, int16_t w, int16_t h, uint8_t v) {
@@ -140,15 +162,15 @@ static void draw() {
       break;
     case IT_BRIGHT:
       s_d.setTextSize(2); s_d.print((int)(arenaled::brightness() * 100 / 255)); s_d.print('%');
-      drawBar(0, ARENA_OLED_H - 7, ARENA_OLED_W, 7, arenaled::brightness());
+      drawValueBar(arenaled::brightness());
       break;
     case IT_SPEED:
       s_d.setTextSize(2); s_d.print((int)(arenaled::speed() * 100 / 255)); s_d.print('%');
-      drawBar(0, ARENA_OLED_H - 7, ARENA_OLED_W, 7, arenaled::speed());
+      drawValueBar(arenaled::speed());
       break;
     case IT_GI:
       s_d.setTextSize(2); s_d.print((int)(arenaled::gi() * 100 / 255)); s_d.print('%');
-      drawBar(0, ARENA_OLED_H - 7, ARENA_OLED_W, 7, arenaled::gi());
+      drawValueBar(arenaled::gi());
       break;
     case IT_FILAMENT:
       s_d.setTextSize(2); s_d.print(arenaled::incandescent() ? F("ON") : F("off"));
