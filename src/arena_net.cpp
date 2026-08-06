@@ -620,6 +620,17 @@ static void startServer() {
   // les identifiants puis sort avant de s'en servir). Ce que ce balayage sert
   // vraiment : savoir quelle puissance de signal le mur recoit LA OU IL EST
   // ACCROCHE, ce qu'aucun telephone tenu a la main ne dit.
+  // Reveiller l'ecran a distance. Il s'eteint apres ARENA_OLED_SLEEP_MS, ce qui
+  // est voulu - un menu statique se grave dans le verre d'un OLED - mais rend
+  // toute verification impossible depuis l'autre bout de la maison : on flashe,
+  // on va voir, il dort deja. ?s=1 le garde eveille en repoussant l'extinction
+  // tant qu'on interroge.
+  s_server.on("/api/oled", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!arenaoled::found()) { r->send(404, "text/plain", "aucun panneau detecte"); return; }
+    arenaoled::poke();
+    r->send(200, "text/plain", "ecran reveille");
+  });
+
   s_server.on("/api/wifiscan", HTTP_GET, [](AsyncWebServerRequest* r) {
     if (r->hasParam("results")) {
       wifi_ap_record_t apInfo = {};
