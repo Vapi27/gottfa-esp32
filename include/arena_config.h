@@ -146,8 +146,13 @@
 // Les deux entrees coexistent : l'encodeur reste lu s'il est cable, et OK
 // partage volontairement la broche de son bouton-poussoir. Une carte n'a donc
 // jamais besoin des deux, et le firmware est le meme dans les deux cas.
-#define PIN_ARENA_BTN_UP       6
-#define PIN_ARENA_BTN_DOWN    15
+// GPIO6 serait le choix evident et il est DEJA PRIS : c'est PIN_LED_DATA2, la
+// seconde chaine de pixels, reellement instanciee dans arenaled.cpp. Un poussoir
+// en pull-up interne s'y opposerait a une sortie RMT.
+// 15 et 17 sont libres sur le WROOM-1 : hors flash (26-32), hors PSRAM octale
+// (33-37), hors USB (19/20) et hors broches de strap.
+#define PIN_ARENA_BTN_UP      15
+#define PIN_ARENA_BTN_DOWN    17
 #define PIN_ARENA_BTN_OK       PIN_ARENA_ENC_SW
 #endif
 
