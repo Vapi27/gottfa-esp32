@@ -32,7 +32,9 @@ idf_component_register(
     SRC_DIRS "../libs/AsyncTCP/src" "../libs/ESPAsyncWebServer/src"
              "../../lib/Adafruit_NeoPixel" "../../lib/Adafruit_GFX"
              "../../lib/Adafruit_SSD1306" "../../lib/Adafruit_BusIO"
-    INCLUDE_DIRS "." "${ARENA_SRC}" "../../include" "../libs/ESPAsyncWebServer/src" "../../lib/Adafruit_NeoPixel" "../../lib/Adafruit_SSD1306" "../../lib/Adafruit_BusIO"
+    INCLUDE_DIRS "." "${ARENA_SRC}" "../../include" "../libs/ESPAsyncWebServer/src" "../../lib/Adafruit_NeoPixel"
+                 "../../lib/Adafruit_GFX" "../../lib/Adafruit_SSD1306" "../../lib/Adafruit_BusIO"
+                 "../libs/AsyncTCP/src" "../libs/ArduinoJson/src"
     PRIV_INCLUDE_DIRS "${ESP_MATTER_PATH}/examples/common/utils")
 
 # ARENA_MATTER is what selects the Matter half of every #ifdef in the shared
