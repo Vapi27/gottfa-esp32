@@ -110,19 +110,14 @@
 #define ARENA_OLED_W         128
 #define ARENA_OLED_H          32   // 64 pour le 0,96" carre
 #define ARENA_OLED_ADDR     0x3C   // 0x3D sur quelques modules
-// L'ecran s'eteint apres ce delai sans action. 0 = ne s'eteint jamais.
-//
-// ############ PHASE DE TEST - A REMETTRE A 30000 AVANT DE LIVRER ############
-// Un OLED qui affiche une image fixe la GRAVE dans son verre. Le QR d'appairage
-// laisse en permanence est le pire cas possible : contraste maximal, motif fixe.
-// Acceptable quelques heures sur un panneau d'essai, destructeur sur une piece
-// vendue et accrochee pour des annees.
-#define ARENA_OLED_SLEEP_MS     0
+// L'ecran s'eteint apres ce delai sans action, et le panneau est coupe, pas
+// seulement efface. Un OLED qui affiche une image fixe la GRAVE dans son verre,
+// et cette piece reste accrochee au mur pendant des annees.
+// 0 = ne s'eteint jamais : reglage de mise au point uniquement.
+#define ARENA_OLED_SLEEP_MS 30000
 
 // Ecran affiche au demarrage : 1 = le code d'appairage, 0 = le menu.
-// Meme remarque - c'est un reglage de mise au point, pas un defaut de produit.
-#define ARENA_OLED_BOOT_QR      1
-// ###########################################################################
+#define ARENA_OLED_BOOT_QR      0
 
 #if defined(ARENA_BOARD_D1MINI32)
 #define PIN_ARENA_OLED_SDA    21
@@ -130,6 +125,9 @@
 #define PIN_ARENA_ENC_A       32
 #define PIN_ARENA_ENC_B       33
 #define PIN_ARENA_ENC_SW      25
+#define PIN_ARENA_BTN_UP      18
+#define PIN_ARENA_BTN_DOWN    19
+#define PIN_ARENA_BTN_OK      PIN_ARENA_ENC_SW
 #else
 // Memes broches d'ecran que le GottFA80+ : SDA 47 / SCL 21. GPIO48 est proscrit
 // (WS2812 embarquee cablee en dur - du trafic I2C dessus laissait la LED figee
@@ -140,6 +138,17 @@
 #define PIN_ARENA_ENC_A        4
 #define PIN_ARENA_ENC_B        5
 #define PIN_ARENA_ENC_SW       7
+
+// Navigation a trois boutons : deux fleches et OK. C'est le montage retenu pour
+// la carte definitive - trois poussoirs CMS coutent moins qu'un encodeur, se
+// posent a plat derriere la face avant, et se serigraphient sans ambiguite.
+//
+// Les deux entrees coexistent : l'encodeur reste lu s'il est cable, et OK
+// partage volontairement la broche de son bouton-poussoir. Une carte n'a donc
+// jamais besoin des deux, et le firmware est le meme dans les deux cas.
+#define PIN_ARENA_BTN_UP       6
+#define PIN_ARENA_BTN_DOWN    15
+#define PIN_ARENA_BTN_OK       PIN_ARENA_ENC_SW
 #endif
 
 
