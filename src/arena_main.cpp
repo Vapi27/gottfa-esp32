@@ -17,6 +17,7 @@ static bool netHasIp() {
 #include "arena_map.h"
 #include "arena_pf.h"
 #include "arena_attract.h"
+#include "arena_oled.h"
 #include "arena_net.h"
 #ifdef ARENA_MATTER
 extern void arena_matter_init();
@@ -40,6 +41,7 @@ static const uint32_t BTN_LONG_MS = 1000;
 
 static void buttonPoll() {
   bool down = (digitalRead(PIN_ARENA_BUTTON) == LOW);
+  if (down) arenaoled::poke();
   uint32_t now = millis();
 
   if (down && !s_btnDown) {                       // press
@@ -80,6 +82,7 @@ void setup() {
   arena_matter_init();    // Matter d abord: c est lui qui possede le WiFi
 #endif
   arenanet::begin();      // WiFi + http://arena.local/
+  arenaoled::begin();     // ecran de controle, inerte si aucun panneau
 
   Serial.printf("[boot] ready — %u LEDs, mode=%s, %s %s\n",
                 arenaled::count(), arenaled::modeName(arenaled::mode()),
@@ -109,6 +112,7 @@ void loop() {
 #if ARENA_BUTTON_ENABLE
   buttonPoll();
 #endif
-  arenaled::tick();       // self-rate-limited to LED_FRAME_HZ
+  arenaled::tick();
+  arenaoled::tick();       // self-rate-limited to LED_FRAME_HZ
   arenanet::loop();
 }

@@ -32,6 +32,7 @@ extern "C" void arena_matter_event_log(char* out, size_t n);
 #include "arena_map.h"
 #include "arena_pf.h"
 #include "arena_attract.h"
+#include "arena_oled.h"
 
 namespace arenanet {
 
@@ -231,6 +232,10 @@ static String stateJson() {
   // Rendu gele pendant un appairage BLE. Sans ce champ, fps/ma/rmtframes figes
   // ressemblent a s'y meprendre a un rendu normal.
   j += ",\"paused\":" + String(arenaled::paused() ? "true" : "false");
+  // L'ecran a-t-il repondu sur l'I2C au demarrage ? Sans ce temoin, un panneau
+  // muet est indiscernable d'un panneau absent, d'une mauvaise adresse ou d'un
+  // fil inverse - et il n'y a pas de port serie sur un mur accroche.
+  j += ",\"oled\":" + String(arenaoled::found() ? "true" : "false");
   j += ",\"bustype\":"  + String((int32_t)espShowBusType);
   // OTA en mode pull : ou en est le telechargement declenche par /api/otapull.
   j += ",\"otast\":\""  + s_pullStatus + "\"";
