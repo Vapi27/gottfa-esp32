@@ -40,8 +40,12 @@ void tick();                          // call from loop()
 
 void        setMode(Mode m);
 Mode        mode();
-const char* modeName(Mode m);   // identifiant : NVS + API, ne change jamais
-const char* modeLabel(Mode m);  // ce que lit le proprietaire, libre de changer
+// Au retour du courant : rallumer le dernier mode utilise (true, defaut) ou
+// restaurer exactement l'etat d'avant, extinction comprise (false).
+bool        bootOn();
+void        setBootOn(bool b);
+const char* modeName(Mode m);   // identifiant : NVS + API
+const char* modeLabel(Mode m);  // libelle client, libre de changer
 Mode        modeFromName(const char* s);   // MODE_COUNT if unknown
 void        nextMode();                    // front-panel button: cycle usable modes
 
@@ -54,7 +58,7 @@ uint8_t brightness();
 // is taste, not fidelity, so it is a live setting rather than a constant.
 void    setGi(uint8_t g);
 uint8_t gi();
-void    setDensity(uint8_t d);   // mode lucioles : combien vivent a la fois
+void    setDensity(uint8_t d);
 uint8_t density();
 
 // Filament warmth, 0..255. 0 is the pure spectral split — colorimetrically
@@ -75,6 +79,12 @@ uint64_t latched();
 // Incandescent simulation on/off. Off is a plain switch: full level, no thermal
 // lag, no colour shift — which is what you want when the inserts carry their own
 // colours and you would rather see them cleanly than through a filament.
+// Pause the render loop entirely - no frames, no pixel pushes. Used while a
+// phone is connected over BLE for Matter pairing: the PASE crypto wants the
+// CPU and RAM, and the RMT traffic wants neither competitor nor spectator.
+void setPaused(bool p);
+bool paused();
+
 void setIncandescent(bool on);
 bool incandescent();
 

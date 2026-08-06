@@ -1,9 +1,31 @@
 #include <WiFi.h>
+#include <esp_netif.h>
+#include <esp_wifi.h>
 #include <LittleFS.h>
 #include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
 #include <Preferences.h>
 #include <Update.h>
+#include <esp_ota_ops.h>
+#include <esp_partition.h>   // ecriture directe de la partition fichiers
+// Empreinte de build exposee dans /api/state. L'en-tete a demenage entre les
+// versions de l'IDF : esp_app_desc.h n'existe qu'a partir de la 5, alors que le
+// build Arduino/PlatformIO tourne encore sur la 4.4. Meme structure, deux noms.
+#if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
+#include <esp_app_desc.h>
+#define ARENA_APP_DESC() esp_app_get_description()
+#else
+#include <esp_ota_ops.h>
+#define ARENA_APP_DESC() esp_ota_get_app_description()
+#endif
+
+#ifdef ARENA_MATTER
+// Definies dans arena_matter.cpp : ce fichier n'inclut aucun en-tete Matter.
+extern "C" uint8_t arena_matter_fabrics();
+extern "C" void    arena_matter_forget();
+extern "C" const char* arena_matter_last_event();
+extern "C" void arena_matter_event_log(char* out, size_t n);
+#endif   // OTA en mode pull (voir pullOta plus bas)
 #include "arena_config.h"
 #include "arena_net.h"
 #include "arenaled.h"
@@ -19,6 +41,9 @@ static String         s_ip   = "0.0.0.0";
 static String         s_mode = "init";
 
 const char* ip()   { return s_ip.c_str(); }
+
+
+
 const char* mode() { return s_mode.c_str(); }
 
 // Served when LittleFS is empty (nobody ran `pio run -e arenaled -t uploadfs` yet):
@@ -34,6 +59,138 @@ static const char FALLBACK[] PROGMEM =
   "<a href='/api/set?mode=rainbow'>rainbow</a><a href='/api/set?mode=test'>test</a>"
   "<a href='/api/set?mode=off'>off</a></p><p><a href='/api/state'>/api/state</a></p>";
 
+// Compteurs exportes par libs/Adafruit_NeoPixel/esp.c : ils disent si la sortie
+// RMT part vraiment, ou si rmtInit() echoue (carte hors USB, donc pas de log).
+extern "C" {
+  extern volatile uint32_t espShowRmtFail, espShowFrames, espShowLockMiss;
+  extern volatile int32_t  espShowBusType;
+}
+
+// --- OTA en mode "pull" ----------------------------------------------------
+// Le POST /update pousse l'image depuis le callback AsyncTCP. Sur S3 ca tue la
+// carte : Update.begin() efface la partition, ce qui bloque la tache AsyncTCP
+// plusieurs secondes pendant que le client continue d'envoyer - lwIP manque de
+// tampons et le chip tombe. Mesure du 2026-08-02 : 250 ko recus sur 1,6 Mo, puis
+// un redemarrage qui ressemble a s'y meprendre a une mise a jour reussie.
+//
+// Ici c'est la carte qui va chercher l'image : elle lit au rythme qu'elle veut,
+// donc rien ne s'accumule, et l'effacement se fait pendant que personne ne
+// pousse. On passe aussi la taille reelle a esp_ota_begin() au lieu de
+// OTA_SIZE_UNKNOWN, qui effacait les 3 Mo entiers de la partition.
+static String        s_pullUrl;
+static volatile bool s_pullPending = false;
+static String        s_pullStatus  = "idle";
+static uint32_t      s_pullDone = 0, s_pullTotal = 0;
+static bool          s_pullFs = false;   // application ou systeme de fichiers
+
+// Balayage WiFi. Lance depuis la boucle principale, jamais depuis un handler :
+// WiFi.scanNetworks() bloque 2 a 5 s, et bloquer la tache AsyncTCP est
+// exactement ce qui tuait la carte pendant les mises a jour.
+static volatile bool s_scanWanted = false;
+static String        s_scanJson   = "[]";
+static uint32_t      s_scanAt     = 0;
+
+// Envoi par morceaux depuis le navigateur (/api/fw).
+static esp_ota_handle_t     s_fwHandle = 0;
+static const esp_partition_t* s_fwPart = nullptr;
+static size_t               s_fwTotal = 0, s_fwGot = 0;
+static uint32_t             s_fwReboot = 0;   // 0 = pas de redemarrage arme
+
+static bool pullOta(const String& url, bool fs, String& err) {
+  if (!url.startsWith("http://")) { err = "seul http:// est supporte"; return false; }
+  const int slash     = url.indexOf('/', 7);
+  const String hostp  = (slash < 0) ? url.substring(7) : url.substring(7, slash);
+  const String path   = (slash < 0) ? "/" : url.substring(slash);
+  const int colon     = hostp.indexOf(':');
+  const String host   = (colon < 0) ? hostp : hostp.substring(0, colon);
+  const uint16_t port = (colon < 0) ? 80 : (uint16_t)hostp.substring(colon + 1).toInt();
+
+  WiFiClient c;
+  if (!c.connect(host.c_str(), port)) { err = "connexion refusee " + hostp; return false; }
+  c.print(String("GET ") + path + " HTTP/1.1\r\nHost: " + hostp +
+          "\r\nConnection: close\r\nAccept-Encoding: identity\r\n\r\n");
+
+  int status = 0; long len = -1;
+  const uint32_t tHdr = millis();
+  while (true) {
+    if (millis() - tHdr > 15000) { err = "timeout en-tetes"; return false; }
+    if (!c.available()) {
+      if (!c.connected()) { err = "coupe pendant les en-tetes"; return false; }
+      delay(5); continue;
+    }
+    String line = c.readStringUntil('\n'); line.trim();
+    if (line.length() == 0) break;                       // fin des en-tetes
+    if (!status && line.startsWith("HTTP/")) status = line.substring(9, 12).toInt();
+    String low = line; low.toLowerCase();
+    if (low.startsWith("content-length:")) len = line.substring(15).toInt();
+  }
+  if (status != 200) { err = "HTTP " + String(status); return false; }
+  if (len <= 0) { err = "Content-Length absent (chunked non gere)"; return false; }
+
+  // Deux destinations : l'application (via esp_ota_*) ou la partition du
+  // systeme de fichiers, qui porte l'interface web. La seconde s'ecrit a la
+  // main - il n'y a pas d'API "ota" pour elle - et LittleFS doit etre demonte
+  // avant, sinon on reecrit sous les pieds du serveur qui vient de servir la page.
+  const esp_partition_t* part = fs
+      ? esp_partition_find_first(ESP_PARTITION_TYPE_DATA,
+                                 ESP_PARTITION_SUBTYPE_DATA_SPIFFS, NULL)
+      : esp_ota_get_next_update_partition(NULL);
+  if (!part) { err = fs ? "partition fichiers introuvable" : "aucune partition OTA libre"; return false; }
+  if ((size_t)len > part->size) {
+    err = "image trop grande (" + String((uint32_t)len) + " > " + String(part->size) + ")";
+    return false;
+  }
+
+  esp_ota_handle_t h = 0;
+  esp_err_t e = ESP_OK;
+  if (fs) {
+    LittleFS.end();
+    e = esp_partition_erase_range(part, 0, (((size_t)len) + 4095) & ~((size_t)4095));
+    if (e != ESP_OK) { err = String("erase: ") + esp_err_to_name(e); return false; }
+  } else {
+    e = esp_ota_begin(part, (size_t)len, &h);
+    if (e != ESP_OK) { err = String("esp_ota_begin: ") + esp_err_to_name(e); return false; }
+  }
+
+  s_pullTotal = (uint32_t)len;
+  s_pullDone  = 0;
+  static uint8_t buf[1460];                              // statique : pas sur la pile
+  uint32_t tLast = millis();
+  while (s_pullDone < (uint32_t)len) {
+    const int n = c.read(buf, sizeof(buf));
+    if (n > 0) {
+      e = fs ? esp_partition_write(part, s_pullDone, buf, (size_t)n)
+             : esp_ota_write(h, buf, (size_t)n);
+      if (e != ESP_OK) {
+        if (!fs) esp_ota_abort(h);
+        err = String(fs ? "partition_write: " : "esp_ota_write: ") + esp_err_to_name(e);
+        return false;
+      }
+      s_pullDone += (uint32_t)n;
+      tLast = millis();
+      // Respiration obligatoire : sans elle cette boucle monopolise le coeur et
+      // le task watchdog tue la tache IDLE. 1 ms par paquet de 1460 octets
+      // plafonne a ~1,4 Mo/s, tres au-dessus du debit reseau reel.
+      delay(1);
+    } else {
+      if (!c.connected() && !c.available()) break;
+      if (millis() - tLast > 20000) { esp_ota_abort(h); err = "timeout reception"; return false; }
+      delay(2);
+    }
+  }
+  if (s_pullDone != (uint32_t)len) {
+    if (!fs) esp_ota_abort(h);
+    err = "tronque " + String(s_pullDone) + "/" + String((uint32_t)len);
+    return false;
+  }
+  if (fs) return true;                       // rien a valider : le redemarrage remonte LittleFS
+  e = esp_ota_end(h);
+  if (e != ESP_OK) { err = String("esp_ota_end: ") + esp_err_to_name(e); return false; }
+  e = esp_ota_set_boot_partition(part);
+  if (e != ESP_OK) { err = String("set_boot: ") + esp_err_to_name(e); return false; }
+  return true;
+}
+
 static String stateJson() {
   arenaled::Rgbw c = arenaled::color();
   String j = "{";
@@ -45,6 +202,7 @@ static String stateJson() {
   j += ",\"density\":" + String(arenaled::density());
   j += ",\"warm\":"   + String(arenaled::warm());
   j += ",\"inc\":"    + String(arenaled::incandescent() ? 1 : 0);
+  j += ",\"boot\":"   + String(arenaled::bootOn() ? 1 : 0);
   // What the wall is running: seconds of ROM attract (0 = generic fallback)
   // and how many inserts the plan carries. The Game panel reads these.
   j += ",\"atr\":"    + String(arenaattract::available()
@@ -65,6 +223,40 @@ static String stateJson() {
   j += ",\"order\":\""  + String(arenaled::order()) + "\"";
   j += ",\"limited\":" + String(arenaled::limited() ? "true" : "false");
   j += ",\"fps\":"    + String(arenaled::fps());
+  // Diagnostic sortie LED : pin reellement compilee, trames emises, echecs.
+  j += ",\"pin\":"      + String(PIN_LED_DATA);
+  j += ",\"rmtframes\":" + String((uint32_t)espShowFrames);
+  j += ",\"rmtfail\":"  + String((uint32_t)espShowRmtFail);
+  j += ",\"lockmiss\":" + String((uint32_t)espShowLockMiss);
+  // Rendu gele pendant un appairage BLE. Sans ce champ, fps/ma/rmtframes figes
+  // ressemblent a s'y meprendre a un rendu normal.
+  j += ",\"paused\":" + String(arenaled::paused() ? "true" : "false");
+  j += ",\"bustype\":"  + String((int32_t)espShowBusType);
+  // OTA en mode pull : ou en est le telechargement declenche par /api/otapull.
+  j += ",\"otast\":\""  + s_pullStatus + "\"";
+  j += ",\"otadone\":"  + String(s_pullDone);
+  j += ",\"otatot\":"   + String(s_pullTotal);
+  j += ",\"fwgot\":"   + String((uint32_t)s_fwGot);
+  j += ",\"fwtot\":"   + String((uint32_t)s_fwTotal);
+#ifdef ARENA_MATTER
+  // A combien de maisons la carte appartient. Si Maison dit "deja dans une autre
+  // maison", c'est ce nombre qu'il faut regarder avant de conclure quoi que ce soit.
+  j += ",\"fabrics\":" + String((int)arena_matter_fabrics());
+  j += ",\"mev\":\"" + String(arena_matter_last_event()) + "\"";
+  { char ev[560]; arena_matter_event_log(ev, sizeof(ev));
+    j += ",\"mevlog\":\"" + String(ev) + "\""; }
+#endif
+  // Empreinte de build : les 8 premiers octets du SHA256 de l'ELF. C'est le SEUL
+  // champ qui prouve qu'une OTA a bien remplace l'image - l'uptime ne prouve
+  // rien (un envoi qui plante redemarre la carte exactement pareil), et un
+  // compteur remis a zero au boot non plus.
+  {
+    const esp_app_desc_t* d = ARENA_APP_DESC();
+    char sha[17];
+    for (int i = 0; i < 8; i++) sprintf(sha + i * 2, "%02x", d->app_elf_sha256[i]);
+    sha[16] = 0;
+    j += ",\"build\":\"" + String(sha) + "\"";
+  }
   j += ",\"ip\":\""   + s_ip + "\",\"net\":\"" + s_mode + "\"";
   j += ",\"up\":"     + String(millis() / 1000);
   j += ",\"heap\":"   + String(ESP.getFreeHeap());
@@ -80,44 +272,7 @@ static uint8_t param8(AsyncWebServerRequest* r, const char* k, uint8_t cur) {
   return (uint8_t)v;
 }
 
-void begin() {
-  // --- WiFi: NVS credentials (set from the UI) override the compile-time ones ---
-  s_prefs.begin("arenanet", false);
-  String ssid = s_prefs.getString("ssid", ARENA_STA_SSID);
-  String pass = s_prefs.getString("pass", ARENA_STA_PASS);
-
-  WiFi.persistent(false);
-  bool connected = false;
-  if (ssid.length()) {
-    WiFi.mode(WIFI_STA);
-    WiFi.setHostname(ARENA_MDNS_HOST);
-    WiFi.setSleep(false);            // keep the REST latency low; the wall is mains-powered
-    Serial.printf("[net] STA connecting to '%s' ...\n", ssid.c_str());
-    WiFi.begin(ssid.c_str(), pass.c_str());
-    uint32_t t0 = millis();
-    while (WiFi.status() != WL_CONNECTED && millis() - t0 < ARENA_STA_TIMEOUT_MS) {
-      delay(250);
-      Serial.print('.');
-    }
-    Serial.println();
-    connected = (WiFi.status() == WL_CONNECTED);
-  }
-  if (connected) {
-    s_mode = "STA";
-    s_ip = WiFi.localIP().toString();
-    Serial.printf("[net] STA OK ip=%s\n", s_ip.c_str());
-  } else {
-    WiFi.mode(WIFI_AP);
-    WiFi.softAP(ARENA_AP_SSID, ARENA_AP_PASS);
-    s_mode = "SoftAP";
-    s_ip = WiFi.softAPIP().toString();
-    Serial.printf("[net] SoftAP '%s' ip=%s\n", ARENA_AP_SSID, s_ip.c_str());
-  }
-  if (MDNS.begin(ARENA_MDNS_HOST)) {
-    MDNS.addService("http", "tcp", 80);
-    Serial.printf("[net] http://%s.local/\n", ARENA_MDNS_HOST);
-  }
-
+static void startServer() {
   // --- UI ---------------------------------------------------------------
   s_server.on("/", HTTP_GET, [](AsyncWebServerRequest* r) {
     if (LittleFS.exists("/arena.html")) r->send(LittleFS, "/arena.html", "text/html");
@@ -142,6 +297,7 @@ void begin() {
     if (r->hasParam("density")) arenaled::setDensity(param8(r, "density", arenaled::density()));
     if (r->hasParam("warm"))   arenaled::setWarm(param8(r, "warm", arenaled::warm()));
     if (r->hasParam("inc"))    arenaled::setIncandescent(r->getParam("inc")->value().toInt() != 0);
+    if (r->hasParam("boot"))   arenaled::setBootOn(r->getParam("boot")->value().toInt() != 0);
     if (r->hasParam("r") || r->hasParam("g") || r->hasParam("b") || r->hasParam("w")) {
       arenaled::Rgbw c = arenaled::color();
       c.r = param8(r, "r", c.r);
@@ -303,7 +459,10 @@ void begin() {
     if (r->hasParam("clear")) {
       arenapf::setName((uint8_t)ins, "");
       arenapf::setColour((uint8_t)ins, { 0, 0, 0, 0 });
+      arenapf::setHidden((uint8_t)ins, false);   // "clear" rend la pastille au plan
     } else {
+      if (r->hasParam("hide"))
+        arenapf::setHidden((uint8_t)ins, r->getParam("hide")->value().toInt() != 0);
       if (r->hasParam("name")) arenapf::setName((uint8_t)ins, r->getParam("name")->value().c_str());
       if (r->hasParam("r") || r->hasParam("g") || r->hasParam("b") || r->hasParam("w"))
         arenapf::setColour((uint8_t)ins, { param8(r, "r", 0), param8(r, "g", 0),
@@ -311,6 +470,7 @@ void begin() {
     }
     arenapf::saveNames();
     arenapf::saveColours();
+    arenapf::saveHidden();
     r->send(200, "application/json", arenapf::insertsJson());
   });
 
@@ -415,6 +575,137 @@ void begin() {
   // failure. Note the reply below often never reaches the client: the restart
   // beats the TCP flush, so curl reports HTTP 000 on a *successful* update.
   // Verify by uptime, not by the response (ARENA_LED.md §4 B).
+  // Demande a la carte d'aller chercher elle-meme une image (voir pullOta).
+  // C'est le chemin fiable sur S3 ; /update reste pour le WROOM et l'interface.
+#ifdef ARENA_MATTER
+  // Fait oublier toutes les maisons, le WiFi compris. La carte quitte le reseau
+  // et ne revient que par un appairage Bluetooth : d'ou le mot de passe dans
+  // l'URL, pour qu'un clic distrait ne mette pas le mur hors ligne.
+  s_server.on("/api/matter/forget", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("confirm") || r->getParam("confirm")->value() != "oui") {
+      r->send(400, "text/plain",
+              "Efface les maisons Matter ET le WiFi. La carte quittera le reseau\n"
+              "jusqu'a un nouvel appairage au telephone. Pour confirmer :\n"
+              "  /api/matter/forget?confirm=oui\n");
+      return;
+    }
+    r->send(200, "text/plain", "oubli en cours, la carte redemarre en appairage");
+    delay(300);
+    arena_matter_forget();
+  });
+#endif
+
+  // --- Mise a jour par le navigateur, en morceaux ---------------------------
+  // Le client telecharge le .bin depuis pinballs.store et le depose ici. C'est
+  // le chemin destine au proprietaire : il ne demande aucun serveur chez lui et
+  // il marche depuis un telephone.
+  //
+  // Pourquoi en morceaux, et pas un seul POST : un envoi d'un bloc tue le S3.
+  // Mesure du 2026-08-02 - 250 ko recus sur 1,6 Mo puis chute. La cause n'est
+  // pas le volume, c'est le RECOUVREMENT : esp_ota_begin() efface la partition
+  // en bloquant plusieurs secondes, le navigateur continue d'emettre pendant ce
+  // temps, lwIP manque de tampons et la puce tombe.
+  //
+  // On separe donc les phases. "begin" fait l'effacement dans SA propre requete,
+  // et le navigateur attend la reponse : rien n'est en vol pendant l'effacement.
+  // Ensuite chaque morceau est acquitte avant que le suivant parte, donc le
+  // debit est plafonne par la carte elle-meme et ne peut plus la submerger.
+  // Balayage WiFi - en LECTURE seule. Sous Matter c'est l'application Maison qui
+  // fournit le reseau ; la carte ne peut pas en changer elle-meme (begin() lit
+  // les identifiants puis sort avant de s'en servir). Ce que ce balayage sert
+  // vraiment : savoir quelle puissance de signal le mur recoit LA OU IL EST
+  // ACCROCHE, ce qu'aucun telephone tenu a la main ne dit.
+  s_server.on("/api/wifiscan", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (r->hasParam("results")) {
+      wifi_ap_record_t apInfo = {};
+      const bool apInfoOk = (esp_wifi_sta_get_ap_info(&apInfo) == ESP_OK);
+      String j = "{\"age\":" + String(s_scanAt ? (millis() - s_scanAt) / 1000 : 9999) +
+                 ",\"busy\":" + String(s_scanWanted ? "true" : "false") +
+                 ",\"rssi\":" + String(apInfoOk ? (int)apInfo.rssi : 0) +
+                 ",\"ssid\":\"" + String(apInfoOk ? (const char*)apInfo.ssid : "") + "\"" +
+                 ",\"nets\":" + s_scanJson + "}";
+      r->send(200, "application/json", j);
+      return;
+    }
+    s_scanWanted = true;
+    r->send(200, "text/plain", "scan lance");
+  });
+
+  s_server.on("/api/fw", HTTP_POST,
+    [](AsyncWebServerRequest* r) {
+      // --- begin : reserve et efface, une bonne fois ---
+      if (r->hasParam("begin")) {
+        const size_t sz = (size_t)r->getParam("begin")->value().toInt();
+        if (sz < 65536) { r->send(400, "text/plain", "taille invalide"); return; }
+        if (s_fwHandle) { esp_ota_abort(s_fwHandle); s_fwHandle = 0; }
+        s_fwPart = esp_ota_get_next_update_partition(NULL);
+        if (!s_fwPart) { r->send(500, "text/plain", "aucune partition OTA"); return; }
+        if (sz > s_fwPart->size) { r->send(400, "text/plain", "image trop grande"); return; }
+        // Taille reelle, pas OTA_SIZE_UNKNOWN : on efface ce qu'on ecrit, pas
+        // les 3 Mo de la partition.
+        const esp_err_t e = esp_ota_begin(s_fwPart, sz, &s_fwHandle);
+        if (e != ESP_OK) {
+          s_fwHandle = 0;
+          r->send(500, "text/plain", String("esp_ota_begin: ") + esp_err_to_name(e));
+          return;
+        }
+        s_fwTotal = sz; s_fwGot = 0;
+        r->send(200, "text/plain", "pret");
+        return;
+      }
+      // --- end : valide et redemarre ---
+      if (r->hasParam("end")) {
+        if (!s_fwHandle) { r->send(409, "text/plain", "aucun envoi en cours"); return; }
+        if (s_fwGot != s_fwTotal) {
+          esp_ota_abort(s_fwHandle); s_fwHandle = 0;
+          r->send(400, "text/plain", "tronque " + String(s_fwGot) + "/" + String(s_fwTotal));
+          return;
+        }
+        esp_err_t e = esp_ota_end(s_fwHandle);
+        s_fwHandle = 0;
+        if (e != ESP_OK) { r->send(400, "text/plain", String("image refusee: ") + esp_err_to_name(e)); return; }
+        e = esp_ota_set_boot_partition(s_fwPart);
+        if (e != ESP_OK) { r->send(500, "text/plain", String("set_boot: ") + esp_err_to_name(e)); return; }
+        r->send(200, "text/plain", "ok, redemarrage");
+        s_fwReboot = millis();          // laisse la reponse partir avant de couper
+        return;
+      }
+      // --- abandon explicite ---
+      if (r->hasParam("abort")) {
+        if (s_fwHandle) { esp_ota_abort(s_fwHandle); s_fwHandle = 0; }
+        s_fwGot = s_fwTotal = 0;
+        r->send(200, "text/plain", "abandonne");
+        return;
+      }
+      // --- un morceau : la reponse part ICI, apres l'ecriture ---
+      if (!s_fwHandle) { r->send(409, "text/plain", "appelle ?begin= d'abord"); return; }
+      r->send(200, "text/plain", String(s_fwGot));
+    },
+    NULL,
+    // Corps brut du morceau. Ecrit au fil de l'eau : un morceau de 32 ko tient
+    // dans les tampons, et l'acquittement ci-dessus ne part qu'une fois ecrit.
+    [](AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total) {
+      if (!s_fwHandle || !len) return;
+      if (esp_ota_write(s_fwHandle, data, len) != ESP_OK) {
+        esp_ota_abort(s_fwHandle); s_fwHandle = 0;
+        return;
+      }
+      s_fwGot += len;
+    });
+
+  s_server.on("/api/otapull", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("url")) { r->send(400, "text/plain", "url= manquant"); return; }
+    if (s_pullPending) { r->send(409, "text/plain", "un telechargement est deja en cours"); return; }
+    s_pullUrl     = r->getParam("url")->value();
+    s_pullDone    = 0;
+    s_pullTotal   = 0;
+    s_pullFs      = r->hasParam("target") && r->getParam("target")->value() == "fs";
+    s_pullStatus  = "demarre";
+    s_pullPending = true;   // la boucle principale prend le relais
+    r->send(200, "text/plain", "telechargement lance depuis " + s_pullUrl +
+                               "\nsuivre otast / otadone / otatot dans /api/state");
+  });
+
   s_server.on("/update", HTTP_POST,
     [](AsyncWebServerRequest* r) {
       bool ok = !Update.hasError();
@@ -426,7 +717,11 @@ void begin() {
         const bool fs = r->hasParam("target") && r->getParam("target")->value() == "fs";
         Serial.printf("[ota] start %s -> %s\n", fn.c_str(), fs ? "filesystem" : "app");
         if (fs) LittleFS.end();                      // cannot be mounted while it is rewritten
-        if (!Update.begin(UPDATE_SIZE_UNKNOWN, fs ? U_SPIFFS : U_FLASH)) Update.printError(Serial);
+        // Taille reelle plutot que UPDATE_SIZE_UNKNOWN : ce dernier efface la
+        // partition entiere (3 Mo) d'un bloc et gele AsyncTCP le temps que ca
+        // dure, ce qui est la cause du plantage decrit devant pullOta().
+        const size_t sz = r->contentLength() ? r->contentLength() : UPDATE_SIZE_UNKNOWN;
+        if (!Update.begin(sz, fs ? U_SPIFFS : U_FLASH)) Update.printError(Serial);
       }
       if (Update.write(data, len) != len) Update.printError(Serial);
       if (done) {
@@ -438,12 +733,135 @@ void begin() {
   s_server.serveStatic("/", LittleFS, "/");
   s_server.onNotFound([](AsyncWebServerRequest* r) { r->send(404, "text/plain", "404"); });
   s_server.begin();
+}
+
+void begin() {
+  // --- WiFi: NVS credentials (set from the UI) override the compile-time ones ---
+  s_prefs.begin("arenanet", false);
+  String ssid = s_prefs.getString("ssid", ARENA_STA_SSID);
+  String pass = s_prefs.getString("pass", ARENA_STA_PASS);
+
+#ifdef ARENA_MATTER
+  // Matter owns WiFi: commissioning stores the credentials and CHIP drives
+  // esp_wifi. We only wait for an address. No SoftAP (an AP interface fights
+  // the CHIP station state machine) and no ESPmDNS (CHIP minimal mDNS holds
+  // port 5353) - reach the board by IP; proper mdns unification is P3 work.
+  // No blocking wait and NO web server yet: the PASE handshake at pairing
+  // time needs every byte of heap this chip has (measured: abort() on the BLE
+  // connect with the server up), and a web server without an address serves
+  // nobody. matterTick() below brings it up the moment WiFi is provisioned.
+  Serial.println("[net] Matter owns WiFi - server deferred until an address");
+  s_mode = "Matter";
+  s_ip = "0.0.0.0";
+  return;
+#else
+  WiFi.persistent(false);
+  bool connected = false;
+  if (ssid.length()) {
+    WiFi.mode(WIFI_STA);
+    WiFi.setHostname(ARENA_MDNS_HOST);
+    WiFi.setSleep(false);            // keep the REST latency low; the wall is mains-powered
+    Serial.printf("[net] STA connecting to '%s' ...\n", ssid.c_str());
+    WiFi.begin(ssid.c_str(), pass.c_str());
+    uint32_t t0 = millis();
+    while (WiFi.status() != WL_CONNECTED && millis() - t0 < ARENA_STA_TIMEOUT_MS) {
+      delay(250);
+      Serial.print('.');
+    }
+    Serial.println();
+    connected = (WiFi.status() == WL_CONNECTED);
+  }
+  if (connected) {
+    s_mode = "STA";
+    s_ip = WiFi.localIP().toString();
+    Serial.printf("[net] STA OK ip=%s\n", s_ip.c_str());
+  } else {
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP(ARENA_AP_SSID, ARENA_AP_PASS);
+    s_mode = "SoftAP";
+    s_ip = WiFi.softAPIP().toString();
+    Serial.printf("[net] SoftAP '%s' ip=%s\n", ARENA_AP_SSID, s_ip.c_str());
+  }
+  if (MDNS.begin(ARENA_MDNS_HOST)) {
+    MDNS.addService("http", "tcp", 80);
+    Serial.printf("[net] http://%s.local/\n", ARENA_MDNS_HOST);
+  }
+
+#endif
+
+  startServer();
   Serial.println("[net] http server up");
 }
 
 void loop() {
-  // Nothing periodic: ESPAsyncWebServer runs on its own task and the LED engine
-  // is driven from the main loop. Kept so main.cpp reads the same as the others.
+  // Le balayage tourne ICI : il bloque plusieurs secondes et n'a rien a faire
+  // dans un handler HTTP.
+  if (s_scanWanted) {
+    s_scanWanted = false;
+    // API IDF, pas l'objet Arduino WiFi : sous Matter c'est CHIP qui possede
+    // esp_wifi et arenanet::begin() sort avant tout WiFi.mode(), donc le
+    // wrapper Arduino n'a aucun etat - il rend 0 reseau, RSSI 0, SSID vide.
+    // Meme lecon que netHasIp(), qui lit deja au niveau esp_netif.
+    wifi_scan_config_t cfg = {};
+    cfg.show_hidden = false;
+    String j = "[";
+    if (esp_wifi_scan_start(&cfg, true) == ESP_OK) {
+      uint16_t n = 0;
+      esp_wifi_scan_get_ap_num(&n);
+      if (n > 20) n = 20;
+      if (n) {
+        wifi_ap_record_t* ap = (wifi_ap_record_t*)calloc(n, sizeof(wifi_ap_record_t));
+        if (ap && esp_wifi_scan_get_ap_records(&n, ap) == ESP_OK) {
+          for (uint16_t i = 0; i < n; i++) {
+            if (i) j += ',';
+            j += "{\"s\":\"" + String((const char*)ap[i].ssid) +
+                 "\",\"r\":" + String((int)ap[i].rssi) +
+                 ",\"c\":" + String((int)ap[i].primary) +
+                 ",\"e\":" + String(ap[i].authmode == WIFI_AUTH_OPEN ? 0 : 1) + "}";
+          }
+        }
+        free(ap);
+      }
+    }
+    j += "]";
+    s_scanJson = j;
+    s_scanAt = millis();
+  }
+
+  // Redemarrage differe apres un envoi par morceaux : couper dans le handler
+  // tuerait la reponse HTTP avant qu'elle parte, et le navigateur afficherait
+  // un echec sur une mise a jour reussie.
+  if (s_fwReboot && millis() - s_fwReboot > 600) ESP.restart();
+
+  // Le telechargement OTA tourne ICI, dans la tache principale - surtout pas
+  // dans le callback AsyncTCP, ou bloquer sur la flash fait tomber la pile WiFi.
+  if (s_pullPending) {
+    s_pullPending = false;
+    s_pullStatus  = "en cours";
+    String err;
+    if (pullOta(s_pullUrl, s_pullFs, err)) {
+      s_pullStatus = "ok, redemarrage";
+      delay(200);
+      ESP.restart();
+    } else {
+      s_pullStatus = "echec: " + err;
+    }
+  }
 }
+
+#ifdef ARENA_MATTER
+// Called from loop(): once commissioning hands us a network, raise the HTTP
+// server. Until then the wall renders and Matter owns the radio.
+void matterTick() {
+  static bool up = false;
+  esp_netif_t *n = esp_netif_get_handle_from_ifkey("WIFI_STA_DEF");
+  esp_netif_ip_info_t info;
+  if (up || !n || esp_netif_get_ip_info(n, &info) != ESP_OK || info.ip.addr == 0) return;
+  up = true;
+  s_ip = IPAddress(info.ip.addr).toString();
+  Serial.printf("[net] ip=%s - starting the web server\n", s_ip.c_str());
+  startServer();
+}
+#endif
 
 }  // namespace arenanet

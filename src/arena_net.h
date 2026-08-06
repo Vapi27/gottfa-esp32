@@ -5,6 +5,9 @@
 namespace arenanet {
 
 void begin();
+#ifdef ARENA_MATTER
+void matterTick();
+#endif
 void loop();
 const char* ip();
 const char* mode();          // "STA" / "SoftAP"

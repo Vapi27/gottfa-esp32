@@ -11,7 +11,7 @@
 // ============================================================================
 
 #define ARENA_FW_NAME    "Arena Wall-Art LED"
-#define ARENA_FW_VERSION "1.0.0"
+#define ARENA_FW_VERSION "1.0.1"
 #define ARENA_MDNS_HOST  "arena"            // -> http://arena.local/
 
 // ---- WiFi -------------------------------------------------------------------
@@ -49,7 +49,12 @@
 #define PIN_LED_DATA2          6
 #else
 // --- ESP32-S3 DevKitC-1: avoid strapping (0,3,45,46), USB (19,20), flash/PSRAM (26-37) ---
-#define PIN_LED_DATA           5
+// GPIO5 was the first choice. On the bench N16R8 it drove nothing: the firmware
+// rendered frames but the chain stayed dark. The cause was never isolated (the
+// board was off USB, so no serial evidence) - do not trust the octal-PSRAM
+// explanation that was guessed here earlier, it was never measured.
+// GPIO16 is clear of flash, PSRAM, strapping and USB on this module.
+#define PIN_LED_DATA          16
 #define PIN_LED_DATA2          6
 #endif
 
@@ -93,7 +98,6 @@
 
 #define ARENA_BUTTON_ENABLE    1
 #define PIN_ARENA_BUTTON       0   // active LOW (internal pull-up)
-
 // --- Ecran de controle SSD1306 + encodeur rotatif ---------------------------
 // Meme panneau que le compagnon GottFA80+ (Adafruit SSD1306 en I2C) : une seule
 // reference pour les deux cartes. Absent = tout le module est inerte, le mur
@@ -128,11 +132,16 @@
 #define PIN_ARENA_ENC_SW       7
 #endif
 
+
 // ---- Soft start -------------------------------------------------------------
 // Ramp global brightness 0 -> target over this many ms at boot instead of
 // slamming the whole chain on. Limits the inrush into the injection-point bulk
 // caps and stops the PSU from hiccup-tripping when 100+ pixels light at once.
 #define ARENA_SOFTSTART_MS   900
+
+// Duree maximale du gel du rendu pendant un appairage Bluetooth. Au-dela, on
+// repart meme si l'evenement de fermeture BLE n'est jamais venu.
+#define ARENA_PAUSE_MAX_MS 120000
 
 // ---- Pixel colour order -----------------------------------------------------
 // SK6812MINI-RGBW ships GRBW, which is the default. If reds and greens come out
@@ -191,14 +200,7 @@
 
 #define ARENA_BRIGHT_DEFAULT 180   // 0..255 global brightness
 #define ARENA_SPEED_DEFAULT  128   // 0..255 -> x0.25 .. x4 animation speed
-// Plafond du mode nuit. 26 convenait a un remplissage uniforme des 41 pixels :
-// tout le mur a 10 %. Depuis que la nuit est faite de braises - une ou deux
-// allumees a la fois - le meme plafond ne laisse plus rien : gain 26, puis le
-// gamma l'eleve au carre, une braise pleine ressort a 2 sur 255. Mesure du
-// 2026-08-04 : 43 mA, soit exactement la consommation a vide.
-// 96 rend a peu pres la meme lumiere TOTALE que l'ancien remplissage, mais
-// concentree sur les braises au lieu d'etre etalee partout.
-#define ARENA_NIGHT_BRIGHT    96
+#define ARENA_NIGHT_BRIGHT    96   // braises : voir arena_config.h de l arbre principal
 
 // ---- Filesystem -------------------------------------------------------------
 #define ARENA_MAP_PATH "/arena_map.json"   // insert map (editable from the web UI)

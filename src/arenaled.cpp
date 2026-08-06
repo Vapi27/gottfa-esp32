@@ -27,9 +27,18 @@ static Mode     s_mode      = MODE_CLASSIC;
 static uint8_t  s_bright    = ARENA_BRIGHT_DEFAULT;
 static uint8_t  s_gi        = ARENA_GI_DEFAULT;   // GI level under ROM attract, 0 = off
 static uint8_t  s_density   = 110;   // mode lucioles : combien vivent a la fois
+// Ce que la carte fait quand le courant revient. Une piece murale qui reste
+// noire apres une coupure passe pour cassee : le proprietaire ne va pas
+// rebrancher un telephone pour la rallumer. On garde donc le dernier mode
+// ALLUME a part, et par defaut on y revient au demarrage plutot que de
+// restaurer un "off" qui pouvait dater d'un ordre Siri d'il y a trois jours.
+static Mode     s_lastOn    = MODE_ATTRACT;       // dernier mode non eteint
+static bool     s_bootOn    = true;               // true = rallumer, false = restaurer tel quel
 static uint8_t  s_warm      = ARENA_WARM_DEFAULT; // 0 = spectral/orange, 255 = white-forward
 static uint64_t s_latched   = 0;                 // lamps held lit from the last game
 static bool     s_inc       = true;              // incandescent simulation
+static volatile bool s_paused   = false;         // BLE pairing in progress
+static uint32_t      s_pausedAt = 0;             // quand, pour le degel de securite
 static uint8_t  s_speed     = ARENA_SPEED_DEFAULT;
 static Rgbw     s_color     = { ARENA_WARM_R, ARENA_WARM_G, ARENA_WARM_B, ARENA_WARM_W };
 static uint16_t s_count     = LED_COUNT_DEFAULT;
@@ -751,13 +760,10 @@ static const char* MODE_NAMES[MODE_COUNT] = {
 
 const char* modeName(Mode m) { return (m < MODE_COUNT) ? MODE_NAMES[m] : "?"; }
 
-// Ce que le PROPRIETAIRE lit, distinct de ce que la machine ecrit.
-// MODE_NAMES ci-dessus est un identifiant : il part en NVS (putString "modeN"),
-// il est la clef de /api/set?mode=..., et modeFromName() le relit. Le renommer
-// casserait les reglages de toutes les cartes deja configurees et toutes les URL
-// documentees. Les libelles vivent donc a part et peuvent changer librement.
-// "arena" -> "Wave" : le nom interne venait du plateau, il ne disait rien a
-// l'acheteur; ce qu'il voit, c'est une vague qui parcourt le plateau.
+// Ce que le PROPRIETAIRE lit, distinct de ce que la machine ecrit. MODE_NAMES
+// est un identifiant : il part en NVS (putString "modeN"), il est la clef de
+// /api/set?mode=... et modeFromName() le relit. Le renommer casserait les
+// reglages de toutes les cartes deja configurees. Les libelles vivent a part.
 static const char* MODE_LABELS[MODE_COUNT] = {
   "Off", "All on", "Attract", "Wave", "Firefly", "Rainbow", "Music", "Test"
 };
@@ -777,10 +783,13 @@ void setMode(Mode m) {
   memcpy(s_prev, s_render, sizeof(Rgbw) * LED_MAX);    // snapshot for the crossfade
   s_xfadeT0 = millis();
   s_mode = m;
+  if (m != MODE_OFF) s_lastOn = m;
   markDirty();
 }
 
 Mode mode() { return s_mode; }
+bool bootOn()          { return s_bootOn; }
+void setBootOn(bool b) { s_bootOn = b; markDirty(); }
 
 void nextMode() {
   // Button cycle skips TEST (a diagnostic, not a look) and OFF stays reachable
@@ -799,6 +808,8 @@ void setWarm(uint8_t w) { s_warm = w; markDirty(); }
 uint8_t warm() { return s_warm; }
 void setLatched(uint64_t m) { s_latched = m; markDirty(); }
 uint64_t latched() { return s_latched; }
+void setPaused(bool p) { s_paused = p; s_pausedAt = p ? millis() : 0; }
+bool paused()           { return s_paused; }
 void setIncandescent(bool on) { s_inc = on; markDirty(); }
 bool incandescent() { return s_inc; }
 void setSpeed(uint8_t s) { s_speed = s; markDirty(); }
@@ -896,6 +907,8 @@ void save() {
   // every board whose NVS held mode=6 (TEST before, MUSIC after). Names survive
   // enum surgery; the numeric key is still read once for migration.
   s_prefs.putString("modeN", modeName(s_mode));
+  s_prefs.putString("lastOn", modeName(s_lastOn));
+  s_prefs.putUChar("bootOn", s_bootOn ? 1 : 0);
   s_prefs.putUChar("bright", s_bright);
   s_prefs.putUChar("speed",  s_speed);
   s_prefs.putUChar("gi",     s_gi);
@@ -919,6 +932,16 @@ void begin() {
     s_mode = (m < MODE_COUNT) ? m : MODE_CLASSIC;
   }
   if (s_mode >= MODE_COUNT) s_mode = MODE_CLASSIC;
+  {
+    String lo = s_prefs.getString("lastOn", "");
+    Mode m = lo.length() ? modeFromName(lo.c_str()) : MODE_COUNT;
+    s_lastOn = (m < MODE_COUNT && m != MODE_OFF) ? m : MODE_ATTRACT;
+  }
+  s_bootOn = s_prefs.getUChar("bootOn", 1) != 0;
+  // Le courant revient : on rallume. Sinon une coupure de secteur laisse le mur
+  // noir jusqu'a ce que quelqu'un s'en occupe, ce qui n'est pas un comportement
+  // acceptable pour un objet accroche au mur.
+  if (s_bootOn && s_mode == MODE_OFF) s_mode = s_lastOn;
   s_bright = s_prefs.getUChar("bright", ARENA_BRIGHT_DEFAULT);
   s_speed  = s_prefs.getUChar("speed",  ARENA_SPEED_DEFAULT);
   s_gi     = s_prefs.getUChar("gi",     ARENA_GI_DEFAULT);
@@ -964,6 +987,18 @@ void begin() {
 }
 
 void tick() {
+  if (s_paused) {
+    // Filet de securite. Le degel dependait de kCHIPoBLEConnectionClosed, que
+    // CHIP n'emet PAS apres un commissioning reussi : il demonte la pile BLE et
+    // l'evenement se perd. Le mur restait alors noir indefiniment - et comme
+    // fps, ma et le compteur de trames ne sont mis a jour QUE plus bas dans
+    // cette fonction, ils restaient figes sur leur derniere valeur et donnaient
+    // toutes les apparences d'un rendu qui tourne. Vecu le 2026-08-02, une heure
+    // perdue a chercher pourquoi l'image etait noire alors qu'elle n'existait
+    // plus. Un appairage ne dure jamais deux minutes : on degele, point.
+    if (millis() - s_pausedAt < ARENA_PAUSE_MAX_MS) return;
+    s_paused = false;
+  }
   uint32_t now = millis();
   if (now - s_lastFrame < (uint32_t)(1000 / LED_FRAME_HZ)) return;
   s_lastFrame = now;
@@ -1024,8 +1059,7 @@ void tick() {
   memcpy(s_render, s_frame, sizeof(Rgbw) * LED_MAX);  // pre-gamma copy for the next crossfade
 
   // Plus de plafond special pour la nuit : fxNight limite deja son amplitude a
-  // 0,6 et n'allume que quelques pixels. Le plafond cache rendait le curseur de
-  // luminosite sans effet dans ce mode, ce qui se lit comme un reglage casse.
+  // 0,6 et n'allume que quelques pixels.
   uint8_t gain = s_bright;
 #if ARENA_SOFTSTART_MS > 0
   // Soft start: ease the chain up over the first second so 100+ pixels lighting
