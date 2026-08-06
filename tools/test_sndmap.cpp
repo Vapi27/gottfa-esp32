@@ -2,8 +2,8 @@
 // Same code as the board: sndmap is pure C++ on purpose so the decode corner cases are proven
 // here, on a Mac, instead of on a pinball that has to be powered up to answer a question.
 // Build+run:
-//   g++ -std=c++17 -I/Users/vapi27/gottfa-esp32/src /Users/vapi27/gottfa-esp32/tools/test_sndmap.cpp \
-//       /Users/vapi27/gottfa-esp32/src/sndmap.cpp -o /tmp/test_sndmap && /tmp/test_sndmap
+//   g++ -std=c++17 -Isrc tools/test_sndmap.cpp \
+//       src/sndmap.cpp -o /tmp/test_sndmap && /tmp/test_sndmap
 // (C) 2026 Valere Pilpil / Pstore.
 #include "sndmap.h"
 #include <cstdio>

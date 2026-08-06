@@ -4,8 +4,14 @@
     {
       "name": "lisyui",
       "runtimeExecutable": "python3",
-      "runtimeArgs": ["-m", "http.server", "8099", "--directory", "/Users/vapi27/gottfa-esp32/data"],
+      "runtimeArgs": ["-m", "http.server", "8099", "--directory", "data"],
       "port": 8099
+    },
+    {
+      "name": "mockboard",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["/private/tmp/claude-501/-Users-vapi27-gottfa-esp32/19b0f1d4-ddbf-46c1-811f-38bd6fd89c6a/scratchpad/mockboard.py"],
+      "port": 8123
     }
   ]
 }

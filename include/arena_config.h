@@ -94,6 +94,40 @@
 #define ARENA_BUTTON_ENABLE    1
 #define PIN_ARENA_BUTTON       0   // active LOW (internal pull-up)
 
+// --- Ecran de controle SSD1306 + encodeur rotatif ---------------------------
+// Meme panneau que le compagnon GottFA80+ (Adafruit SSD1306 en I2C) : une seule
+// reference pour les deux cartes. Absent = tout le module est inerte, le mur
+// n'en depend jamais.
+//
+// 128x32 suffit : le QR d'appairage Matter ne fait que 21 modules, 29 avec la
+// zone de silence obligatoire - mesure, pas estimation (tools/mkqr_header.py).
+// En 128x64 il est trace a 2 px par module, bien plus confortable a scanner.
+#define ARENA_OLED_ENABLE      1
+#define ARENA_OLED_W         128
+#define ARENA_OLED_H          32   // 64 si tu montes le grand panneau
+#define ARENA_OLED_ADDR     0x3C   // 0x3D sur quelques modules
+// L'ecran s'eteint apres ce delai sans action. C'est une piece accrochee au mur
+// pour des annees : un menu statique laisse allume se grave dans le verre.
+#define ARENA_OLED_SLEEP_MS 30000
+
+#if defined(ARENA_BOARD_D1MINI32)
+#define PIN_ARENA_OLED_SDA    21
+#define PIN_ARENA_OLED_SCL    22
+#define PIN_ARENA_ENC_A       32
+#define PIN_ARENA_ENC_B       33
+#define PIN_ARENA_ENC_SW      25
+#else
+// Memes broches d'ecran que le GottFA80+ : SDA 47 / SCL 21. GPIO48 est proscrit
+// (WS2812 embarquee cablee en dur - du trafic I2C dessus laissait la LED figee
+// en blanc sale). L'encodeur prend trois broches libres, a l'ecart de la flash,
+// de la PSRAM, des broches de strap et de l'USB.
+#define PIN_ARENA_OLED_SDA    47
+#define PIN_ARENA_OLED_SCL    21
+#define PIN_ARENA_ENC_A        4
+#define PIN_ARENA_ENC_B        5
+#define PIN_ARENA_ENC_SW       7
+#endif
+
 // ---- Soft start -------------------------------------------------------------
 // Ramp global brightness 0 -> target over this many ms at boot instead of
 // slamming the whole chain on. Limits the inrush into the injection-point bulk
@@ -157,7 +191,14 @@
 
 #define ARENA_BRIGHT_DEFAULT 180   // 0..255 global brightness
 #define ARENA_SPEED_DEFAULT  128   // 0..255 -> x0.25 .. x4 animation speed
-#define ARENA_NIGHT_BRIGHT    26   // ~10 % of 255 (night mode)
+// Plafond du mode nuit. 26 convenait a un remplissage uniforme des 41 pixels :
+// tout le mur a 10 %. Depuis que la nuit est faite de braises - une ou deux
+// allumees a la fois - le meme plafond ne laisse plus rien : gain 26, puis le
+// gamma l'eleve au carre, une braise pleine ressort a 2 sur 255. Mesure du
+// 2026-08-04 : 43 mA, soit exactement la consommation a vide.
+// 96 rend a peu pres la meme lumiere TOTALE que l'ancien remplissage, mais
+// concentree sur les braises au lieu d'etre etalee partout.
+#define ARENA_NIGHT_BRIGHT    96
 
 // ---- Filesystem -------------------------------------------------------------
 #define ARENA_MAP_PATH "/arena_map.json"   // insert map (editable from the web UI)

@@ -40,7 +40,8 @@ void tick();                          // call from loop()
 
 void        setMode(Mode m);
 Mode        mode();
-const char* modeName(Mode m);
+const char* modeName(Mode m);   // identifiant : NVS + API, ne change jamais
+const char* modeLabel(Mode m);  // ce que lit le proprietaire, libre de changer
 Mode        modeFromName(const char* s);   // MODE_COUNT if unknown
 void        nextMode();                    // front-panel button: cycle usable modes
 
@@ -53,6 +54,8 @@ uint8_t brightness();
 // is taste, not fidelity, so it is a live setting rather than a constant.
 void    setGi(uint8_t g);
 uint8_t gi();
+void    setDensity(uint8_t d);   // mode lucioles : combien vivent a la fois
+uint8_t density();
 
 // Filament warmth, 0..255. 0 is the pure spectral split — colorimetrically
 // right and, on a wall, orange. 255 hands the output to the white die as soon

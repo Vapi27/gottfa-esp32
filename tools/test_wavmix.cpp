@@ -1,5 +1,5 @@
 // test_wavmix.cpp — verifie sur Mac les correctifs du mixeur embarque (meme code que la carte).
-// Build: g++ -std=c++17 -I/Users/vapi27/gottfa-esp32/src /tmp/test_wavmix.cpp /Users/vapi27/gottfa-esp32/src/wavmix.cpp -o /tmp/test_wavmix
+// Build: g++ -std=c++17 -Isrc /tmp/test_wavmix.cpp src/wavmix.cpp -o /tmp/test_wavmix
 #include "wavmix.h"
 #include <cstdio>
 #include <cstring>

@@ -20,6 +20,7 @@ static const char* NVS_NS  = "arenapf";
 static const char* NVS_KEY = "ledmap";
 static const char* NVS_COL = "inscol";
 static const char* NVS_NAM = "insnam";
+static const char* NVS_HID = "inshid";
 
 static Insert  s_ins[INSERT_MAX];
 static uint8_t s_nIns = 0;
@@ -27,6 +28,12 @@ static uint8_t s_led[LED_MAX];                       // chain index -> insert in
 static bool    s_any = false;
 static Colour  s_col[INSERT_MAX];      // per-insert plastic colour, all-zero = unset
 static char    s_nam[INSERT_MAX][NAME_LEN];  // owner's label, empty = use the shipped one
+// Hidden from the plan. The eighteen general-illumination pads are classified
+// from the ROM capture, but only the owner sees the real playfield: whatever we
+// got wrong, they can put away themselves. Stored here rather than in the plan
+// file so it survives a game-bundle upload, and on the board rather than in the
+// browser so it is the same from every phone in the house.
+static uint8_t s_hid[INSERT_MAX];      // 1 = masque
 
 uint8_t       insertCount()       { return s_nIns; }
 const Insert* insert(uint8_t i)   { return (i < s_nIns) ? &s_ins[i] : nullptr; }
@@ -72,6 +79,10 @@ bool setName(uint8_t ins, const char* name) {
   return true;
 }
 bool saveNames() { return s_prefs.putBytes(NVS_NAM, s_nam, sizeof(s_nam)) == sizeof(s_nam); }
+
+bool hidden(uint8_t ins)              { return ins < s_nIns && s_hid[ins]; }
+bool setHidden(uint8_t ins, bool h)   { if (ins >= s_nIns) return false; s_hid[ins] = h ? 1 : 0; return true; }
+bool saveHidden() { return s_prefs.putBytes(NVS_HID, s_hid, sizeof(s_hid)) == sizeof(s_hid); }
 
 Colour colourOf(uint8_t ins) {
   return (ins < s_nIns) ? s_col[ins] : Colour{ 0, 0, 0, 0 };
@@ -139,6 +150,7 @@ String insertsJson() {
          ",\"x\":" + String(s_ins[i].x, 4) + ",\"y\":" + String(s_ins[i].y, 4);
     if (c.r | c.g | c.b | c.w)
       j += ",\"c\":[" + String(c.r) + "," + String(c.g) + "," + String(c.b) + "," + String(c.w) + "]";
+    if (s_hid[i]) j += ",\"h\":1";
     j += "}";
   }
   j += "]}";
@@ -245,12 +257,15 @@ void begin() {
   clearAssignment();
   clearColours();
   memset(s_nam, 0, sizeof(s_nam));
+  memset(s_hid, 0, sizeof(s_hid));
   const bool haveTable = loadInserts();
   const bool haveMap   = haveTable && loadAssignment();
   if (s_prefs.getBytesLength(NVS_COL) == sizeof(s_col))
     s_prefs.getBytes(NVS_COL, s_col, sizeof(s_col));
   if (s_prefs.getBytesLength(NVS_NAM) == sizeof(s_nam))
     s_prefs.getBytes(NVS_NAM, s_nam, sizeof(s_nam));
+  if (s_prefs.getBytesLength(NVS_HID) == sizeof(s_hid))
+    s_prefs.getBytes(NVS_HID, s_hid, sizeof(s_hid));
   uint16_t n = 0;
   for (uint16_t i = 0; i < LED_MAX; i++) if (s_led[i] != UNASSIGNED) n++;
   Serial.printf("[pf] %u inserts%s, %u pixels placed\n",

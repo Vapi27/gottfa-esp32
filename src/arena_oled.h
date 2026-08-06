@@ -1,0 +1,29 @@
+// arena_oled.h — optional SSD1306 status/control screen for the wall.
+//
+// Same panel family as the GottFA80+ companion (Adafruit SSD1306 over I2C), so
+// one part number covers both boards. Absent panel = every entry point is a
+// no-op; the wall never depends on it.
+//
+// It is a CONTROL surface, not just a status one: mode, brightness, speed,
+// filament, and the Matter pairing code, reachable without a phone. That last
+// one matters more than it looks — the pairing code is the one thing an owner
+// needs exactly when the wall is not yet on the network, which is precisely
+// when the web UI cannot help them.
+//
+// The screen blanks after ARENA_OLED_SLEEP_MS without input and the panel is
+// powered down, not merely cleared: an OLED left showing a static menu burns
+// that menu into the glass, and this thing hangs on a wall for years.
+#pragma once
+#include <Arduino.h>
+
+namespace arenaoled {
+
+void begin();          // I2C + panel probe. Safe to call when no panel is fitted.
+void tick();           // call from loop(); cheap when asleep
+bool found();          // true if a panel answered — lets the caller skip its own UI
+
+// Any human input, wherever it came from (encoder, button, web page). Wakes the
+// screen and restarts the sleep countdown. Calling it while awake is harmless.
+void poke();
+
+}  // namespace arenaoled

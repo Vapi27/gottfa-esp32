@@ -1,7 +1,7 @@
 #!/bin/sh
 # check_board.sh — controle de sante GOSOWAV a distance (carte allumee + WiFi).
-# Usage: tools/check_board.sh [ip]    (defaut 192.168.1.15, ou gosowav.local)
-IP=${1:-192.168.1.15}
+# Usage: tools/check_board.sh [ip|hote]   (defaut: gottfa80.local)
+IP=${1:-${PSTORE_IP:-gottfa80.local}}   # jamais une adresse de LAN en dur : ce fichier est versionne
 S=$(curl -s -m 4 "http://$IP/status") || { echo "KO: carte injoignable ($IP)"; exit 1; }
 echo "status: $S"
 echo "(mesure des underruns sur 5 s...)"

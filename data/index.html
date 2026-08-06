@@ -80,10 +80,18 @@
   .bdg{font-size:.68rem;padding:.15rem .5rem;border-radius:20px;border:1px solid var(--line);color:var(--muted);white-space:nowrap}
   .bdg.ok{border-color:var(--ok);color:var(--ok)} .bdg.warn{border-color:var(--warn);color:var(--warn)}
   .bdg.bad{border-color:var(--bad);color:var(--bad)}
+  /* "précondition non remplie" is NOT a fault: it must never borrow the red or the amber
+     of a real defect, or the operator will go hunting a coil that is perfectly healthy. */
+  .bdg.info{border-color:var(--accent);color:var(--accent)}
   .swchip{display:inline-block;border:1px solid var(--line);border-radius:5px;padding:0 .28rem;
     margin:0 .2rem .14rem 0;font-variant-numeric:tabular-nums;color:var(--txt);font-size:.74rem}
   .swchip i{color:var(--muted);font-style:normal;font-size:.86em}
   .swchip.miss{border-color:var(--bad);color:var(--bad)} .swchip.xtra{border-color:var(--warn);color:var(--warn)}
+  .swchip.blk{border-color:var(--accent);color:var(--accent)}   /* could not move from where it was */
+  .swchip.conf{border-color:var(--ok);color:var(--ok)}          /* also in the manual's own table */
+  .swchip.exp{border-style:dashed}                              /* expected, not yet measured */
+  .ctpre{color:var(--accent)}
+  .ctsrc{font-size:.66rem;color:var(--muted);margin-top:.35rem;line-height:1.45}
   .snds{display:grid;grid-template-columns:repeat(auto-fill,minmax(46px,1fr));gap:6px}
   .psbank{grid-column:1/-1;font-size:.72rem;color:var(--accent);font-weight:700;margin:.55rem 0 .15rem;letter-spacing:.02em}
   .psbank span{color:var(--muted);font-weight:400}
@@ -134,29 +142,32 @@
     <h1>GottFA80 · LISYcontrol</h1>
     <span class="ver" id="ver" title="version du firmware ESP — à citer dans toute demande d'aide">—</span>
     <span class="grow"></span>
+    <button class="btn" id="langBtn" onclick="toggleLang()" title="Français / English"
+            style="padding:.15rem .5rem;font-size:.7rem;font-weight:700">EN</button>
     <span class="conn" id="conn">…</span>
   </div>
   <div class="game" id="game">jeu : —</div>
   <div class="master">
     <label class="switch"><input type="checkbox" id="mst"><span class="slide"></span></label>
     <div>
-      <div class="lbl">Mode contrôle <span id="mstState" class="sub">(jeu en marche)</span></div>
-      <div class="sub warn">Mode diag = appui long sur le bouton TEST de la portière. Ici on arme les sorties.</div>
+      <div class="lbl"><span data-i18n>Mode contrôle</span> <span id="mstState" class="sub" data-i18n>(jeu en marche)</span></div>
+      <div class="sub warn" data-i18n>Mode diag = appui long sur le bouton TEST de la portière. Ici on arme les sorties.</div>
     </div>
   </div>
 </header>
 
 <nav id="tabs">
-  <button data-t="sw" class="active">Switches</button>
-  <button data-t="lamp">Lampes</button>
-  <button data-t="coil">Bobines</button>
-  <button data-t="disp">Display</button>
-  <button data-t="snd">Son</button>
-  <button data-t="adj">Réglages</button>
-  <button data-t="sys">Système</button>
-  <button data-t="deploy">Déploiement</button>
-  <button data-t="tourney">Tournoi</button>
-  <button data-t="info">Info</button>
+  <button data-t="sw" class="active" data-i18n>Switches</button>
+  <button data-t="lamp" data-i18n>Lampes</button>
+  <button data-t="coil" data-i18n>Bobines</button>
+  <button data-t="disp" data-i18n>Display</button>
+  <button data-t="snd" data-i18n>Son</button>
+  <button data-t="adj" data-i18n>Réglages</button>
+  <button data-t="sys" data-i18n>Système</button>
+  <button data-t="net" data-i18n>Réseau</button>
+  <button data-t="deploy" data-i18n>Déploiement</button>
+  <button data-t="tourney" data-i18n>Tournoi</button>
+  <button data-t="info" data-i18n>Info</button>
 </nav>
 
 <main>
@@ -191,26 +202,36 @@
 
     <div class="panel">
       <h2>Diagnostic — quelle bobine n'a pas tiré ?</h2>
-      <div class="row" style="align-items:center;margin-bottom:.5rem">
+      <div class="row" style="align-items:center;margin-bottom:.5rem;flex-wrap:wrap">
         <span class="pill" id="ct_key">jeu —</span>
         <span class="pill" id="ct_state">—</span>
+        <select id="ct_game" onchange="ctGame(this.value)" style="max-width:15rem"></select>
         <span class="grow"></span>
         <button class="btn accent" id="ct_bl" onclick="ctRun('learn')">Apprendre</button>
         <button class="btn accent" id="ct_bt" onclick="ctRun('test')">Tester</button>
+        <button class="btn" id="ct_br" onclick="ctRun('test',true)">Reprendre les non concluants</button>
         <button class="btn danger" id="ct_bs" onclick="ctAbort()">Arrêter</button>
       </div>
       <div class="ctbar"><i id="ct_fill"></i></div>
       <div class="note" id="ct_msg">—</div>
+      <div class="note" id="ct_gd" style="display:none"></div>
       <div id="ct_tbl" style="margin-top:.6rem"></div>
       <div class="note">
         Une bobine saine <b>déplace</b> quelque chose, et presque tout ce qui bouge est vu par un contact
         (l'éjecteur d'outhole <b>ouvre</b> le contact d'outhole, un relève-cibles en <b>ferme</b> plusieurs…).
-        <b>Apprendre</b> pulse chaque bobine plusieurs fois et retient les contacts qui réagissent à chaque
-        fois : c'est sa <b>signature</b>, enregistrée pour ce jeu. <b>Tester</b> rejoue la signature et dit
-        laquelle ne répond plus.
+        <b>Apprendre</b> pulse chaque bobine et retient les contacts qui réagissent : c'est sa
+        <b>signature</b>, enregistrée pour ce jeu. <b>Tester</b> la rejoue et dit laquelle ne répond plus.
+      </div>
+      <div class="note" style="border-left:3px solid var(--accent);padding-left:.6rem">
+        <b>Le plateau doit être préparé.</b> Un relève-cibles ne déplace rien si les cibles sont
+        <b>déjà relevées</b>, un éjecteur ne déplace rien <b>sans bille</b> dedans. Dans ce cas la bobine
+        est peut-être parfaitement saine : elle est marquée
+        <span class="bdg info">précondition</span> — jamais « en panne » — avec ce qu'il faut mettre en
+        place. Tu réarranges le plateau, puis <b>Reprendre les non concluants</b> ne rejoue que celles-là,
+        sans reconsommer celles qui viennent de passer.
       </div>
       <div class="note warn">
-        Knocker, carillons, verrou de monnayeur… ne bougent aucun contact : ils sont marqués
+        Knocker, carillons, verrou de monnayeur, flashers… ne bougent aucun contact : ils sont marqués
         <b>« non testable »</b> plutôt que déclarés bons à tort. Détection électrique (coupée / en court-circuit)
         = shunt de courant, pas encore installé.
       </div>
@@ -307,6 +328,47 @@
         <code>/grant</code>, <code>/norhold</code>, <code>/norloop</code>) prennent le bus SPI
         partagé : le FPGA est <b>remis à zéro</b>, donc la partie en cours est perdue. Les deux
         derniers gardent la main sur les broches — ils se relâchent tout seuls au bout de 5 min.</div>
+    </div>
+  </section>
+
+  <!-- Réseau. The board already exposes /wifi/status|scan|connect|aponly|appass|forget with NO
+       interface filter (wifiprov.cpp), i.e. they answer from the home LAN as well as from the
+       hotspot. Until now they were only reachable through the setup portal, which a customer
+       stops seeing the moment the board is provisioned — so changing network meant a factory
+       reset. This panel is the same API, in the normal UI. -->
+  <section id="net">
+    <div class="panel">
+      <h2 data-i18n>Réseau WiFi</h2>
+      <div class="row" style="align-items:center;flex-wrap:wrap;margin-bottom:.5rem">
+        <span class="pill" id="nw_mode">—</span>
+        <span class="pill" id="nw_ip">—</span>
+        <span class="pill" id="nw_rssi">—</span>
+        <span class="grow"></span>
+        <button class="btn" id="nw_scanBtn" onclick="nwScan(1)" data-i18n>Rechercher</button>
+      </div>
+      <div class="note" id="nw_msg">—</div>
+      <div id="nw_list" style="margin-top:.6rem"></div>
+      <label class="fld" style="margin-top:.6rem">SSID</label>
+      <input type="text" id="nw_ssid" maxlength="32" autocomplete="off" spellcheck="false">
+      <label class="fld" data-i18n>Mot de passe</label>
+      <input type="password" id="nw_pass" maxlength="63" autocomplete="off">
+      <div class="row" style="margin-top:.6rem;flex-wrap:wrap">
+        <button class="btn accent" onclick="nwConnect()" data-i18n>Se connecter</button>
+        <button class="btn" onclick="nwApOnly()" data-i18n>Rester en point d'accès</button>
+        <button class="btn danger" onclick="nwForget()" data-i18n>Oublier le réseau</button>
+      </div>
+    </div>
+
+    <div class="panel">
+      <h2 data-i18n>Point d'accès de la carte</h2>
+      <div class="kv"><span class="k">SSID</span><span id="nw_apssid">—</span></div>
+      <div class="kv"><span class="k" data-i18n>Mot de passe</span><span id="nw_appass">—</span></div>
+      <div class="note warn" id="nw_apwarn" style="display:none"></div>
+      <label class="fld" data-i18n>Changer le mot de passe du point d'accès</label>
+      <input type="password" id="nw_newpass" maxlength="63" minlength="8" autocomplete="off">
+      <div class="row" style="margin-top:.5rem">
+        <button class="btn" onclick="nwApPass()" data-i18n>Appliquer</button>
+      </div>
     </div>
   </section>
 
@@ -538,6 +600,100 @@
 <script>
 "use strict";
 const N_LAMP=48, N_COIL=9, N_SND=32, N_DIP=32;
+
+/* ================= bilingue FR / EN =====================================================
+   The dictionary is keyed by the FRENCH string, not by an invented id. Two reasons that
+   matter here: a string with no entry yet renders as readable French instead of a blank or
+   a raw key, so the UI is never half-broken while the translation catches up; and the
+   source stays readable — L('Tout allumer') says what it does, LBL_LAMP_ALL_ON does not.
+
+   NOT translated, deliberately: switch, coil and lamp NAMES. They come verbatim from the
+   game's own manual ("#1 Top Drop Target"), and the operator is holding that manual or
+   looking at the schematic. Translating them would force a translation back before they
+   could find the part, and would insert a second, unverifiable wording between the machine
+   and its documentation. See GAMEDATA.md. */
+const EN={
+  /* header + navigation */
+  "Mode contrôle":"Control mode","(jeu en marche)":"(game running)",
+  "Mode diag = appui long sur le bouton TEST de la portière. Ici on arme les sorties.":
+    "Diag mode = long-press the TEST button on the door. This arms the outputs.",
+  "jeu : —":"game: —",
+  "Switches":"Switches","Lampes":"Lamps","Bobines":"Coils","Display":"Display","Son":"Sound",
+  "Réglages":"Settings","Système":"System","Déploiement":"Deploy","Tournoi":"Tournament",
+  "Info":"Info","Réseau":"Network",
+  /* switch matrix */
+  "Matrice de contacts — 8 strobes × 8 retours":"Switch matrix — 8 strobes × 8 returns",
+  /* lamps + coils */
+  "Lampes (48)":"Lamps (48)","Tout allumer":"All on","Tout éteindre":"All off",
+  "Clignoter":"Blink","Bobines / solénoïdes":"Coils / solenoids",
+  "Impulsion momentanée (watchdog FPGA). Pas de maintien = pas de bobine collée.":
+    "Momentary pulse (FPGA watchdog). No hold means no stuck coil.",
+  /* coil diagnostic */
+  "Diagnostic — quelle bobine n'a pas tiré ?":"Diagnostic — which coil did not fire?",
+  "Apprendre":"Learn","Tester":"Test","Arrêter":"Stop",
+  "Reprendre les non concluants":"Retry the inconclusive ones",
+  "Reprendre (apprentissage)":"Retry (learn)","Reprendre (test)":"Retry (test)",
+  "— jeu : d’après la carte —":"— game: as reported by the board —",
+  "Ne touche pas au plateau pendant la mesure.":"Do not touch the playfield during the measurement.",
+  "Mode diag + sorties armées requis avant de lancer (bouton en haut de page).":
+    "Diag mode + armed outputs are required before starting (toggle at the top of the page).",
+  "Mode diag + « mode contrôle » requis : appui long sur le bouton TEST de la portière, puis le bouton en haut.":
+    "Diag mode + \"control mode\" required: long-press the door TEST button, then the toggle at the top.",
+  "Aucune bobine en attente de précondition":"No coil is waiting on a precondition",
+  "annoncé par la carte":"reported by the board","choisi à la main":"chosen by hand",
+  "inconnu":"unknown","jeu":"game","jamais appris":"never learned",
+  "prêt":"ready","apprentissage":"learning","test":"test","bobine":"coil",
+  "signature :":"signature:","confirmé par le manuel :":"confirmed by the manual:",
+  "sans réaction :":"no reaction:","contact inattendu :":"unexpected contact:",
+  "pas observable dans cet état :":"not observable in this state:",
+  "➜ à mettre en place :":"➜ to set up:","jamais appris ":"never learned ",
+  "aucun contact ne réagit":"no contact reacts",
+  "(1 seul tir possible : mécanisme à usage unique)":"(only one shot possible: one-shot mechanism)",
+  "attendu d’après le manuel :":"expected from the manual:",
+  "OK":"OK","partiel":"partial","aucune réaction":"no reaction","précondition":"precondition",
+  "non testable":"not testable","abandonné":"aborted",
+  "Pas de table pour ce jeu.":"No game table for this title.",
+  "Table du jeu :":"Game table:",
+  "deux sources indépendantes concordantes":"two independent sources in agreement",
+  "source unique, non recoupée":"single source, not cross-checked",
+  /* network */
+  "Réseau WiFi":"WiFi network","Réseaux détectés":"Detected networks","Rechercher":"Scan",
+  "Se connecter":"Connect","Mot de passe":"Password","Rester en point d'accès":"Stay on hotspot",
+  "Oublier le réseau":"Forget network","Point d'accès de la carte":"Board hotspot",
+  "Changer le mot de passe du point d'accès":"Change the hotspot password",
+  "Appliquer":"Apply","recherche…":"scanning…","connecté":"connected","déconnecté":"disconnected",
+  "tentative en cours…":"attempting…","échec":"failed",
+};
+let LANG = (function(){ try { return localStorage.getItem('gfa_lang') || 'fr'; } catch(e){ return 'fr'; } })();
+function L(s){ return (LANG==='en' && EN[s]) ? EN[s] : s; }   /* L = localise. NOT named t():
+   six functions in this file already declare a local `t` (st.ct, st.ta), and any one of them
+   would shadow the helper and turn a translated string into a TypeError at render time. */
+/* Static markup is tagged with data-i18n; the element's ORIGINAL French text is captured
+   once and used as the dictionary key, so switching back and forth is lossless. */
+function i18nApply(){
+  document.querySelectorAll('[data-i18n]').forEach(e=>{
+    if(!e.dataset.i18nSrc) e.dataset.i18nSrc = e.textContent.trim();
+    e.textContent = L(e.dataset.i18nSrc);
+  });
+  document.querySelectorAll('[data-i18n-ph]').forEach(e=>{
+    if(!e.dataset.i18nPhSrc) e.dataset.i18nPhSrc = e.getAttribute('placeholder')||'';
+    e.setAttribute('placeholder', L(e.dataset.i18nPhSrc));
+  });
+  document.documentElement.lang = LANG;
+  const b=document.getElementById('langBtn'); if(b) b.textContent = LANG==='fr' ? 'EN' : 'FR';
+}
+function setLang(l){
+  LANG = (l==='en') ? 'en' : 'fr';
+  try { localStorage.setItem('gfa_lang', LANG); } catch(e){}
+  i18nApply();
+  /* The board holds the per-title prose (preconditions, "why not testable") in both
+     languages, so it has to know which one to serve. */
+  if(st.ws && st.ws.readyState===1) send({c:'lang',v:LANG});
+  if(typeof renderCt==='function') renderCt();
+  if(typeof renderNames==='function') renderNames();
+}
+function toggleLang(){ setLang(LANG==='fr'?'en':'fr'); }
+
 const st={ws:null,connected:false,demo:false,outputs:false,is80B:false,blink:false,bus:'normal',lisy:'—',
   sw:Array(8).fill(0), lamps:Array(N_LAMP).fill(0), snd:Array(N_SND).fill(0), dip:Array(N_DIP).fill(0),
   ps:{ready:false,theme:'',mask:0,loop:0,voice:0,n:0,themes:[],snds:[]}, games:[], tourney:[],
@@ -568,7 +724,13 @@ function buildMatrix(){
 }
 function buildLamps(){const g=document.getElementById('lamps');g.innerHTML='';
   for(let i=0;i<N_LAMP;i++){const b=el('lamp','<div>'+(i+1)+'</div><div class="nm" id="ln'+i+'"></div>');b.id='l'+i;b.onclick=()=>lamp(i);g.appendChild(b);}}
-const COIL_DEF=["","Knocker","Coil 2","Coil 3","Coil 4","Coil 5","Coil 6","Coil 7","Coil 8","Outhole"];
+/* Fallback labels for a title with no game table. Only the assignments that are actually
+   constant across System 80 are named — the coin-chute counters on 3/4/7 and the knocker on
+   8, identical in every manual read so far. The rest stay "bobine N": the previous default
+   asserted coil 1 = Knocker and coil 9 = Outhole, and coil 1 is the knocker on no System 80
+   game at all (it is 8), so it labelled the wrong device on every machine. */
+const COIL_DEF=["","Bobine 1","Bobine 2","Compteur monnayeur","Compteur monnayeur",
+                "Bobine 5","Bobine 6","Compteur monnayeur","Knocker","Bobine 9"];
 function buildCoils(){const g=document.getElementById('coils');g.innerHTML='';
   for(let i=1;i<=N_COIL;i++){const d=el('coil','<div class="n">'+i+'</div><div class="t" id="kn'+i+'">'+COIL_DEF[i]+'</div>');d.id='k'+i;d.onclick=()=>coil(i);g.appendChild(d);}}
 function buildSnd(){const g=document.getElementById('sndPad');g.innerHTML='';
@@ -593,59 +755,250 @@ function coil(i){if(!gate())return need();const ms=+pw.value,e=document.getEleme
   e.classList.add('fire');setTimeout(()=>e.classList.remove('fire'),Math.max(120,ms));send({c:'coil',i,ms});}
 function sound(i){if(!gate())return need();st.snd[i]^=1;if(st.snd[i])st.snd.forEach((v,j)=>{if(j!=i)st.snd[j]=0});renderSnd();send({c:'sound',n:i});}
 /* ---- coil diagnostic: learn / replay a switch signature per solenoid ---- */
-function ctRun(mode){
+/* A coil in the "inconclusive" set needs LEARN, not TEST, when it has no signature at all:
+   there is no baseline to replay. That is the normal state of a kicker whose LEARN ran with
+   no ball in front of it. Retrying such a coil with TEST would skip it for ever. */
+function ctIncNeedsLearn(){const m=st.ct.inc|0;if(!m)return false;
+  return (st.ct.c||[]).some(c=>(m>>(c.n-1))&1 && !((c.sig||[]).length));}
+function ctRun(mode,onlyInc){
   /* The ESP is authoritative on whether this is allowed; we only pre-warn so the
      operator is not left guessing why nothing happened. */
   if(!gate()){document.getElementById('ct_msg').textContent=
-    'Mode diag + « mode contrôle » requis : appui long sur le bouton TEST de la portière, puis le bouton en haut.';return need();}
-  if(mode==='learn'&&!confirm('Apprentissage : chaque bobine va être pulsée '+st.ct.lreps+
-    ' fois (~'+ctEta()+' s). La signature enregistrée pour ce jeu sera remplacée. Continuer ?'))return;
+    L('Mode diag + « mode contrôle » requis : appui long sur le bouton TEST de la portière, puis le bouton en haut.');return need();}
+  if(onlyInc&&!st.ct.inc){toast(L('Aucune bobine en attente de précondition'));return;}
+  if(onlyInc){
+    /* A subset LEARN keeps the signatures of the coils it does not touch, so this cannot
+       lose the ones that already passed. */
+    mode=ctIncNeedsLearn()?'learn':'test';
+    document.getElementById('ct_msg').textContent=
+      (mode==='learn'?'Apprentissage':'Test')+' des bobines non concluantes…';
+    send({c:mode==='learn'?'ct_learn':'ct_test',ms:+pw.value,only:'inc'});
+    return;
+  }
+  if(mode==='learn'&&!confirm('Apprentissage (~'+ctEta()+' s). Prépare le plateau AVANT : cibles '+
+    'tombantes abaissées, une bille dans l’outhole et dans chaque trou éjecteur — sinon les bobines '+
+    'concernées ressortiront « précondition ». La signature enregistrée pour ce jeu sera remplacée. Continuer ?'))return;
   document.getElementById('ct_msg').textContent=(mode==='learn'?'Apprentissage':'Test')+' demandé…';
-  send({c:mode==='learn'?'ct_learn':'ct_test',ms:+pw.value});
+  send({c:mode==='learn'?'ct_learn':'ct_test',ms:+pw.value,only:onlyInc?'inc':0});
 }
 function ctAbort(){send({c:'ct_abort'});}
+/* Titles as the FPGA numbers them (annexe A de GottFA80_PLuS_GameSelect) — the same numbers
+   the board reports, so picking one here means the same thing as the DIP switches. */
+const GAME_TITLES=["Panthera","The Amazing Spider-Man","Circus","Counterforce","Star Race",
+"James Bond 007","James Bond 007 (3/5 billes)","Time Line","Force II","Pink Panther",
+"Mars God of War","Mars God of War (son seul)","Volcano","Volcano (son seul)","Black Hole",
+"Black Hole (son seul)","Haunted House","Eclipse","Devil's Dare","Devil's Dare (son seul)",
+"Rocky","Spirit","Punk!","Striker","Krull","Q*Bert's Quest","Super Orbit",
+"Royal Flush Deluxe","Goin' Nuts","Amazon Hunt","Rack 'Em Up","Ready... Aim... Fire!",
+"Jacks To Open","Touchdown","Alien Star","The Games","El Dorado City of Gold","Ice Fever",
+"Caveman","Caveman (flipprojects)","Bounty Hunter","Chicago Cubs Triple Play","Tag Team",
+"Rock","Raven","Rock Encore","Hollywood Heat","Genesis","Gold Wings","Monte Carlo",
+"Spring Break","Arena","Victory","Diamond Lady","TX Sector","Robo War","Excalibur",
+"Bad Girls","Big House","Hot Shots","Bone Busters Inc.","Night Moves","Amazon Hunt II"];
+function buildGameSel(){const s=document.getElementById('ct_game');if(!s||s.options.length)return;
+  s.insertAdjacentHTML('beforeend','<option value="-1">— jeu : d’après la carte —</option>');
+  GAME_TITLES.forEach((t,i)=>s.insertAdjacentHTML('beforeend','<option value="'+i+'">'+i+' · '+esc(t)+'</option>'));}
+function ctGame(v){send({c:'ct_game',g:+v});}
+/* Upper bound: LEARN now stops repeating as soon as a mechanism is consumed, so a real run
+   is usually well under this. Better to over-quote a wait than to under-quote it. */
 function ctEta(){const t=st.ct;/* per rep: idle window (learn only) + pulse + watch + cooldown */
   const per=(t.win|0)+(t.pulse|0)+65+(t.mode==='learn'?(t.win|0):0);
   return Math.round(9*(t.lreps||3)*per/1000);}
 const CT_V={ok:['OK','ok'],partiel:['partiel','warn'],muet:['aucune réaction','bad'],
-            nonteste:['non testable','' ],abandon:['abandonné','']};
-/* denominator = the rep count the LOADED signature was built with (sreps), not today's
-   constant: a file learned by an older firmware must not be re-labelled "2/3". */
-function ctChip(s,cls){return '<span class="swchip '+(cls||'')+'">'+s.i+(s.h?(' <i>'+s.h+'/'+(st.ct.sreps||st.ct.lreps||3)+'</i>'):'')+'</span>';}
+            precond:['précondition','info'],nonteste:['non testable','' ],abandon:['abandonné','']};
+/* Denominator = the repetitions that were actually POSSIBLE for THAT coil (c.r), not a
+   global constant: a one-shot mechanism legitimately scores 1/1, and printing "1/3" for it
+   would read as a marginal contact when it is nothing of the kind. */
+function ctChip(s,cls,den){return '<span class="swchip '+(cls||'')+'">'+s.i+
+  (s.nm?(' '+esc(s.nm)):'')+(s.h?(' <i>'+s.h+'/'+(den||st.ct.sreps||st.ct.lreps||3)+'</i>'):'')+'</span>';}
 function renderCt(){
-  const t=st.ct,run=!!t.run;
-  const bl=document.getElementById('ct_bl'),bt=document.getElementById('ct_bt'),bs=document.getElementById('ct_bs');
+  const ct=st.ct,run=!!ct.run;
+  const bl=document.getElementById('ct_bl'),bt=document.getElementById('ct_bt'),bs=document.getElementById('ct_bs'),
+        br=document.getElementById('ct_br');
   if(!bl)return;
   bl.classList.toggle('disabled',run); bt.classList.toggle('disabled',run); bs.classList.toggle('disabled',!run);
+  br.classList.toggle('disabled',run||!ct.inc);
+  /* Say which of the two it will do: re-learning a coil that never had a signature and
+     re-verifying one that has are different operations, and the operator should know. */
+  br.textContent = !ct.inc ? L('Reprendre les non concluants')
+                 : (ctIncNeedsLearn() ? L('Reprendre (apprentissage)') : L('Reprendre (test)'));
+  const gd=ct.gd||{};
+  buildGameSel();
+  const sel=document.getElementById('ct_game');
+  if(sel&&document.activeElement!==sel)sel.value=String(ct.ovr===undefined?-1:ct.ovr);
+  /* Say WHERE the slot came from. "jeu #12" is ambiguous between "the board told us" and
+     "someone picked it from a list", and those deserve different amounts of trust. */
+  const orig=(ct.fpga!==undefined&&ct.fpga>=0)?L('annoncé par la carte')
+            :(ct.ovr!==undefined&&ct.ovr>=0)?L('choisi à la main'):L('inconnu');
+  /* While idle show the slot we are ON (live); during a run show the slot being run (key) —
+     they differ right after the operator picks a title, and showing the stale one makes the
+     choice look like it did not take. */
+  const slot=run?ct.key:(ct.live!==undefined?ct.live:ct.key);
   document.getElementById('ct_key').textContent =
-    'jeu '+(t.gen?'inconnu (profil générique)':('#'+t.key))+(t.sigk>=0?'':' · jamais appris');
+    L('jeu')+' '+(ct.gen?L('inconnu (profil générique)'):('#'+slot))+
+    (gd.t?(' · '+gd.t):'')+' · '+orig+(ct.sigk>=0?'':' · '+L('jamais appris'));
+  /* Provenance is shown, not hidden: the coil->switch table is what turns a silence into a
+     verdict, so the operator gets to see where it came from and whether it was corroborated. */
+  const gdiv=document.getElementById('ct_gd');
+  if(gd.g>=0&&gd.src){
+    gdiv.style.display='';
+    gdiv.innerHTML='<b>'+L('Table du jeu :')+' '+esc(gd.t||'')+'</b> — '+
+      (gd.conf>=2?'<span style="color:var(--ok)">'+L('deux sources indépendantes concordantes')+'</span>'
+                 :'<span style="color:var(--warn)">'+L('source unique, non recoupée')+'</span>')+
+      '<div class="ctsrc">'+esc(gd.src)+(gd.note?('<br>⚠ '+esc(gd.note)):'')+'</div>';
+  }else{
+    gdiv.style.display='';
+    gdiv.innerHTML='<b>'+L('Pas de table pour ce jeu.')+'</b> <span class="ctsrc">'+
+      ((ct.fpga!==undefined&&ct.fpga<0&&!(ct.ovr>=0))
+        ? 'La carte n’annonce son numéro de jeu que lorsque les DIP <b>changent</b> : après une '+
+          'simple mise sous tension elle ne dit rien. <b>Choisis le titre dans la liste</b> — '+
+          'il est mémorisé, et un numéro annoncé par la carte reprendra toujours le dessus. '
+        : '')+
+      'Le test fonctionne quand même, mais sans table il ne peut ni nommer les contacts ni '+
+      'expliquer une précondition : il ne saura pas si un silence est une panne ou un plateau '+
+      'mal préparé.</span>';
+  }
   document.getElementById('ct_state').textContent =
-    run?((t.mode==='learn'?'apprentissage':'test')+' — bobine '+t.coil+(t.reps>1?(' ('+t.rep+'/'+t.reps+')'):'')):
-        (t.ms?('terminé en '+(t.ms/1000).toFixed(1)+' s'):'prêt');
-  document.getElementById('ct_fill').style.width=(t.pct|0)+'%';
+    run?((ct.mode==='learn'?L('apprentissage'):L('test'))+' — '+L('bobine')+' '+ct.coil+(ct.reps>1?(' ('+ct.rep+'/'+ct.reps+')'):'')):
+        (ct.ms?(L('terminé en')+' '+(ct.ms/1000).toFixed(1)+' s'):L('prêt'));
+  document.getElementById('ct_fill').style.width=(ct.pct|0)+'%';
   const msg=document.getElementById('ct_msg');
-  if(t.err)msg.innerHTML='<b style="color:var(--warn)">'+esc(t.err)+'</b>';
-  else if(run)msg.textContent='Ne touche pas au plateau pendant la mesure.';
-  else if(!(st.demo||gate()))msg.textContent='Mode diag + sorties armées requis avant de lancer (bouton en haut de page).';
-  else msg.textContent='Impulsion '+t.pulse+' ms · fenêtre d’observation '+t.win+' ms · '+
-    'apprentissage '+t.lreps+' répétitions, contact retenu à partir de '+t.lmin+'.';
+  if(ct.err)msg.innerHTML='<b style="color:var(--warn)">'+esc(ct.err)+'</b>';
+  else if(run)msg.textContent=L('Ne touche pas au plateau pendant la mesure.');
+  else if(!(st.demo||gate()))msg.textContent=L('Mode diag + sorties armées requis avant de lancer (bouton en haut de page).');
+  else msg.textContent='Impulsion '+ct.pulse+' ms · fenêtre d’observation '+ct.win+' ms · '+
+    'apprentissage '+ct.lreps+' répétitions, contact retenu à partir de '+ct.lmin+'.';
   const g=document.getElementById('ct_tbl');g.innerHTML='';
-  (t.c||[]).forEach(c=>{
+  (ct.c||[]).forEach(c=>{
     const v=CT_V[c.v]||['—',''];
+    const den=c.r||undefined;
     let d='';
-    if(!c.l)d='jamais appris';
-    else if(!(c.sig||[]).length)d='aucun contact ne réagit — non testable';
-    else d='signature : '+c.sig.map(s=>ctChip(s)).join('');
-    if((c.miss||[]).length)d+='<br>sans réaction : '+c.miss.map(s=>ctChip(s,'miss')).join('');
-    if((c.xtra||[]).length)d+='<br>contact inattendu : '+c.xtra.map(s=>ctChip(s,'xtra')).join('');
+    if(c.x)d='<span style="color:var(--muted)">'+esc(c.x)+'</span>';        /* structurally blind */
+    else if(!c.l)d=L('jamais appris');
+    else if(!(c.sig||[]).length)d='aucun contact ne réagit';
+    else d=L('signature :')+' '+c.sig.map(s=>ctChip(s,'',den)).join('')+
+           (den===1?' <i style="color:var(--muted)">'+L('(1 seul tir possible : mécanisme à usage unique)')+'</i>':'');
+    if((c.conf||[]).length)d+='<br>'+L('confirmé par le manuel :')+' '+c.conf.map(s=>ctChip(s,'conf')).join('');
+    else if(!c.l&&(c.exp||[]).length)d+='<br>'+L('attendu d’après le manuel :')+' '+c.exp.map(s=>ctChip(s,'exp')).join('');
+    if((c.miss||[]).length)d+='<br>'+L('sans réaction :')+' '+c.miss.map(s=>ctChip(s,'miss')).join('');
+    /* Blocked ≠ missing. These contacts were physically unable to move from where they sat,
+       so they say nothing at all about the coil and must not be shown as a failure. */
+    if((c.blk||[]).length)d+='<br><span class="ctpre">'+L('pas observable dans cet état :')+' '+
+      c.blk.map(s=>ctChip(s,'blk')).join('')+'</span>';
+    /* Show the setup hint whenever the verdict is "precondition", including the case where
+       only PART of the signature was blocked — that is the one the operator is most likely to
+       hit, because a single ball can only satisfy one mechanism at a time. */
+    if(c.v==='precond'&&c.pre)d+='<br><span class="ctpre">'+L('➜ à mettre en place :')+' <b>'+esc(c.pre)+'</b>'+
+      (c.fired===0?', puis « Reprendre les non concluants » (la bobine n’a pas été tirée)':'')+'</span>';
+    if((c.xtra||[]).length)d+='<br>'+L('contact inattendu :')+' '+c.xtra.map(s=>ctChip(s,'xtra')).join('');
     if(c.f)d+='<br><b style="color:var(--warn)">défaut FPGA : '+
       (c.f.clamp?'impulsion écrêtée':c.f.refire?'tir trop rapproché (refusé)':c.f.wd?'watchdog — bobine restée ON':'0x'+c.f.raw.toString(16))+'</b>';
-    g.insertAdjacentHTML('beforeend','<div class="ctrow'+(run&&c.n===t.coil?' cur':'')+'">'+
+    /* The game table's own name wins: it comes from the manual for THIS title, whereas
+       st.names.coil is whatever the operator typed and COIL_DEF is a generic guess. */
+    const nm=c.fn||st.names.coil[c.n]||COIL_DEF[c.n]||('Coil '+c.n);
+    g.insertAdjacentHTML('beforeend','<div class="ctrow'+(run&&c.n===ct.coil?' cur':'')+'">'+
       '<div class="cn">'+c.n+'</div>'+
-      '<div><div>'+esc(st.names.coil[c.n]||COIL_DEF[c.n]||('Coil '+c.n))+'</div><div class="cd">'+d+'</div></div>'+
-      '<span class="bdg '+v[1]+'">'+v[0]+'</span></div>');
+      '<div><div>'+esc(nm)+'</div><div class="cd">'+d+'</div></div>'+
+      '<span class="bdg '+v[1]+'">'+L(v[0])+'</span></div>');
   });
 }
+/* ---- Réseau WiFi (mêmes routes que le portail de configuration, wifiprov.cpp) ----
+   Every call goes through the board's own queue: the HTTP handlers only record an intent and
+   tick() does the radio work, so nothing here can block the network task. That also means a
+   connect answers 202 immediately and the OUTCOME arrives later via /wifi/status — hence the
+   poll rather than a reply-driven UI. */
+let _nwTimer=null, _nwNets=[];
+function nwFetch(p,opt){return fetch(p,opt).then(r=>r.json().catch(()=>({})));}
+function nwPost(p,body){return nwFetch(p,{method:'POST',
+  headers:{'Content-Type':'application/x-www-form-urlencoded'},
+  body:body?new URLSearchParams(body).toString():''});}
+function nwStatus(){
+  return nwFetch('/wifi/status').then(s=>{
+    if(!s||!s.mode)return;
+    document.getElementById('nw_mode').textContent=s.mode;
+    document.getElementById('nw_ip').textContent=s.ip||'—';
+    document.getElementById('nw_rssi').textContent=s.sta?((s.rssi||0)+' dBm'):L('déconnecté');
+    document.getElementById('nw_apssid').textContent=s.apssid||'—';
+    document.getElementById('nw_appass').textContent=s.appass||'—';
+    const w=document.getElementById('nw_apwarn');
+    /* A hotspot password identical on every board is a shared secret, not a password. Say so
+       where the customer can act on it, not only in a README nobody opens. */
+    if(s.apdefault){w.style.display='';w.textContent=LANG==='en'
+      ? 'This is the factory hotspot password, identical on every board. Change it below.'
+      : 'C’est le mot de passe d’usine du point d’accès, identique sur toutes les cartes. Change-le ci-dessous.';}
+    else w.style.display='none';
+    const m=document.getElementById('nw_msg');
+    if(s.trying)m.textContent=L('tentative en cours…')+' '+(s.busy?'':'');
+    else if(s.msg)m.textContent=s.msg;
+    else m.textContent=s.sta?(L('connecté')+' — '+(s.ssid||'')):(s.aponly?L('Rester en point d\'accès'):L('déconnecté'));
+    const i=document.getElementById('nw_ssid');
+    if(document.activeElement!==i && !i.value && s.ssid) i.value=s.ssid;
+    return s;
+  }).catch(()=>{});
+}
+function nwScan(force){
+  document.getElementById('nw_msg').textContent=L('recherche…');
+  nwFetch('/wifi/scan'+(force?'?force=1':'')).then(r=>{
+    if(!r)return;
+    if(r.nets)_nwNets=r.nets;
+    nwRenderNets();
+    if(r.scanning)setTimeout(()=>nwScan(0),1500); else nwStatus();
+  }).catch(()=>{});
+}
+function nwRenderNets(){
+  const g=document.getElementById('nw_list');g.innerHTML='';
+  if(!_nwNets.length){g.innerHTML='<div class="note">'+L('Réseaux détectés')+' : —</div>';return;}
+  _nwNets.slice().sort((a,b)=>(b.rssi||0)-(a.rssi||0)).forEach(n=>{
+    const ss=n.ssid||n.s||'';
+    if(!ss)return;
+    const r=n.rssi||n.r||0, lock=(n.enc===undefined?n.e:n.enc)?'🔒':'';
+    g.insertAdjacentHTML('beforeend',
+      '<div class="ctrow" style="cursor:pointer" onclick="nwPick('+JSON.stringify(ss).replace(/"/g,'&quot;')+')">'+
+      '<div class="cn">'+lock+'</div><div><div>'+esc(ss)+'</div>'+
+      '<div class="cd">'+r+' dBm</div></div><span class="bdg">'+L('Se connecter')+'</span></div>');
+  });
+}
+function nwPick(ss){document.getElementById('nw_ssid').value=ss;document.getElementById('nw_pass').focus();}
+function nwConnect(){
+  const ssid=document.getElementById('nw_ssid').value.trim();
+  if(!ssid){toast('SSID ?');return;}
+  nwPost('/wifi/connect',{ssid:ssid,pass:document.getElementById('nw_pass').value})
+    .then(r=>{ if(r&&r.ok===false)toast(r.err||L('échec'));
+      document.getElementById('nw_msg').textContent=L('tentative en cours…');
+      /* The board may move to a NEW address on success, so this page can legitimately stop
+         answering. Poll for a while, then tell the operator where to look rather than
+         leaving a spinner running for ever. */
+      let n=0; const iv=setInterval(()=>{ n++;
+        nwStatus().then(s=>{ if(s&&!s.trying){clearInterval(iv);
+          if(s.sta)toast(L('connecté')+' — '+s.ip); } });
+        if(n>20){clearInterval(iv);document.getElementById('nw_msg').textContent=
+          LANG==='en' ? 'No answer — the board may have moved to another address. Look for it on the new network, or rejoin its hotspot.'
+                      : 'Pas de réponse — la carte a peut-être changé d’adresse. Cherche-la sur le nouveau réseau, ou rejoins son point d’accès.';}
+      },1500);
+    }).catch(()=>toast(L('échec')));
+}
+function nwApOnly(){ nwPost('/wifi/aponly').then(()=>nwStatus()); }
+function nwForget(){
+  const q=LANG==='en'?'Forget the stored network and go back to the hotspot?'
+                     :'Oublier le réseau enregistré et revenir au point d’accès ?';
+  if(!confirm(q))return;
+  nwPost('/wifi/forget').then(()=>{document.getElementById('nw_ssid').value='';nwStatus();});
+}
+function nwApPass(){
+  const p=document.getElementById('nw_newpass').value;
+  if(p.length<8){toast(LANG==='en'?'8 characters minimum':'8 caractères minimum');return;}
+  nwPost('/wifi/appass',{pass:p}).then(r=>{
+    if(r&&r.ok===false){toast(r.err||L('échec'));return;}
+    document.getElementById('nw_newpass').value='';
+    toast(LANG==='en'?'Hotspot password changed':'Mot de passe du point d’accès changé');
+    nwStatus();});
+}
+/* Only poll while the tab is visible: this runs over the same WiFi the panel is reconfiguring. */
+function nwTabActive(on){
+  if(_nwTimer){clearInterval(_nwTimer);_nwTimer=null;}
+  if(on){nwStatus();nwScan(0);_nwTimer=setInterval(nwStatus,3000);}
+}
+
 /* ---- PSOWAV (ESP WAV engine — independent of diag mode) ---- */
 function psPlay(i,e){if(e){e.classList.add('play');setTimeout(()=>e.classList.remove('play'),350);}send({c:'snd',n:i});}
 function psStop(){send({c:'sndstop'});}
@@ -1075,15 +1428,22 @@ document.getElementById('mst').onchange=e=>{
   setOutputs(e.target.checked,false);};
 
 /* ---------- tabs + toast ---------- */
-document.getElementById('tabs').onclick=e=>{const t=e.target.dataset.t;if(t){
+/* `tab`, not `t`: a local named t would shadow the translation helper L() for this whole
+   handler, and the next person to add a L('...') call in here would get a TypeError. */
+document.getElementById('tabs').onclick=e=>{const tab=e.target.dataset.t;if(tab){
   document.querySelectorAll('nav button').forEach(b=>b.classList.toggle('active',b===e.target));
-  document.querySelectorAll('section').forEach(s=>s.classList.toggle('active',s.id===t));
-  if(t==='sys'||t==='deploy')reqSys();if(t==='deploy'){reqGames();romFetchList();ownFetch();}}};
+  document.querySelectorAll('section').forEach(s=>s.classList.toggle('active',s.id===tab));
+  if(tab==='sys'||tab==='deploy')reqSys();if(tab==='deploy'){reqGames();romFetchList();ownFetch();}
+  nwTabActive(tab==='net');}};
 let tT;function toast(msg){const c=document.getElementById('conn'),o=c.textContent;c.textContent=msg;
   clearTimeout(tT);tT=setTimeout(()=>setConn(st.connected?'ok':st.demo?'demo':''),1400);}
 
 /* ---------- boot ---------- */
 buildMatrix();buildLamps();buildCoils();buildSnd();buildPsPad();buildDisp();buildDips();buildRomGames();
+/* Re-apply any names already received: the grids above replace their innerHTML, so a
+   {t:'names'} that arrived before this ran would have been painted over. */
+renderNames();
+i18nApply();          // restore the stored FR/EN choice before anything is read
 applySys();applyBus();renderGate();renderPs();renderTourney();renderMode();renderTfpga();renderCt();setConn('');connect();
 </script>
 </body>

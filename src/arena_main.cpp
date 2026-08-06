@@ -5,6 +5,7 @@
 #include "arena_map.h"
 #include "arena_pf.h"
 #include "arena_attract.h"
+#include "arena_oled.h"
 #include "arena_net.h"
 
 // ============================================================================
@@ -24,6 +25,7 @@ static const uint32_t BTN_LONG_MS = 1000;
 
 static void buttonPoll() {
   bool down = (digitalRead(PIN_ARENA_BUTTON) == LOW);
+  if (down) arenaoled::poke();   // le bouton reveille l'ecran comme l'encodeur
   uint32_t now = millis();
 
   if (down && !s_btnDown) {                       // press
@@ -58,6 +60,7 @@ void setup() {
   arenaattract::begin();  // Arena's own attract sequence, captured from the ROM
   arenaled::begin();      // NVS settings + chain init; pixels go dark-then-live
   arenanet::begin();      // WiFi + http://arena.local/
+  arenaoled::begin();     // ecran de controle, inerte si aucun panneau
 
   Serial.printf("[boot] ready — %u LEDs, mode=%s, %s %s\n",
                 arenaled::count(), arenaled::modeName(arenaled::mode()),
@@ -69,5 +72,6 @@ void loop() {
   buttonPoll();
 #endif
   arenaled::tick();       // self-rate-limited to LED_FRAME_HZ
+  arenaoled::tick();
   arenanet::loop();
 }

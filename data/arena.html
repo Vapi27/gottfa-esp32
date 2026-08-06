@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>Arena Wall-Art LED</title>
+<title>Wall Pinball Playfield</title>
 <style>
   :root{--bg:#0d0b09;--panel:#171310;--line:#2c241d;--txt:#efe6da;--dim:#9a8a78;
         --amber:#ff9b21;--gold:#ffc046;--red:#e0483a;--ok:#4caf50}
@@ -11,7 +11,18 @@
   body{margin:0;background:var(--bg);color:var(--txt);
        font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
   header{padding:14px 16px;border-bottom:1px solid var(--line);
-         background:linear-gradient(180deg,#1d1712,#120f0c);position:sticky;top:0;z-index:5}
+         background:linear-gradient(180deg,#1d1712,#120f0c);position:sticky;top:0;z-index:5;
+         display:flex;align-items:center;gap:14px}
+  header .hgrow{flex:1;min-width:0}
+  /* Le geste le plus frequent merite la cible la plus grande, et une place que
+     l'oeil trouve sans chercher. 56 px = confortable au pouce sur telephone. */
+  #pwr{width:56px;height:56px;flex:0 0 auto;border-radius:50%;
+       border:2px solid var(--line);background:#171310;color:var(--dim);
+       font-size:26px;line-height:1;cursor:pointer;transition:.15s;padding:0}
+  #pwr:hover{border-color:var(--amber)}
+  #pwr.on{border-color:var(--amber);color:#120f0c;background:var(--amber);
+          box-shadow:0 0 16px color-mix(in srgb, var(--amber) 45%, transparent)}
+  #pwr:disabled{opacity:.4;cursor:default}
   h1{margin:0;font-size:18px;letter-spacing:.14em;text-transform:uppercase;color:var(--gold)}
   .stat{margin-top:6px;font-size:12px;color:var(--dim);display:flex;gap:14px;flex-wrap:wrap}
   .stat b{color:var(--txt);font-weight:600}
@@ -43,14 +54,25 @@
   .grid2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
   .warn{color:var(--red)}.ok{color:var(--ok)}
   .hint{font-size:12px;color:var(--dim);margin:8px 0 0}
+  /* A pan drags across the insert labels; without this it highlights them instead. */
+  #wz-plan{user-select:none;-webkit-user-select:none}
   .bar{height:6px;background:#241c16;border-radius:3px;overflow:hidden;flex:1}
   .bar i{display:block;height:100%;background:var(--amber)}
   footer{color:var(--dim);font-size:11px;text-align:center;padding:0 0 24px}
+/* Une bascule n'est pas un choix de mode : elle ne doit pas crier aussi fort.
+   Pleine couleur, elles ecrasaient visuellement le panneau ou l'on choisit
+   reellement quelque chose. */
+button.tog{background:transparent;border:1px solid var(--amber);color:var(--amber);
+           font-size:12px;padding:5px 11px;border-radius:14px;font-weight:500}
+button.tog.on{background:color-mix(in srgb, var(--amber) 18%, transparent)}
+header h1 img{filter:saturate(.9)}
 </style>
 </head>
 <body>
 <header>
-  <h1>Arena &mdash; wall art</h1>
+  <div class="hgrow">
+  <h1><img src="/logo.png" alt="pinballs.store" onerror="this.style.display='none'"
+           style="height:52px;width:auto;vertical-align:-16px;margin-right:12px">Wall Pinball Playfield</h1>
   <div class="stat">
     <span>mode <b id="s-mode">–</b></span>
     <span>leds <b id="s-count">–</b></span>
@@ -59,13 +81,19 @@
     <span><b id="s-net">–</b> <b id="s-ip"></b></span>
     <span id="s-lim" class="warn"></span>
   </div>
+  </div>
+  <button id="pwr" onclick="togglePower()" title="on / off" aria-label="on / off">&#9211;</button>
 </header>
 
 <main>
   <section>
     <h2>Lighting mode</h2>
     <div class="modes" id="modes"></div>
-  </section>
+      <p class="hint" style="margin-top:10px">
+      <button id="bootbtn" class="tog" onclick="toggleBoot()">&ndash;</button>
+      <span class="hint">What the wall does when mains power comes back.</span>
+    </p>
+</section>
 
   <section>
     <h2>Level</h2>
@@ -73,12 +101,15 @@
       <input type="range" id="bright" min="0" max="255"><output id="o-bright"></output></div>
     <div class="row"><label>Speed</label>
       <input type="range" id="speed" min="0" max="255"><output id="o-speed"></output></div>
-    <div class="row"><label>Glow</label>
+    <div class="row"><label>Background glow</label>
       <input type="range" id="gi" min="0" max="255"><output id="o-gi"></output></div>
-    <div class="row"><label>Warmth</label>
+
+    <div class="row"><label>How many at once</label>
+      <input type="range" id="density" min="0" max="255"><output id="o-density"></output></div>
+    <div class="row"><label>Bulb tone</label>
       <input type="range" id="warm" min="0" max="255"><output id="o-warm"></output></div>
     <div class="row"><label>Filament</label>
-      <button id="incbtn" onclick="push('inc=' + (st.inc ? 0 : 1))">&ndash;</button>
+      <button id="incbtn" class="tog" onclick="push('inc=' + (st.inc ? 0 : 1))">&ndash;</button>
       <span class="hint" style="margin:0">ON = real bulb &mdash; Colour above tints its glass (pure white = clear #47) &middot; off = plain switch in that Colour</span></div>
     <div class="row"><label>Power</label>
       <div class="bar"><i id="pbar" style="width:0"></i></div><output id="o-pow"></output></div>
@@ -87,7 +118,7 @@
   </section>
 
   <section>
-    <h2>Colour (classic / attract / arena)</h2>
+    <h2>Colour</h2>
     <div class="presets" style="margin-bottom:8px">
       <button onclick="push('r=0&g=0&b=0&w=255&warm=217&inc=1')">original bulb</button>
       <button onclick="push('r=0&g=0&b=0&w=255&warm=55&inc=1')">older bulb</button>
@@ -133,86 +164,220 @@
   </section>
 
   <section>
-    <h2>Game</h2>
-    <p class="hint">The wall plays <b id="g-atr">&ndash;</b> with <b id="g-ins">&ndash;</b> inserts
-      on the plan. To run <b>your</b> machine: pick its bundle (two files) and upload &mdash;
-      the board validates, reboots, and your pixel mapping is kept. Bundles live in the repo's
-      <code>bundles/</code> folder, or are made from your table + ROM with <code>tools/mkgame.sh</code>.</p>
-    <div class="row"><label>Plan (pf.json)</label>
-      <input type="file" id="g-pf" accept=".json">
-      <button onclick="gUp('pf')">Upload</button></div>
-    <div class="row"><label>Attract (.bin)</label>
-      <input type="file" id="g-at" accept=".bin">
-      <button onclick="gUp('attract')">Upload</button></div>
-    <p class="hint warn">A different table = different inserts: after loading a new plan,
-      re-run the wizard. Assignments pointing past the new table are dropped automatically.</p>
+    <h2>Which machine</h2>
+    <p class="hint">Your wall replays the real attract mode of a Gottlieb
+      <b>Arena</b> &mdash; <b id="g-atr">&ndash;</b> captured from the game&rsquo;s own ROM,
+      on <b id="g-ins">&ndash;</b> inserts.</p>
+    <details>
+      <summary class="hint" style="cursor:pointer">Put a different machine on this wall</summary>
+      <p class="hint" style="margin-top:8px">Two files: the <b>playfield plan</b> and the
+        <b>attract capture</b>. Download them for your title from pinballs.store, upload both,
+        and the wall reboots on your machine. Your pixel placements are kept.</p>
+      <div class="row"><label>Playfield plan</label>
+        <input type="file" id="g-pf" accept=".json">
+        <button onclick="gUp('pf')">Upload</button></div>
+      <div class="row"><label>Attract capture</label>
+        <input type="file" id="g-at" accept=".bin">
+        <button onclick="gUp('attract')">Upload</button></div>
+      <p class="hint warn">A different machine has different inserts, so you will need to
+        place the pixels again afterwards.</p>
+    </details>
   </section>
 
   <section>
-    <h2>Mapping wizard</h2>
-    <p class="hint">The board lights one pixel; you click the insert it sits under on the plan.
-       Every click is saved on the board, so you can stop and come back at any point.</p>
-    <div class="row">
-      <button id="wz-go" onclick="wzStart()">Start walking</button>
-      <button onclick="wzFinish()">Done</button>
-      <span class="bar"><i id="wz-bar" style="width:0"></i></span>
-      <output id="wz-pos" style="width:96px">&ndash;</output>
-    </div>
-    <div class="row">
-      <label>Go to pixel</label>
-      <input type="number" id="wz-goto" min="0" style="width:90px">
-      <button onclick="wzGo(+$('wz-goto').value)">Light it</button>
-    </div>
+    <h2>Playfield</h2>
 
-    <div id="wz-body" style="display:none">
-      <div class="modes" style="margin-bottom:8px">
-        <button id="wz-m-place" onclick="wzSetMode('place')">Place pixels</button>
-        <button id="wz-m-edit"  onclick="wzSetMode('edit')">Edit inserts</button>
-      </div>
-      <p class="hint" id="wz-say">Look at the playfield: <b>one pixel is blinking white</b>.
-        Click the insert it sits under.</p>
-      <div id="wz-edit" style="display:none">
-        <div class="row"><label>Insert</label>
-          <input type="text" id="ed-name" maxlength="7" placeholder="name from your manual">
-          <button onclick="edApply()">Rename</button></div>
-        <div class="row"><label>Colour</label>
-          <input type="color" id="ed-rgb" style="width:64px;height:34px;padding:2px">
-          <output id="ed-w-o" style="width:auto">white</output>
-          <input type="range" id="ed-w" min="0" max="255" value="0">
-          <button onclick="edApply()">Set</button>
-          <button onclick="edClear()">Clear</button></div>
-        <p class="hint" id="ed-say">Click an insert on the plan to edit it.</p>
-      </div>
-      <div id="wz-plan"></div>
+    <!-- Trois etats, UN SEUL visible a la fois. Avant, les quinze controles des
+         trois etaient affiches ensemble : la moitie ne servaient que dans un
+         mode, et rien ne disait lequel on etait en train d'utiliser. -->
+
+    <!-- etat "repos" -->
+    <div id="wz-idle">
+      <p class="hint" id="wz-idle-say">Tap an insert to name it or colour it.</p>
       <div class="modes">
-        <button onclick="wzSkip()">Not on an insert</button>
-        <button onclick="wzGo(wz.at-1)">&#9664; Back</button>
-        <button onclick="wzGo(wz.at+1)">Skip ahead &#9654;</button>
-        <button onclick="if(confirm('Forget every placement?')) wzClear()">Clear all</button>
+        <button id="wz-start" onclick="wzStart()">Map the pixels</button>
+        <button id="pf-gi" onclick="pfToggleGi()">show lighting pads</button>
       </div>
-      <p class="hint" id="wz-warn"></p>
     </div>
+
+    <!-- etat "placement" -->
+    <div id="wz-map" style="display:none">
+      <p class="hint" id="wz-say"></p>
+      <div class="row">
+        <span class="bar"><i id="wz-bar" style="width:0"></i></span>
+        <output id="wz-pos" style="width:96px">&ndash;</output>
+      </div>
+      <div class="modes" id="wz-placebar">
+        <button onclick="wzSkip()">It lights the playfield</button>
+        <button onclick="wzGo(wz.at-1)">&#9664; Back</button>
+        <button onclick="wzGo(wz.at+1)">Skip &#9654;</button>
+        <button onclick="wzFinish()">Stop</button>
+      </div>
+    </div>
+
+    <!-- etat "edition d'un insert" -->
+    <div id="wz-edit" style="display:none">
+      <p class="hint" id="ed-say"></p>
+      <div class="row"><label>Name</label>
+        <input type="text" id="ed-name" maxlength="7" placeholder="from your manual">
+        <button onclick="edApply()">Save</button></div>
+      <div class="row"><label>Colour</label>
+        <input type="color" id="ed-rgb" style="width:64px;height:34px;padding:2px">
+        <input type="range" id="ed-w" min="0" max="255" value="0">
+        <output id="ed-w-o" style="width:auto">white</output>
+        <button onclick="edApply()">Set</button></div>
+      <div class="modes">
+        <button onclick="edClear()">Reset</button>
+        <button id="ed-hide" onclick="edHide()">Hide this pad</button>
+        <button onclick="edDone()">Done</button>
+      </div>
+    </div>
+
+    <div id="wz-plan"></div>
+
+    <div class="row" style="gap:8px;justify-content:flex-end">
+      <button onclick="pfZoomBy(1/1.6)" title="Zoom out">&minus;</button>
+      <button onclick="pfZoomBy(1.6)" title="Zoom in">+</button>
+      <output id="pf-z" style="width:46px;text-align:center">1.0&times;</output>
+      <button onclick="pfFit()">Fit</button>
+    </div>
+    <p class="hint" id="wz-warn"></p>
+
+    <!-- Ce qui sert une fois par an ne doit pas encombrer ce qui sert tous les
+         jours. Replie par defaut. -->
+    <details style="margin-top:10px">
+      <summary class="hint" style="cursor:pointer">Advanced</summary>
+      <div class="row" style="margin-top:8px">
+        <label>Go to pixel</label>
+        <input type="number" id="wz-goto" min="0" style="width:90px">
+        <button onclick="wzGo(+$('wz-goto').value)">Light it</button>
+      </div>
+      <div class="modes">
+        <button onclick="if(confirm('Forget every placement?')) wzClear()">Clear all placements</button>
+      </div>
+    </details>
   </section>
 
   <section>
-    <h2>Wi-Fi &amp; firmware</h2>
-    <div class="grid2">
-      <div><label class="hint">SSID</label><input type="text" id="ssid"></div>
-      <div><label class="hint">Password</label><input type="password" id="pass"></div>
-    </div>
-    <p class="hint" style="margin-top:12px">
-      <button onclick="saveWifi()">Join network &amp; reboot</button>
-      <span id="ota-wrap"><input type="file" id="fw" accept=".bin" style="display:none"
-        onchange="ota(this)"><button onclick="fw.click()">Upload firmware (OTA)</button></span>
+    <h2>Network</h2>
+    <p class="hint">
+      Connected to <b id="nw-ssid">&ndash;</b> &middot; signal <b id="nw-rssi">&ndash;</b>
+      at the wall. Below &minus;75 dBm, expect the page to feel slow and updates to fail.
     </p>
-    <p class="hint" id="msg"></p>
+    <div class="modes">
+      <button onclick="wifiScan()">Scan from the wall</button>
+    </div>
+    <div id="nw-list" class="hint" style="margin-top:8px"></div>
+    <p class="hint">
+      The wall gets its network from the Home app when you pair it &mdash; there is nothing
+      to type here. To move it to another network, use <b>Forget all homes &amp; re-pair</b>
+      in the Siri section and pair it again on the new one.
+    </p>
   </section>
 
-  <footer>Arena Wall-Art LED &middot; <span id="s-fw">–</span> &middot; uptime <span id="s-up">–</span></footer>
+  <!-- ===================== Voice assistants (Matter) ===================== -->
+  <section>
+    <h2>Siri &amp; voice assistants</h2>
+    <p class="hint">
+      The wall joins Apple Home, Google Home or Alexa as a Matter accessory:
+      one master lamp, plus one switch per mode. Rename each switch in your home
+      app — whatever you type there is the phrase the assistant listens for.
+    </p>
+    <p class="hint" style="margin-top:10px">
+      Homes this board belongs to: <b id="m-fab">–</b> <span id="m-hint"></span>
+    </p>
+    <div id="m-pair" style="margin-top:12px;display:flex;gap:18px;align-items:center;flex-wrap:wrap">
+      <!-- Static: the firmware is built with CONFIG_ENABLE_TEST_SETUP_PARAMS,
+           so the payload never changes. Regenerate this image if the passcode,
+           discriminator, VID or PID ever move. -->
+      <img alt="Matter pairing QR" style="width:132px;height:132px;image-rendering:pixelated;
+           background:#fff;padding:6px;border-radius:8px"
+           src="data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAXQAAAF0AQAAAAAbGP/+AAACPklEQVR4nO2ba27sIAyFjdX/zA7u/pfVHcAKXJnnhJkCo6ukQZxPVUTxUYWM5diQGqFP8PyRnAj6Pjywt0Dfhwf2Fuj78MDeAn0fHthboJ/wjzcFItJnnHm0JvhzBO+pl4jTgNFnmKHGdOF6puF5aQD6c/zjS4bJeCPf5sUE//fhzfRfr1MlVswfrIehX9s/Nr22tPixst76B/BI0AD9XP6xb86B5I0J/uzDe+qNqQ1Xqp9DLX0wXbieaXheGoD+hPrHHpJPLHuMFZ1v8xL834d31PtcKZeBFfnWnFNOhJB/Ft7fy/p3qwlHRGK0SOjf0/x//v1ZeFoZgf5v/UPxbLCcFiohhHTGJlPFYb/68GZ6KqFyqHZK5LgcWjGoED+L7S+frKeSWlLPFcvpHEiS55F/1txfPllP9W7rKQWVK7Bnaxjfbf0M/R3uL8Q/RJ+1/zLawjvyWkk/1UbYrz68mZ5ihkl55qnsqVnIhbcY8s+S+8sX3V/4kGe8tuqadkJGMsGSEtFF62Hol/IPSYOr1TIdqyPUPwvuL5+spxoh+dfDm8vlpiwp77Z+hv5e3x+Sjs0/HZv8CUcsja5czzQ8Lw1Af2b9Q3WsAeNrCZRbMPi/Dw/se+glXJ5SbMdi/5Va+zXW/zvcsb0D+o+/X6Vwimi0F3Oh+UodWQD+7MP7nv9Ive2qZ0Eu/yTB3dbP0N/h/MeUCf+IaecwaSWXQNivPryZ3uD/35faL4a+C/fNL0Dfhwf2Fuj78MDeAj11+QFrgWS+WWxpLQAAAABJRU5ErkJggg==">
+      <div>
+        <div class="hint">Manual pairing code</div>
+        <div style="font-size:22px;letter-spacing:2px;font-weight:600">3497-011-2332</div>
+        <div class="hint" style="margin-top:6px">Uncertified test IDs — your phone will warn, that is expected.</div>
+      </div>
+    </div>
+    <p class="hint" style="margin-top:14px">
+      <button onclick="matterForget()" style="border-color:var(--red);color:var(--red)">
+        Forget all homes &amp; re-pair</button>
+    </p>
+    <p class="hint">
+      Use this when a home app says <i>“already added to another home”</i>: the board
+      still holds an old pairing. It erases every home <b>and the Wi-Fi credentials</b>,
+      so this page goes offline until you pair again with the code above.
+    </p>
+  </section>
+
+  <!-- ===================== Firmware ===================== -->
+  <section>
+    <h2>Firmware</h2>
+    <p class="hint">
+      Running <b id="f-build">–</b> · <span id="f-part">–</span>
+    </p>
+    <p class="hint" style="margin-top:10px">
+      The board <b>downloads</b> its update instead of receiving it. A pushed
+      upload freezes the network task while the flash erases, and on the S3 that
+      kills the board a couple of seconds in. Serve the .bin from your computer
+      (<code>python3 -m http.server 8099</code> in its folder) and paste the URL.
+    </p>
+    <p class="hint" style="margin-top:10px">
+      <input type="file" id="fwfile" accept=".bin" style="display:none" onchange="fwUpload(this)">
+      <button onclick="fwfile.click()">Choose the .bin and update</button>
+      <span class="hint">Download it from pinballs.store, then pick it here.</span>
+    </p>
+
+    <div class="grid2" style="margin-top:10px">
+      <div><label class="hint">Firmware URL</label>
+           <input type="text" id="ourl" placeholder="http://192.168.1.20:8099/arena_matter.bin"></div>
+      <div><label class="hint">Filesystem URL (web UI)</label>
+           <input type="text" id="furl" placeholder="http://192.168.1.20:8099/littlefs.bin"></div>
+    </div>
+    <p class="hint" style="margin-top:10px">
+      <button onclick="pull(false)">Update firmware</button>
+      <button onclick="pull(true)">Update web UI</button>
+    </p>
+    <div id="o-prog" style="display:none;margin-top:10px">
+      <div style="height:8px;background:#0003;border-radius:4px;overflow:hidden">
+        <div id="o-bar" style="height:100%;width:0;background:var(--amber)"></div>
+      </div>
+      <p class="hint" id="o-txt" style="margin-top:6px"></p>
+    </div>
+  </section>
+
+  <!-- ===================== Diagnostics ===================== -->
+  <section>
+    <h2>Diagnostics</h2>
+    <p class="hint">
+      Frames that actually reached the LED chain, not frames the firmware
+      thought it drew. <b>sent</b> stuck while the wall is dark means the data
+      line never carried anything. And if <b>renderer</b> says PAUSED, the frame
+      rate and current beside it are frozen leftovers, not live readings.
+    </p>
+    <div class="grid2" style="margin-top:10px">
+      <div class="hint">data pin<br><b id="d-pin">–</b></div>
+      <div class="hint">frames sent<br><b id="d-tx">–</b></div>
+      <div class="hint">RMT init failures<br><b id="d-fail">–</b></div>
+      <div class="hint">blocked frames<br><b id="d-lock">–</b></div>
+      <div class="hint">frames / s<br><b id="d-fps">–</b></div>
+      <div class="hint">free heap<br><b id="d-heap">–</b></div>
+      <div class="hint">renderer<br><b id="d-run">–</b></div>
+    </div>
+  </section>
+
+  <footer>Wall Pinball Playfield &middot; pinballs.store &middot; <span id="s-fw">–</span> &middot; uptime <span id="s-up">–</span></footer>
 </main>
 
 <script>
-const MODES = ['classic','attract','arena','night','rainbow','music','test','off'];
+const MODES = ['attract','classic','arena','rainbow','night','music'];   // 'test' -> Diagnostics, 'off' -> la lampe maitresse
+// Ce que le proprietaire lit. Les clefs restent les identifiants de l'API et de
+// la NVS - les renommer casserait les reglages deja enregistres sur les cartes
+// existantes. "arena" s'appelle "Wave" parce que c'est ce qu'on voit : une vague
+// qui traverse le plateau. Le nom interne, lui, venait du plateau lui-meme.
+const MODE_LABEL = { off:'Off', classic:'All on', attract:'Attract', arena:'Wave',
+                     night:'Firefly', rainbow:'Rainbow', music:'Music', test:'Test' };
+const label = m => MODE_LABEL[m] || m;
 const $ = id => document.getElementById(id);
 let st = {}, holdUntil = 0;
 
@@ -222,10 +387,41 @@ const toast = m => { $('msg').textContent = m; setTimeout(() => $('msg').textCon
 // --- mode buttons ---
 MODES.forEach(m => {
   const b = document.createElement('button');
-  b.textContent = m; b.dataset.m = m; b.onclick = () => setMode(m);
+  b.textContent = label(m); b.dataset.m = m; b.onclick = () => setMode(m);
   $('modes').appendChild(b);
 });
 function setMode(m) { push('mode=' + m); }
+
+// Ce que le proprietaire lit a cote du curseur. L'API et la NVS restent en
+// 0-255 - c'est la resolution du materiel - mais "110" ne veut rien dire pour
+// un humain. Chaque reglage s'affiche donc dans SON unite : un pourcentage,
+// un multiplicateur de vitesse, ou pour les lucioles le nombre reel de points
+// allumes en meme temps, calcule avec la formule exacte du firmware
+// (arenaled.cpp : 1 + density * (FLY_N-1) / 255, division entiere).
+function fmt(k, v) {
+  v = +v;
+  if (k === 'speed') return speedLabel(v);
+  if (k === 'density') {
+    const n = 1 + Math.floor(v * 6 / 255);
+    return n + (n > 1 ? ' at once' : ' at a time');
+  }
+  if (k === 'warm') return v < 96 ? 'warm' : v > 176 ? 'cool' : 'medium';
+  return Math.round(v * 100 / 255) + '%';
+}
+
+// Le bouton d'alimentation rend le DERNIER mode allume, pas un mode arbitraire.
+// Eteindre puis rallumer doit redonner ce qu'on regardait ; revenir de force sur
+// "attract" ferait perdre son reglage a quelqu'un qui vivait en Classic.
+// La carte tient la meme memoire de son cote (s_lastOn) pour le retour du
+// courant - ici c'est la version navigateur, pour le geste immediat.
+let lastOn = 'attract';
+function togglePower() { push('mode=' + (st.mode === 'off' ? lastOn : 'off')); }
+// Une piece murale qui reste noire apres une coupure passe pour cassee : le
+// proprietaire ne va pas rebrancher un telephone pour la rallumer. Par defaut
+// la carte revient donc au dernier mode ALLUME, pas a un "off" qui pouvait
+// dater d'un ordre vocal d'il y a trois jours. Reglable, parce que quelqu'un
+// qui eteint vraiment son mur pour la nuit veut l'inverse.
+function toggleBoot() { push('boot=' + (st.boot ? 0 : 1)); }
 
 // --- sliders: send while dragging, but pause polling so the UI doesn't fight the user ---
 // Speed has a MAGNET at 128: that is x1.00 — the machine's own rate, the one
@@ -233,11 +429,11 @@ function setMode(m) { push('mode=' + m); }
 // you land on rather than one you hunt for, while the whole range stays
 // reachable. Shown as a multiplier, since "128" means nothing to a human.
 const speedLabel = v => (+v === 128) ? 'x1 (orig)' : 'x' + Math.pow(2, (v - 128) / 64).toFixed(2);
-['bright','speed','gi','warm','r','g','b','w'].forEach(k => {
+['bright','speed','gi','density','warm','r','g','b','w'].forEach(k => {
   const el = $(k);
   el.oninput = () => {
     if (k === 'speed' && Math.abs(el.value - 128) < 11 && el.value != 128) el.value = 128;
-    $('o-' + k).value = k === 'speed' ? speedLabel(el.value) : el.value;
+    $('o-' + k).value = fmt(k, el.value);
     holdUntil = Date.now() + 1500;
   };
   el.onchange = () => push(k + '=' + el.value);
@@ -252,7 +448,11 @@ function apply() { push('count=' + $('count').value + '&budget=' + $('budget').v
 
 function render(s) {
   st = s;
-  $('s-mode').textContent  = s.mode;
+  $('s-mode').textContent  = label(s.mode);
+  if (s.mode && s.mode !== 'off') lastOn = s.mode;
+  const pw = $('pwr');
+  if (pw) { pw.classList.toggle('on', s.mode !== 'off');
+            pw.title = s.mode === 'off' ? 'turn the wall on' : 'turn the wall off'; }
   $('s-count').textContent = s.count + '/' + s.max;
   $('s-amps').textContent  = s.amps.toFixed(2) + ' A';
   $('s-fps').textContent   = s.fps;
@@ -269,18 +469,57 @@ function render(s) {
   $('pbar').style.background = pct > 90 ? 'var(--red)' : 'var(--amber)';
   $('o-pow').value = (s.budget / 1000).toFixed(1) + ' A';
 
+  // --- Matter ---
+  const fab = s.fabrics;
+  $('m-fab').textContent = (fab === undefined) ? '–' : fab;
+  $('m-hint').textContent =
+      fab === undefined ? '' :
+      fab === 0 ? '— not paired yet, scan the code below' :
+      fab === 1 ? '— paired' :
+                  '— paired more than once; a home app will refuse to add it again';
+  $('m-hint').style.color = fab > 1 ? 'var(--amber)' : '';
+
+  // --- firmware ---
+  $('f-build').textContent = s.build ? s.build.slice(0, 8) : 'v' + s.fw;
+  $('f-part').textContent  = 'v' + s.fw + ' · ' + (s.fsu / 1024 | 0) + ' kB of web UI';
+  otaProgress(s);
+
+  // --- diagnostics ---
+  $('d-pin').textContent  = s.pin  !== undefined ? 'GPIO' + s.pin : '–';
+  $('d-tx').textContent   = s.rmtframes !== undefined ? s.rmtframes.toLocaleString() : '–';
+  $('d-fail').textContent = s.rmtfail  !== undefined ? s.rmtfail  : '–';
+  $('d-lock').textContent = s.lockmiss !== undefined ? s.lockmiss : '–';
+  $('d-fps').textContent  = s.fps;
+  $('d-heap').textContent = (s.heap / 1024 | 0) + ' kB';
+  // Frozen, not broken: while a phone holds the BLE link the render loop returns
+  // early, so fps / mA / frames-sent all keep their last value and look healthy.
+  // Say so plainly instead of letting stale numbers pass for live ones.
+  $('d-run').textContent = s.paused === undefined ? '–' : (s.paused ? 'PAUSED (pairing)' : 'running');
+  $('d-run').style.color = s.paused ? 'var(--amber)' : '';
+  // A single startup failure is normal and self-heals; a climbing count is not.
+  $('d-fail').style.color = s.rmtfail > 1 ? 'var(--red)' : '';
+  $('d-lock').style.color = s.lockmiss > 0 ? 'var(--red)' : '';
+
   if (Date.now() < holdUntil) return;            // don't stomp a slider being dragged
   set('bright', s.bright); set('speed', s.speed); set('gi', s.gi); set('warm', s.warm);
+  if (s.density !== undefined) set('density', s.density);
+  showRelevant(s);
+  if ($('nw-ssid')) $('nw-ssid').textContent = s.net === 'Matter' ? (s.ip || '–') : (s.net || '–');
   $('g-atr').textContent = s.atr ? s.atr + ' s of ROM attract' : 'the generic attract (no capture loaded)';
   $('g-ins').textContent = s.ins;
-  $('incbtn').textContent = s.inc ? 'incandescent: ON' : 'incandescent: off';
+  const bb = $('bootbtn');
+  if (bb && s.boot !== undefined) {
+    bb.textContent = s.boot ? 'power cut: comes back on' : 'power cut: stays off';
+    bb.classList.toggle('on', !!s.boot);
+  }
+  $('incbtn').textContent = s.inc ? 'bulb simulation: on' : 'bulb simulation: off';
   $('incbtn').classList.toggle('on', !!s.inc);
   set('r', s.r); set('g', s.g); set('b', s.b); set('w', s.w);
   if (document.activeElement !== $('count'))  $('count').value  = s.count;
   if (document.activeElement !== $('budget')) $('budget').value = s.budget;
   if (document.activeElement !== $('order'))  $('order').value  = s.order;
 }
-function set(k, v) { $(k).value = v; $('o-' + k).value = k === 'speed' ? speedLabel(v) : v; }
+function set(k, v) { $(k).value = v; $('o-' + k).value = fmt(k, v); }
 function fmtUp(s) {
   const d = Math.floor(s / 86400), h = Math.floor(s % 86400 / 3600), m = Math.floor(s % 3600 / 60);
   return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
@@ -309,7 +548,14 @@ function gUp(target) {
 // geometric effects need arrive for free. Every click is saved on the board,
 // because placing ninety-nine inserts is a long session under a playfield and a
 // power cut at pixel 80 must not cost the other 79.
-let PF = [], LEDMAP = {}, wz = { at: 0 };
+// wz.live : le plan n'ecrit QUE si un pixel est reellement allume. Sans ce
+// drapeau, rendre #wz-body visible au chargement (fait le 2026-08-02 pour que
+// l'edition n'oblige plus a lancer la marche) a ouvert le circuit d'ecriture
+// sans le declencheur : wz.at valant 0 et wzMode valant 'place' par defaut, le
+// moindre appui sur une pastille - ne serait-ce que pour lire son nom - envoyait
+// /api/assign?led=0 et detruisait en silence le placement du pixel 0, sans
+// qu'aucun pixel n'ait clignote. Seul wzGo() arme, seul wzSpotOff() desarme.
+let PF = [], LEDMAP = {}, wz = { at: 0, live: false };
 
 function pfLoad() {
   return Promise.all([
@@ -320,24 +566,46 @@ function pfLoad() {
     })
   ]).then(wzDraw).catch(() => {});
 }
-function wzStart() { $('wz-body').style.display = ''; wzSetMode('place'); pfLoad().then(() => wzGo(wz.at)); }
+// Un seul etat visible a la fois. 'idle' = on regarde le plan et on touche un
+// insert pour le modifier ; 'map' = la carte allume un pixel et on dit ou il est ;
+// 'edit' = on modifie l'insert qu'on vient de toucher. Avant, les trois etaient
+// affiches ensemble et rien ne disait lequel etait actif.
+function wzUi(st) {
+  wzState = st || wzState;
+  ['idle','map','edit'].forEach(k => {
+    const e = $('wz-' + k); if (e) e.style.display = (k === wzState) ? '' : 'none';
+  });
+  wzMode = (wzState === 'edit') ? 'edit' : 'place';
+}
+let wzState = 'idle';
+
+function wzStart() { wzUi('map'); pfLoad().then(() => wzGo(wz.at)); }
+function edDone()  { edSel = -1; wzSpotOff(); wzUi('idle'); wzDraw(); }
+
+// Eteindre le projecteur n'est PAS quitter. Les deux etaient la meme fonction :
+// passer en mode edition appelait wzStop() -> wzFinish(), qui masquait
+// #wz-body - le panneau se refermait sur lui-meme et ressemblait a un plantage.
+// Et comme seul wzStart() le reaffichait, il fallait lancer la marche pour
+// atteindre le plan. Signale par l'utilisateur le 2026-08-02.
+function wzSpotOff() { api('/api/identify?clear=1'); wz.live = false; wzDraw(); }
 // Leaving the wizard has to put the wall back the way it was: the spotlight is
 // an overlay that outlives the panel being closed, so a wizard you merely
 // navigate away from leaves one pixel blinking white for ten minutes.
 function wzFinish() {
-  api('/api/identify?clear=1');
-  $('wz-body').style.display = 'none';
+  wzUi('idle');
+  wzSpotOff();
   const placed = Object.keys(LEDMAP).length, total = st.count || 0;
   toast(placed + ' of ' + total + ' pixels placed' +
         (placed < total ? ' - ' + (total - placed) + ' still unassigned' : ' - chain complete'));
 }
-function wzStop() { wzFinish(); }
+function wzStop() { wzSpotOff(); }   // surtout pas wzFinish : voir plus haut
 
 function wzGo(n) {
   const last = Math.max(0, (st.count || 1) - 1);
   wz.at = Math.max(0, Math.min(last, n));
   // 10 min outlasts any single step, and every step re-arms it anyway.
   api('/api/identify?led=' + wz.at + '&ms=600000');
+  wz.live = true;                 // un pixel clignote vraiment : le plan peut ecrire
   wzDraw();
 }
 function wzAssign(ins) {
@@ -350,6 +618,15 @@ function wzSkip() {
   const led = wz.at;
   api('/api/assign?led=' + led + '&ins=none')
     .then(() => { delete LEDMAP[led]; wzGo(led + 1); });
+}
+// The lighting pads are hidden so the plan reads as the game reads. Turn them
+// back on when a pixel really does sit on one - a GI pad that already carries a
+// pixel is drawn either way, so nothing can be lost behind the filter.
+function pfToggleGi() {
+  pfShowGi = !pfShowGi;
+  $('pf-gi').textContent = pfShowGi ? 'hide lighting pads' : 'show lighting pads';
+  $('pf-gi').classList.toggle('on', pfShowGi);
+  wzDraw();
 }
 function wzClear() {
   api('/api/ledmap/reset').then(() => { LEDMAP = {}; wzGo(0); });
@@ -371,14 +648,21 @@ function pfOwner() {
 // property of the insert, not of whichever pixel happens to sit behind it.
 let wzMode = 'place', edSel = -1;
 
-function wzSetMode(m) {
-  wzMode = m;
-  $('wz-m-place').classList.toggle('on', m === 'place');
-  $('wz-m-edit').classList.toggle('on', m === 'edit');
-  $('wz-edit').style.display = m === 'edit' ? '' : 'none';
-  if (m === 'place') wzGo(wz.at); else { wzStop(); wzDraw(); }
+// A pan ends over an insert and the browser reports it as a click on that insert,
+// which would assign the pixel to whatever the finger happened to stop on. Eight
+// pixels of travel is more than a tap wobbles and less than a pan moves.
+function wzClick(i) {
+  if (pfMoved > 8) return;
+  // Au repos, toucher un insert ouvre son editeur : c'est le geste naturel, et
+  // ca supprime le bouton "Edit inserts" qui obligeait a choisir un mode avant
+  // de savoir ce qu'on voulait faire.
+  if (wzState === 'idle') { edSelect(i); wzUi('edit'); wzDraw(); return; }
+  if (wzState === 'edit') { edSelect(i); return; }
+  // Rien n'est allume : un appui ne peut pas designer un pixel. On refuse plutot
+  // que d'ecrire une affectation que le proprietaire n'a pas voulue.
+  if (!wz.live) { toast('press "Start walking" first - no pixel is lit'); return; }
+  wzAssign(i);
 }
-function wzClick(i) { if (wzMode === 'place') wzAssign(i); else edSelect(i); }
 
 function edSelect(i) {
   edSel = i;
@@ -387,6 +671,8 @@ function edSelect(i) {
   const c = p.c || [0, 0, 0, 0];
   $('ed-rgb').value = '#' + [c[0], c[1], c[2]].map(v => (+v).toString(16).padStart(2, '0')).join('');
   $('ed-w').value = c[3] || 0;
+  const hb = $('ed-hide');
+  if (hb) { hb.textContent = p.h ? 'Show on the plan' : 'Hide this pad'; hb.classList.toggle('on', !!p.h); }
   $('ed-say').innerHTML = 'Editing <b>' + (p.n || '?') + '</b>' +
     (p.f ? ' &mdash; <b>' + p.f + '</b> (manual E-25440)' : '') +
     (p.d && p.d !== p.n ? ' (shipped: ' + p.d + ')' : '') +
@@ -405,13 +691,145 @@ function edApply() {
             '&b=' + parseInt(h.slice(4, 6), 16) + '&w=' + $('ed-w').value;
   fetch(q).then(r => r.json()).then(j => { PF = j.inserts || []; wzDraw(); toast('saved'); });
 }
+// Masquer une pastille. C'est un reglage de la carte, pas du navigateur : le
+// meme plan doit s'afficher pareil depuis n'importe quel telephone de la maison.
+// Une pastille masquee qui porte un pixel reste dessinee - on ne peut donc pas
+// perdre de vue ce qu'on a mappe.
+function edHide() {
+  if (edSel < 0) { toast('click an insert first'); return; }
+  const now = PF[edSel] && PF[edSel].h ? 1 : 0;
+  fetch('/api/insert?ins=' + edSel + '&hide=' + (now ? 0 : 1))
+    .then(r => r.json())
+    .then(j => { PF = j.inserts || []; edSelect(edSel); wzDraw();
+                 toast(now ? 'back on the plan' : 'hidden from the plan'); })
+    .catch(() => toast('failed'));
+}
 function edClear() {
   if (edSel < 0) return;
   fetch('/api/insert?ins=' + edSel + '&clear=1').then(r => r.json())
     .then(j => { PF = j.inserts || []; edSelect(edSel); toast('cleared'); });
 }
 
-const PF_KIND = { i: '#ff9b21', l: '#ffc046', f: '#e0483a' };
+// 'g' = general illumination: a pad the ROM never drives. Kept in the plan (a
+// pixel may well sit on one) but hidden by default - eighteen of Arena's
+// seventy-five pads are GI, and drawn together they bury the inserts that
+// actually do something. Classified from evidence, not taste: never lit in the
+// 120 s ROM capture AND no function in the service manual. L3, L4, L17, L49-L51
+// fail one of those two tests and stay on the plan.
+const PF_KIND = { i: '#ff9b21', l: '#ffc046', f: '#e0483a', g: '#4d4237' };
+let pfShowGi = false;
+
+// --- the plan canvas: zoom and pan ---------------------------------------
+// The wizard is used standing at the wall with a phone in one hand, and that is
+// exactly where the plan was worst. The whole board is 1060 x 2134 units and on a
+// 375 px phone it lands in 315 CSS pixels, so an insert drawn at r=30 was an 18 px
+// target - well under the 44 px a finger can reliably hit - and the bottom rank
+// sits 43 units apart, 13 px between centres.
+//
+// Everything below moves one attribute: the SVG's viewBox. Narrowing it magnifies
+// (the SVG keeps its CSS width), sliding it pans, and because no geometry is
+// touched every insert keeps its coordinates, its click handler and its label.
+// One helper, so a future editor gets the same canvas for free.
+const PF_BOX = { x: -30, y: -30, w: 1060, h: 2134 };   // the whole board
+// The ceiling is set by the tightest pair, not by taste: L25 and L26a are 18
+// units apart, so their targets are 18 units wide and only clear 44 px once the
+// window is under about 127 units - 8.4x - on the 313 px the SVG actually gets on
+// a 375 px phone. 12x is that with room for a narrower phone, and costs nothing:
+// it is a clamp, not a default, and Fit is one tap away.
+const PF_ZMAX = 12;
+let pfV = { x: PF_BOX.x, y: PF_BOX.y, w: PF_BOX.w }, pfMoved = 0;
+
+function pfVh(w) { return w * PF_BOX.h / PF_BOX.w; }   // aspect is never changed
+function pfClamp() {
+  pfV.w = Math.max(PF_BOX.w / PF_ZMAX, Math.min(PF_BOX.w, pfV.w));
+  pfV.x = Math.max(PF_BOX.x, Math.min(PF_BOX.x + PF_BOX.w - pfV.w, pfV.x));
+  pfV.y = Math.max(PF_BOX.y, Math.min(PF_BOX.y + PF_BOX.h - pfVh(pfV.w), pfV.y));
+}
+function pfViewBox() { return pfV.x + ' ' + pfV.y + ' ' + pfV.w + ' ' + pfVh(pfV.w); }
+// f > 1 magnifies. ax/ay name the point that must hold still, as a fraction of
+// the window: the buttons pass the centre, a pinch passes the point between the
+// two fingers, which is the one thing that makes pinching feel attached to the
+// board rather than to the screen.
+function pfZoomAt(f, ax, ay) {
+  const w0 = pfV.w, h0 = pfVh(w0);
+  pfV.w = w0 / f;
+  pfClamp();
+  pfV.x += (w0 - pfV.w) * ax;
+  pfV.y += (h0 - pfVh(pfV.w)) * ay;
+  pfClamp();
+  pfApply();
+}
+function pfZoomBy(f) { pfZoomAt(f, .5, .5); }
+function pfFit() { pfV = { x: PF_BOX.x, y: PF_BOX.y, w: PF_BOX.w }; pfApply(); }
+
+// Zooming must not redraw. wzDraw() rebuilds the entire SVG, which mid-gesture
+// would throw away the element holding the pointer capture; only the viewBox moves.
+function pfApply() {
+  const svg = $('wz-plan').firstElementChild;
+  if (svg) svg.setAttribute('viewBox', pfViewBox());
+  const z = PF_BOX.w / pfV.w;
+  $('pf-z').textContent = z.toFixed(1) + '×';
+  // The drag owns the finger only once there is somewhere to pan to. At 1x the
+  // plan is twice as tall as the phone, and taking touch-action there would mean
+  // the page could no longer be scrolled by dragging on the biggest thing on it.
+  $('wz-plan').style.touchAction = z > 1.01 ? 'none' : '';
+}
+
+// The gesture starts on the container - wzDraw() replaces the SVG on every step
+// of the wizard, so listeners on the SVG itself would go with it - but it is
+// finished on the window, and NOT with setPointerCapture. Capturing the pointer
+// on the container is the obvious way to keep a drag alive past its edge, and it
+// silently breaks the wizard: Chrome then retargets the following click to the
+// capturing element, so every tap on the plan arrives as a click on the div and
+// no insert is ever selected. Measured, not guessed - it made the plan
+// unclickable at exactly the zoom levels this was written to enable.
+function pfBind() {
+  const el = $('wz-plan'), down = new Map();
+  let sep = 0;
+  const stop = e => { down.delete(e.pointerId); if (down.size < 2) sep = 0; };
+  el.addEventListener('pointerdown', e => {
+    down.set(e.pointerId, { x: e.clientX, y: e.clientY });
+    if (down.size === 1) pfMoved = 0;
+  });
+  addEventListener('pointermove', e => {
+    const p = down.get(e.pointerId), svg = $('wz-plan').firstElementChild;
+    if (!p || !svg) return;
+    const r = svg.getBoundingClientRect();
+    const dx = e.clientX - p.x, dy = e.clientY - p.y;
+    p.x = e.clientX; p.y = e.clientY;
+    pfMoved += Math.abs(dx) + Math.abs(dy);
+    if (down.size > 1) {
+      const a = [...down.values()], d = Math.hypot(a[0].x - a[1].x, a[0].y - a[1].y);
+      if (sep) pfZoomAt(d / sep, ((a[0].x + a[1].x) / 2 - r.left) / r.width,
+                                 ((a[0].y + a[1].y) / 2 - r.top) / r.height);
+      sep = d;
+    } else if (pfV.w < PF_BOX.w) {
+      const u = pfV.w / r.width;                        // viewBox units per CSS pixel
+      pfV.x -= dx * u; pfV.y -= dy * u;
+      pfClamp(); pfApply();
+    }
+  });
+  addEventListener('pointerup', stop);
+  addEventListener('pointercancel', stop);
+}
+
+// The plan is drawn on a phone at about a third of a pixel per unit, so a circle
+// at r=30 is 18 px across and forty of the seventy-five inserts sit closer than
+// 60 units to a neighbour - their circles overlap, and the one painted second
+// takes every click. L25 is 18 units from L26a: it was buried whole and could not
+// be selected at all. Half the distance to the nearest DRAWN neighbour, capped at
+// the old 30, cannot overlap by construction (both radii are at most d/2), so
+// every insert on the plan keeps a target of its own. Nearest drawn, not nearest
+// in the file: a GI pad hidden by the filter must not shrink the insert beside it.
+function pfRadii(vis) {
+  vis.forEach((v, k) => {
+    let d = 60;
+    vis.forEach((o, m) => { if (m !== k) d = Math.min(d, Math.hypot(v.cx - o.cx, v.cy - o.cy)); });
+    // Rounded DOWN to a tenth, not to nearest: at d/2 exactly, rounding two radii
+    // up puts a tenth of a unit of overlap back into the tightest pairs.
+    v.r = Math.floor(Math.max(8, Math.min(30, d / 2)) * 10) / 10;
+  });
+}
 
 function wzDraw() {
   const total = st.count || 0;
@@ -423,14 +841,26 @@ function wzDraw() {
 
   const owner = pfOwner(), placed = Object.keys(LEDMAP).length;
   const W = 1000, H = 2074;              // 960 x 1991 table units, normalised
-  let s = '<svg viewBox="-30 -30 ' + (W + 60) + ' ' + (H + 60) +
+  let s = '<svg viewBox="' + pfViewBox() +
           '" style="width:100%;max-width:430px;display:block;margin:8px auto">';
   s += '<rect x="0" y="0" width="' + W + '" height="' + H +
        '" rx="64" fill="#141009" stroke="#2c241d" stroke-width="4"/>';
   s += '<text x="' + (W / 2) + '" y="-6" fill="#5b4c3c" font-size="38" text-anchor="middle">back panel</text>';
   s += '<text x="' + (W / 2) + '" y="' + (H + 26) + '" fill="#5b4c3c" font-size="38" text-anchor="middle">flippers</text>';
+  // Two passes: what is on the plan has to be known in full before any circle can
+  // be sized, because a circle's radius is set by its nearest visible neighbour.
+  const vis = [];
   PF.forEach((p, i) => {
-    const cx = (p.x * W).toFixed(1), cy = (p.y * H).toFixed(1);
+    // Deux raisons d'etre masque : classe eclairage d'apres la ROM, ou range a la
+    // main par le proprietaire. Dans les deux cas, une pastille qui porte un
+    // pixel reste dessinee - le filtre ne peut rien cacher de ce qui est mappe.
+    if ((p.k === 'g' || p.h) && !pfShowGi && owner[i] === undefined) return;
+    vis.push({ p: p, i: i, cx: p.x * W, cy: p.y * H });
+  });
+  pfRadii(vis);
+  vis.forEach(v => {
+    const p = v.p, i = v.i, r = v.r;
+    const cx = v.cx.toFixed(1), cy = v.cy.toFixed(1);
     const own = owner[i], taken = own !== undefined;
     const col = PF_KIND[p.k] || '#ff9b21';
     // The label is ALWAYS the insert's own name. It used to switch to the LED
@@ -440,30 +870,50 @@ function wzDraw() {
     // ring, not in the label.
     const pc = p.c ? 'rgb(' + Math.min(255, p.c[0] + p.c[3]) + ',' + Math.min(255, p.c[1] + p.c[3]) +
                      ',' + Math.min(255, p.c[2] + p.c[3]) + ')' : null;
+    // Ring and label follow the radius, or a shrunken insert would be all stroke
+    // and a label wider than the circle it names. Both stay legible under zoom -
+    // the SVG magnifies them with everything else.
+    const sw = (i === edSel ? 7 : (taken ? 5 : 3)) * Math.max(.5, r / 30);
     s += '<g onclick="wzClick(' + i + ')" style="cursor:pointer">' +
          '<title>' + p.n + (p.f ? ' - ' + p.f : '') + (taken ? ' - pixel ' + own : ' - free') + '</title>' +
-         '<circle cx="' + cx + '" cy="' + cy + '" r="30" fill="' + (pc || (taken ? col : '#241c16')) +
-         '" stroke="' + (i === edSel ? '#7fb3ff' : (taken ? '#efe6da' : col)) + '" stroke-width="' + (i === edSel ? 7 : (taken ? 5 : 3)) + '"/>' +
-         '<text x="' + cx + '" y="' + cy + '" font-size="26" font-weight="700" text-anchor="middle" ' +
+         '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + (pc || (taken ? col : '#241c16')) +
+         '" stroke="' + (i === edSel ? '#7fb3ff' : (taken ? '#efe6da' : col)) + '" stroke-width="' + sw.toFixed(1) + '"/>' +
+         '<text x="' + cx + '" y="' + cy + '" font-size="' + (r * .87).toFixed(1) + '" font-weight="700" text-anchor="middle" ' +
          'dominant-baseline="central" fill="' + (taken ? '#0d0b09' : '#9a8a78') + '">' +
          p.n.replace(/^L/, '') + '</text></g>';
   });
   s += '</svg>';
   $('wz-plan').innerHTML = s;
+  pfApply();          // the SVG is new; give it back the zoom the user was on
 
   const here = owner[LEDMAP[wz.at]] !== undefined ? null : null;
   const mine = LEDMAP[wz.at];
   $('wz-goto').max = Math.max(0, total - 1);
-  $('wz-say').innerHTML = total
+  $('wz-say').innerHTML = !wz.live
+    ? 'Press <b>Map the pixels</b> to light one.'
+    : total
     ? 'Pixel <b>' + wz.at + '</b> is blinking on the playfield &mdash; the <b>' + (wz.at + 1) +
       'th</b> of ' + total + ' (they are numbered from 0). Click ' +
       'the insert it sits under. Filled dots are already placed; the label is always the ' +
-      '<b>insert</b>, and the tooltip says which pixel is on it.' +
+      '<b>insert</b>, and the tooltip says which pixel is on it. ' +
+      'If it lights the playfield rather than an insert, press ' +
+      '<b>Lighting, not an insert</b>. Where the inserts crowd together, ' +
+      '<b>+</b> or a pinch magnifies the plan and a drag moves it around.' +
       (mine !== undefined ? ' This one currently holds <b>' + (PF[mine] ? PF[mine].n : '?') + '</b>.' : '') +
       (wz.at >= total - 1 ? ' <b>Last pixel of the chain</b> &mdash; clicking still assigns, it just has nowhere to advance to.' : '')
     : 'Set the LED count first.';
-  $('wz-warn').textContent = PF.length
-    ? placed + ' of ' + total + ' pixels placed, on ' + PF.length + ' known inserts.'
+  // A pixel on no insert is not a mistake: the firmware renders it as general
+  // illumination (arenaled.cpp - "if (lamp < 0) buf[i] = giC"), so it follows the
+  // GI slider instead of a game lamp. That is how you light the playfield rather
+  // than an insert, and it deserves to be counted out loud rather than looking
+  // like unfinished mapping.
+  const gi = Math.max(0, total - placed);
+  const giPads = PF.filter(x => x.k === 'g' || x.h).length;
+  $('wz-warn').innerHTML = PF.length
+    ? placed + ' of ' + total + ' pixels on inserts' +
+      (gi ? ', <b>' + gi + '</b> as lighting (they follow the GI slider)' : '') +
+      '. ' + (PF.length - giPads) + ' inserts on the plan' +
+      (giPads ? ' + ' + giPads + ' lighting pads hidden' : '') + '.'
     : 'The board has no /arena_pf.json - re-upload the filesystem.';
   $('wz-warn').className = PF.length ? 'hint' : 'hint warn';
 }
@@ -477,19 +927,148 @@ function saveWifi() {
     .then(() => toast('rebooting — reconnect to your network, then http://arena.local/'))
     .catch(() => toast('failed'));
 }
-function ota(inp) {
+// --- updates: the board pulls, we never push ------------------------------
+// A pushed POST blocks the network task while the flash erases; on the S3 that
+// is fatal a couple of seconds in. Handing over a URL costs one text field and
+// removes the failure mode entirely.
+function pull(fs) {
+  const url = ($(fs ? 'furl' : 'ourl').value || '').trim();
+  if (!url) return toast('paste the URL your computer serves the file at');
+  if (!/^http:\/\//.test(url)) return toast('must start with http:// (https is not supported)');
+  if (!confirm((fs ? 'Replace the web UI' : 'Replace the firmware') + ' from\n' + url + ' ?')) return;
+  api('/api/otapull?url=' + encodeURIComponent(url) + (fs ? '&target=fs' : ''))
+    .then(() => { $('o-prog').style.display = ''; toast('downloading…'); })
+    .catch(() => toast('the board refused the request'));
+}
+// Envoi du firmware par morceaux, acquittes un par un.
+//
+// Un seul POST d'1,6 Mo tue la carte : esp_ota_begin() efface la partition en
+// bloquant plusieurs secondes pendant que le navigateur continue d'emettre, et
+// sa pile reseau manque de tampons. Mesure du 2026-08-02 : 250 ko puis chute.
+// Ici "begin" est une requete a lui seul - le navigateur ATTEND sa reponse,
+// donc rien n'est en vol pendant l'effacement - puis chaque morceau part
+// seulement quand le precedent est ecrit. Le debit est plafonne par la carte.
+const FW_CHUNK = 32 * 1024;
+
+async function fwUpload(inp) {
   const f = inp.files[0];
-  if (!f || !confirm('Flash ' + f.name + ' (' + (f.size / 1024 | 0) + ' kB)?')) return;
-  const fd = new FormData();
-  fd.append('f', f);
-  toast('uploading…');
-  fetch('/update', { method: 'POST', body: fd })
-    .then(r => r.text()).then(t => toast(t + ' — reload in ~10 s'))
-    .catch(() => toast('OTA failed'));
+  inp.value = '';
+  if (!f) return;
+  if (f.size < 65536) return toast('that file is too small to be a firmware');
+  if (!confirm('Update the wall with ' + f.name + ' (' + (f.size / 1024 | 0) + ' kB)?\n\n' +
+               'It keeps running while this uploads, and reboots at the end.')) return;
+
+  $('o-prog').style.display = '';
+  const bar = $('o-bar'), txt = $('o-txt');
+  const fail = m => { bar.style.background = 'var(--red)'; txt.textContent = m;
+                      fetch('/api/fw?abort=1', { method: 'POST' }).catch(() => {}); };
+  try {
+    txt.textContent = 'preparing the board (erasing)...';
+    let r = await fetch('/api/fw?begin=' + f.size, { method: 'POST' });
+    if (!r.ok) return fail(await r.text());
+
+    for (let off = 0; off < f.size; off += FW_CHUNK) {
+      const part = f.slice(off, Math.min(off + FW_CHUNK, f.size));
+      r = await fetch('/api/fw', { method: 'POST', body: part });
+      if (!r.ok) return fail('at ' + (off / 1024 | 0) + ' kB: ' + await r.text());
+      const pc = Math.round(100 * Math.min(off + FW_CHUNK, f.size) / f.size);
+      bar.style.width = pc + '%';
+      txt.textContent = pc + '% - ' + (Math.min(off + FW_CHUNK, f.size) / 1024 | 0) +
+                        ' / ' + (f.size / 1024 | 0) + ' kB';
+    }
+
+    txt.textContent = 'checking the image...';
+    r = await fetch('/api/fw?end=1', { method: 'POST' });
+    if (!r.ok) return fail(await r.text());
+    bar.style.width = '100%';
+    txt.textContent = 'done - the wall is rebooting, reload this page in ~15 s';
+  } catch (e) {
+    fail('connection lost: ' + e);
+  }
+}
+
+// Ne montrer que ce qui agit VRAIMENT dans le mode courant.
+// Verifie dans arenaled.cpp, pas suppose : s_gi n'est lu que par fxRomAttract,
+// s_density que par fxNight, s_warm que par filament() - donc seulement quand
+// la simulation d'ampoule est active - et s_color par tout sauf rainbow et test.
+// Le proprietaire tournait des curseurs sans effet et croyait le mur casse.
+const APPLIES = {
+  bright : null,                                            // partout
+  speed  : ['attract','arena','rainbow','night','music'],   // pas classic : il est fixe
+  gi     : ['attract'],                                     // les ampoules de fond de la ROM
+  density: ['night'],
+  warm   : ['classic','attract','night'],                   // + simulation d'ampoule active
+  r      : ['classic','attract','arena','night'],
+  g      : ['classic','attract','arena','night'],
+  b      : ['classic','attract','arena','night'],
+  w      : ['classic','attract','arena','night'],
+  incbtn : ['classic','attract','night'],
+};
+function applies(k, s) {
+  const m = APPLIES[k];
+  if (m && m.indexOf(s.mode) < 0) return false;
+  if (k === 'warm' && !s.inc) return false;   // Bulb tone ne fait rien sans la simulation
+  return true;
+}
+function showRelevant(s) {
+  Object.keys(APPLIES).forEach(k => {
+    const el = $(k);
+    const row = el && el.closest ? el.closest('.row') : null;
+    if (row) row.style.display = applies(k, s) ? '' : 'none';
+  });
+  // Le bloc couleur entier disparait quand aucune de ses composantes n'agit.
+  const cs = $('r') && $('r').closest ? $('r').closest('section') : null;
+  if (cs) cs.style.display = applies('r', s) ? '' : 'none';
+}
+
+// Balayage lance par la carte, pas par le telephone : ce qui compte est ce que
+// le mur recoit LA OU IL EST ACCROCHE, souvent derriere une plaque de bois et a
+// l'autre bout de la piece. Un telephone tenu a la main ne mesure pas ca.
+function bars(r) { return r > -55 ? '••••' : r > -65 ? '•••·' : r > -75 ? '••··' : '•···'; }
+function wifiScan() {
+  $('nw-list').innerHTML = 'scanning… (the wall pauses briefly)';
+  api('/api/wifiscan')
+    .then(() => new Promise(r => setTimeout(r, 5000)))
+    .then(() => fetch('/api/wifiscan?results=1')).then(r => r.json())
+    .then(d => {
+      if ($('nw-rssi')) $('nw-rssi').textContent = d.rssi + ' dBm';
+      if ($('nw-ssid') && d.ssid) $('nw-ssid').textContent = d.ssid;
+      if (!d.nets || !d.nets.length) { $('nw-list').textContent = 'nothing found'; return; }
+      d.nets.sort((a, b) => b.r - a.r);
+      $('nw-list').innerHTML = d.nets.map(n =>
+        '<div style="display:flex;gap:10px;padding:2px 0">' +
+        '<span style="width:52px;letter-spacing:2px">' + bars(n.r) + '</span>' +
+        '<b style="flex:1">' + (n.s || '(hidden)') + '</b>' +
+        '<span>' + n.r + ' dBm</span>' +
+        '<span style="width:38px;text-align:right">ch ' + n.c + '</span></div>').join('');
+    })
+    .catch(() => $('nw-list').textContent = 'scan failed');
+}
+
+function otaProgress(s) {
+  if (!s.otast || s.otast === 'idle') return;
+  $('o-prog').style.display = '';
+  const pc = s.otatot ? Math.round(100 * s.otadone / s.otatot) : 0;
+  $('o-bar').style.width = pc + '%';
+  $('o-bar').style.background = s.otast.indexOf('echec') === 0 ? 'var(--red)' : 'var(--amber)';
+  $('o-txt').textContent = s.otast.indexOf('echec') === 0
+      ? 'failed: ' + s.otast.slice(7)
+      : pc + '% — ' + (s.otadone / 1024 | 0) + ' / ' + (s.otatot / 1024 | 0) + ' kB';
+}
+
+// --- Matter: leave every home ---------------------------------------------
+function matterForget() {
+  if (!confirm('Erase every paired home AND the Wi-Fi credentials?\n\n' +
+               'The wall leaves the network and this page stops working until you\n' +
+               'pair it again from your phone with the code shown above.')) return;
+  if (!confirm('Last check — you will need your phone nearby to pair again.')) return;
+  api('/api/matter/forget?confirm=oui')
+    .then(() => toast('erased — the board is rebooting into pairing mode'))
+    .catch(() => toast('erased — the board is rebooting into pairing mode'));
 }
 
 const poll = () => fetch('/api/state').then(r => r.json()).then(render).catch(() => {});
-poll(); wzDraw();
+poll(); pfBind(); pfLoad().then(wzDraw).catch(() => wzDraw());
 setInterval(poll, 1500);
 </script>
 </body>

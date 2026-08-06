@@ -42,6 +42,7 @@ static String stateJson() {
   j += ",\"bright\":" + String(arenaled::brightness());
   j += ",\"speed\":"  + String(arenaled::speed());
   j += ",\"gi\":"     + String(arenaled::gi());
+  j += ",\"density\":" + String(arenaled::density());
   j += ",\"warm\":"   + String(arenaled::warm());
   j += ",\"inc\":"    + String(arenaled::incandescent() ? 1 : 0);
   // What the wall is running: seconds of ROM attract (0 = generic fallback)
@@ -138,6 +139,7 @@ void begin() {
     if (r->hasParam("bright")) arenaled::setBrightness(param8(r, "bright", arenaled::brightness()));
     if (r->hasParam("speed"))  arenaled::setSpeed(param8(r, "speed", arenaled::speed()));
     if (r->hasParam("gi"))     arenaled::setGi(param8(r, "gi", arenaled::gi()));
+    if (r->hasParam("density")) arenaled::setDensity(param8(r, "density", arenaled::density()));
     if (r->hasParam("warm"))   arenaled::setWarm(param8(r, "warm", arenaled::warm()));
     if (r->hasParam("inc"))    arenaled::setIncandescent(r->getParam("inc")->value().toInt() != 0);
     if (r->hasParam("r") || r->hasParam("g") || r->hasParam("b") || r->hasParam("w")) {

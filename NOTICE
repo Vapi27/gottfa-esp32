@@ -1,0 +1,21 @@
+GottFA80_PLuS ESP32 companion
+Copyright (C) 2026 Valere Pilpil / Pstore
+
+This program is free software: you can redistribute it and/or modify it under
+the terms of the GNU General Public License version 3, as published by the Free
+Software Foundation. See LICENSE.
+
+DERIVATION
+This work is a companion to, and derives from, GottFA80 by Ralf Zerres
+("bontango") — https://github.com/bontango/GottFA80 — which is GPL-3. The FPGA
+side lives in a separate tree; this repository holds the ESP32-S3 firmware and
+its web UI.
+
+WHAT IS NOT OURS
+- Gottlieb, System 80/80A/80B and the game titles are trademarks of their
+  respective owners. No game ROM, and no manual, is distributed here.
+- Switch, coil and lamp NAMES in data/gd-*.json are transcribed from the
+  machines' own service manuals. Numbers and wiring facts are not copyrightable;
+  the manuals themselves are, and are not redistributed.
+- Third-party sources retain their own licences and headers (see the individual
+  files, e.g. emu2149.LICENSE).

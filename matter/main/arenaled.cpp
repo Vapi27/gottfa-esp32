@@ -26,10 +26,19 @@ static uint8_t  s_spark[LED_MAX];      // "random inserts" decay envelopes
 static Mode     s_mode      = MODE_CLASSIC;
 static uint8_t  s_bright    = ARENA_BRIGHT_DEFAULT;
 static uint8_t  s_gi        = ARENA_GI_DEFAULT;   // GI level under ROM attract, 0 = off
+static uint8_t  s_density   = 110;   // mode lucioles : combien vivent a la fois
+// Ce que la carte fait quand le courant revient. Une piece murale qui reste
+// noire apres une coupure passe pour cassee : le proprietaire ne va pas
+// rebrancher un telephone pour la rallumer. On garde donc le dernier mode
+// ALLUME a part, et par defaut on y revient au demarrage plutot que de
+// restaurer un "off" qui pouvait dater d'un ordre Siri d'il y a trois jours.
+static Mode     s_lastOn    = MODE_ATTRACT;       // dernier mode non eteint
+static bool     s_bootOn    = true;               // true = rallumer, false = restaurer tel quel
 static uint8_t  s_warm      = ARENA_WARM_DEFAULT; // 0 = spectral/orange, 255 = white-forward
 static uint64_t s_latched   = 0;                 // lamps held lit from the last game
 static bool     s_inc       = true;              // incandescent simulation
-static volatile bool s_paused = false;           // BLE pairing in progress
+static volatile bool s_paused   = false;         // BLE pairing in progress
+static uint32_t      s_pausedAt = 0;             // quand, pour le degel de securite
 static uint8_t  s_speed     = ARENA_SPEED_DEFAULT;
 static Rgbw     s_color     = { ARENA_WARM_R, ARENA_WARM_G, ARENA_WARM_B, ARENA_WARM_W };
 static uint16_t s_count     = LED_COUNT_DEFAULT;
@@ -588,6 +597,74 @@ static void fxTest(Rgbw* buf) {
 // indices the user ever sees stay 0-based on the first *visible* LED.
 static const uint16_t OFFS = LED_REPEATER_PIXEL ? 1 : 0;
 
+// Night — lucioles. Quelques points s'allument doucement, brillent, s'eteignent,
+// ailleurs, sans jamais tout allumer. C'est le mode qu'on laisse vivre a 23 h.
+//
+// Ne PAS reutiliser filamentStep() ici, c'est l'erreur du premier essai : cette
+// courbe est calibree sur une ampoule #47, 3 % de lumiere 170 ms apres la
+// coupure. Une luciole batie dessus meurt en un sixieme de seconde et le mur
+// reste noir - mesure du 2026-08-04, 43 mA, la consommation a vide.
+// Ici chaque luciole a sa propre duree de vie de 1,5 a 4 s et suit une cloche
+// (sinus) : elle monte aussi doucement qu'elle descend. C'est cette symetrie qui
+// fait respirer, la ou une decroissance seule fait clignoter.
+static void fxNight(Rgbw* buf) {
+  static const uint8_t FLY_N = 7;         // au plus 7 vivantes a la fois
+  struct Fly { int16_t led; float t, dur, gap; };
+  static Fly fly[FLY_N] = { { -1, 0, 0, 0 } };
+  static uint32_t lastMs = 0;
+  static bool armed = false;
+
+  const uint32_t now = millis();
+  float dt = (lastMs ? (now - lastMs) : 16) / 1000.0f;
+  lastMs = now;
+  if (dt > 0.25f) dt = 0.25f;             // apres un hoquet WiFi, ne pas sauter
+
+  if (!armed) {                           // etaler les premieres apparitions
+    armed = true;
+    for (uint8_t k = 0; k < FLY_N; k++) { fly[k].led = -1; fly[k].gap = k * 0.55f; }
+  }
+
+  fill(buf, { 0, 0, 0, 0 });
+  const uint16_t n = s_count ? s_count : 1;
+  const float sp = speedFactor();
+
+  // Densite : de une luciole a la fois (calme) aux sept (anime), et les temps
+  // morts qui raccourcissent avec. Un seul curseur pour les deux, parce que
+  // "plus de monde" et "moins d'attente" sont la meme intention.
+  const uint8_t live = (uint8_t)(1 + ((uint16_t)s_density * (FLY_N - 1)) / 255);
+  const float   gapK = 2.6f - 2.2f * ((float)s_density / 255.0f);
+
+  for (uint8_t k = 0; k < live; k++) {
+    Fly& f = fly[k];
+    if (f.led < 0) {                      // en attente : compte a rebours
+      f.gap -= dt * sp;
+      if (f.gap > 0.0f) continue;
+      f.led = (int16_t)random(n);
+      f.dur = 1.5f + (float)random(1000) / 1000.0f * 2.5f;
+      f.t   = 0.0f;
+      continue;
+    }
+    f.t += dt * sp;
+    if (f.t >= f.dur) { f.led = -1; f.gap = (0.25f + (float)random(1000) / 1000.0f * 1.6f) * gapK; continue; }
+
+    // Cloche : 0 -> 1 -> 0, pleine amplitude.
+    // Le plafond de 0,6 du premier essai etait une fausse bonne idee : avec la
+    // simulation d'ampoule active, 0,6 n'est pas 60 % de lumiere mais une
+    // TEMPERATURE de filament, donc une lueur rouge sombre - que le gamma
+    // ecrase ensuite au carre. Mesure : 10 sur 255 par luciole, invisible.
+    // On va au bout de la courbe et c'est le curseur de luminosite qui dose,
+    // comme dans tous les autres modes. Peu de pixels allumes suffit a garder
+    // une veilleuse : sept au plus, sur quarante et un.
+    const float k01 = sinf(3.14159265f * f.t / f.dur);
+    // Simulation d'ampoule active : la courbe du filament, qui traverse le rouge
+    // avant d'atteindre le blanc - c'est elle qui donne la lueur d'insecte.
+    // Desactivee : la couleur choisie dans le panneau Colour. Ce mode ignorait
+    // ce panneau, exactement le reproche deja fait sur l'attract.
+    const Rgbw c = s_inc ? filament(k01) : scale(s_color, k01);
+    if (f.led < (int16_t)s_count) buf[f.led] = c;
+  }
+}
+
 static void renderMode(Mode m, Rgbw* buf) {
   switch (m) {
     case MODE_CLASSIC: fxClassic(buf); break;
@@ -598,9 +675,7 @@ static void renderMode(Mode m, Rgbw* buf) {
       else                                                     fxAttractGeneric(buf);
       break;
     case MODE_ARENA:   fxArena(buf);   break;
-    // Night is deliberately the warm-white die whatever the current colour is:
-    // at 10 % an amber made of R+G reads orange and dirty, W stays clean.
-    case MODE_NIGHT:   fill(buf, { ARENA_WARM_R, ARENA_WARM_G, ARENA_WARM_B, ARENA_WARM_W }); break;
+    case MODE_NIGHT:   fxNight(buf);   break;
     case MODE_RAINBOW: fxRainbow(buf); break;
     case MODE_MUSIC:   fxMusic(buf);   break;
     case MODE_TEST:    fxTest(buf);    break;
@@ -685,6 +760,15 @@ static const char* MODE_NAMES[MODE_COUNT] = {
 
 const char* modeName(Mode m) { return (m < MODE_COUNT) ? MODE_NAMES[m] : "?"; }
 
+// Ce que le PROPRIETAIRE lit, distinct de ce que la machine ecrit. MODE_NAMES
+// est un identifiant : il part en NVS (putString "modeN"), il est la clef de
+// /api/set?mode=... et modeFromName() le relit. Le renommer casserait les
+// reglages de toutes les cartes deja configurees. Les libelles vivent a part.
+static const char* MODE_LABELS[MODE_COUNT] = {
+  "Off", "All on", "Attract", "Wave", "Firefly", "Rainbow", "Music", "Test"
+};
+const char* modeLabel(Mode m) { return (m < MODE_COUNT) ? MODE_LABELS[m] : "?"; }
+
 Mode modeFromName(const char* s) {
   if (!s) return MODE_COUNT;
   for (uint8_t i = 0; i < MODE_COUNT; i++)
@@ -699,10 +783,13 @@ void setMode(Mode m) {
   memcpy(s_prev, s_render, sizeof(Rgbw) * LED_MAX);    // snapshot for the crossfade
   s_xfadeT0 = millis();
   s_mode = m;
+  if (m != MODE_OFF) s_lastOn = m;
   markDirty();
 }
 
 Mode mode() { return s_mode; }
+bool bootOn()          { return s_bootOn; }
+void setBootOn(bool b) { s_bootOn = b; markDirty(); }
 
 void nextMode() {
   // Button cycle skips TEST (a diagnostic, not a look) and OFF stays reachable
@@ -714,12 +801,15 @@ void nextMode() {
 void setBrightness(uint8_t b) { s_bright = b; markDirty(); }
 uint8_t brightness() { return s_bright; }
 void setGi(uint8_t g) { s_gi = g; markDirty(); }
+void setDensity(uint8_t d) { s_density = d; markDirty(); }
+uint8_t density() { return s_density; }
 uint8_t gi() { return s_gi; }
 void setWarm(uint8_t w) { s_warm = w; markDirty(); }
 uint8_t warm() { return s_warm; }
 void setLatched(uint64_t m) { s_latched = m; markDirty(); }
 uint64_t latched() { return s_latched; }
-void setPaused(bool p) { s_paused = p; }
+void setPaused(bool p) { s_paused = p; s_pausedAt = p ? millis() : 0; }
+bool paused()           { return s_paused; }
 void setIncandescent(bool on) { s_inc = on; markDirty(); }
 bool incandescent() { return s_inc; }
 void setSpeed(uint8_t s) { s_speed = s; markDirty(); }
@@ -817,9 +907,12 @@ void save() {
   // every board whose NVS held mode=6 (TEST before, MUSIC after). Names survive
   // enum surgery; the numeric key is still read once for migration.
   s_prefs.putString("modeN", modeName(s_mode));
+  s_prefs.putString("lastOn", modeName(s_lastOn));
+  s_prefs.putUChar("bootOn", s_bootOn ? 1 : 0);
   s_prefs.putUChar("bright", s_bright);
   s_prefs.putUChar("speed",  s_speed);
   s_prefs.putUChar("gi",     s_gi);
+  s_prefs.putUChar("dens",   s_density);
   s_prefs.putUChar("warm",   s_warm);
   s_prefs.putBytes("latched", &s_latched, sizeof(s_latched));
   s_prefs.putUChar("inc", s_inc ? 1 : 0);
@@ -839,9 +932,20 @@ void begin() {
     s_mode = (m < MODE_COUNT) ? m : MODE_CLASSIC;
   }
   if (s_mode >= MODE_COUNT) s_mode = MODE_CLASSIC;
+  {
+    String lo = s_prefs.getString("lastOn", "");
+    Mode m = lo.length() ? modeFromName(lo.c_str()) : MODE_COUNT;
+    s_lastOn = (m < MODE_COUNT && m != MODE_OFF) ? m : MODE_ATTRACT;
+  }
+  s_bootOn = s_prefs.getUChar("bootOn", 1) != 0;
+  // Le courant revient : on rallume. Sinon une coupure de secteur laisse le mur
+  // noir jusqu'a ce que quelqu'un s'en occupe, ce qui n'est pas un comportement
+  // acceptable pour un objet accroche au mur.
+  if (s_bootOn && s_mode == MODE_OFF) s_mode = s_lastOn;
   s_bright = s_prefs.getUChar("bright", ARENA_BRIGHT_DEFAULT);
   s_speed  = s_prefs.getUChar("speed",  ARENA_SPEED_DEFAULT);
   s_gi     = s_prefs.getUChar("gi",     ARENA_GI_DEFAULT);
+  s_density = s_prefs.getUChar("dens", 110);
   s_warm   = s_prefs.getUChar("warm",   ARENA_WARM_DEFAULT);
   if (s_prefs.getBytesLength("latched") == sizeof(s_latched))
     s_prefs.getBytes("latched", &s_latched, sizeof(s_latched));
@@ -883,7 +987,18 @@ void begin() {
 }
 
 void tick() {
-  if (s_paused) return;
+  if (s_paused) {
+    // Filet de securite. Le degel dependait de kCHIPoBLEConnectionClosed, que
+    // CHIP n'emet PAS apres un commissioning reussi : il demonte la pile BLE et
+    // l'evenement se perd. Le mur restait alors noir indefiniment - et comme
+    // fps, ma et le compteur de trames ne sont mis a jour QUE plus bas dans
+    // cette fonction, ils restaient figes sur leur derniere valeur et donnaient
+    // toutes les apparences d'un rendu qui tourne. Vecu le 2026-08-02, une heure
+    // perdue a chercher pourquoi l'image etait noire alors qu'elle n'existait
+    // plus. Un appairage ne dure jamais deux minutes : on degele, point.
+    if (millis() - s_pausedAt < ARENA_PAUSE_MAX_MS) return;
+    s_paused = false;
+  }
   uint32_t now = millis();
   if (now - s_lastFrame < (uint32_t)(1000 / LED_FRAME_HZ)) return;
   s_lastFrame = now;
@@ -943,7 +1058,9 @@ void tick() {
 
   memcpy(s_render, s_frame, sizeof(Rgbw) * LED_MAX);  // pre-gamma copy for the next crossfade
 
-  uint8_t gain = (s_mode == MODE_NIGHT) ? min<uint8_t>(s_bright, ARENA_NIGHT_BRIGHT) : s_bright;
+  // Plus de plafond special pour la nuit : fxNight limite deja son amplitude a
+  // 0,6 et n'allume que quelques pixels.
+  uint8_t gain = s_bright;
 #if ARENA_SOFTSTART_MS > 0
   // Soft start: ease the chain up over the first second so 100+ pixels lighting
   // at once can't trip the PSU's over-current hiccup or slam the bulk caps.

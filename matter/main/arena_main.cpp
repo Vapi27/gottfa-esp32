@@ -20,6 +20,7 @@ static bool netHasIp() {
 #include "arena_net.h"
 #ifdef ARENA_MATTER
 extern void arena_matter_init();
+extern void arena_matter_sync();   // reflechit le mode reel vers Maison/Siri
 #endif
 
 // ============================================================================
@@ -99,6 +100,7 @@ void loop() {
     if (!ipSinceMs) ipSinceMs = millis();
     if (millis() - ipSinceMs > 8000) {
       arenanet::matterTick();
+      arena_matter_sync();   // page web -> Maison, pas seulement l'inverse
       static bool atrLoaded = false;
       if (!atrLoaded) { atrLoaded = true; arenaattract::begin(); }
     }

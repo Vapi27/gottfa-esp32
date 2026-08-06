@@ -74,6 +74,12 @@ const char* nameOf(uint8_t ins);
 bool  setName(uint8_t ins, const char* name);   // empty string restores the shipped one
 bool  saveNames();
 
+// Masquage d'une pastille sur le plan. Purement visuel : une pastille masquee
+// garde sa lampe et son pixel, elle n'est simplement plus dessinee.
+bool  hidden(uint8_t ins);
+bool  setHidden(uint8_t ins, bool h);
+bool  saveHidden();
+
 Colour colourOf(uint8_t ins);            // 0,0,0,0 when the insert has no colour
 Colour colourOfLed(uint16_t led);
 bool   setColour(uint8_t ins, Colour c); // all zero clears it
