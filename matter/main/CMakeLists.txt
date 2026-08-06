@@ -25,27 +25,14 @@ idf_component_register(
          "${ARENA_SRC}/arena_map.cpp"
          "${ARENA_SRC}/arena_attract.cpp"
          "${ARENA_SRC}/arena_oled.cpp"
-         "../libs/AsyncTCP/src/AsyncTCP.cpp"
-         "../libs/ESPAsyncWebServer/src/AsyncEventSource.cpp"
-         "../libs/ESPAsyncWebServer/src/AsyncWebSocket.cpp"
-         "../libs/ESPAsyncWebServer/src/WebAuthentication.cpp"
-         "../libs/ESPAsyncWebServer/src/WebHandlers.cpp"
-         "../libs/ESPAsyncWebServer/src/WebRequest.cpp"
-         "../libs/ESPAsyncWebServer/src/WebResponses.cpp"
-         "../libs/ESPAsyncWebServer/src/WebServer.cpp"
-         "../../lib/Adafruit_NeoPixel/Adafruit_NeoPixel.cpp"
-         "../../lib/Adafruit_NeoPixel/esp.c"
-         "../../lib/Adafruit_GFX/Adafruit_GFX.cpp"
-         "../../lib/Adafruit_GFX/Adafruit_SPITFT.cpp"
-         "../../lib/Adafruit_GFX/Adafruit_GrayOLED.cpp"
-         "../../lib/Adafruit_SSD1306/Adafruit_SSD1306.cpp"
-         "../../lib/Adafruit_BusIO/Adafruit_I2CDevice.cpp"
-         "../../lib/Adafruit_BusIO/Adafruit_SPIDevice.cpp"
-         "../../lib/Adafruit_BusIO/Adafruit_BusIO_Register.cpp"
-    INCLUDE_DIRS "." "${ARENA_SRC}" "../../include"
-                 "../libs/AsyncTCP/src" "../libs/ESPAsyncWebServer/src"
-                 "../libs/ArduinoJson/src" "../../lib/Adafruit_NeoPixel"
-                 "../../lib/Adafruit_GFX" "../../lib/Adafruit_SSD1306" "../../lib/Adafruit_BusIO"
+    # SRC_DIRS pour les bibliotheques : ce sont des repertoires feuilles, tout ce
+    # qu'ils contiennent leur appartient. Les enumerer fichier par fichier a
+    # coute une serie d'erreurs de lien - il manquait Middleware.cpp et deux
+    # autres. SRCS reste reserve a src/, qui heberge aussi l'application GottFA.
+    SRC_DIRS "../libs/AsyncTCP/src" "../libs/ESPAsyncWebServer/src"
+             "../../lib/Adafruit_NeoPixel" "../../lib/Adafruit_GFX"
+             "../../lib/Adafruit_SSD1306" "../../lib/Adafruit_BusIO"
+    INCLUDE_DIRS "." "${ARENA_SRC}" "../../include" "../libs/ESPAsyncWebServer/src" "../../lib/Adafruit_NeoPixel" "../../lib/Adafruit_SSD1306" "../../lib/Adafruit_BusIO"
     PRIV_INCLUDE_DIRS "${ESP_MATTER_PATH}/examples/common/utils")
 
 # ARENA_MATTER is what selects the Matter half of every #ifdef in the shared
