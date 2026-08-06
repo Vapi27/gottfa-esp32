@@ -78,14 +78,17 @@ enum Kind : uint8_t {
   K_INFO,    // se consulte, ne se regle pas
   K_QR,      // le code d'appairage, en plein ecran
   K_SLEEP,   // eteindre l'ecran tout de suite
+  K_CONFIRM, // efface quelque chose : demande un appui maintenu
 };
 
 enum : uint8_t {
   N_ROOT = 0,
-  N_LIGHT, N_FX, N_WALLS, N_PAIR, N_NET, N_ABOUT, N_OFF,       // 1..7  enfants de ROOT
-  N_MODE, N_BRIGHT, N_GLOW, N_WARM,                            // 8..11 enfants de LIGHT
-  N_SPEED, N_FILAMENT, N_FLIES,                                // 12..14 enfants de FX
-  N_LINK, N_PEERS,                                             // 15..16 enfants de WALLS
+  N_LIGHT, N_FX, N_WALLS, N_PAIR, N_NET, N_ABOUT, N_RESET, N_OFF,  // 1..8  enfants de ROOT
+  N_MODE, N_BRIGHT, N_GLOW, N_WARM,                                // 9..12 enfants de LIGHT
+  N_SPEED, N_FILAMENT, N_FLIES,                                    // 13..15 enfants de FX
+  N_LINK, N_PEERS,                                                 // 16..17 enfants de WALLS
+  N_R_REBOOT, N_R_LOOK, N_R_HOMES, N_R_ALL,                        // 18..21 enfants de RESET
+                                                                   // MEME ORDRE que NODES[]
   N_COUNT
 };
 
@@ -100,13 +103,14 @@ struct Node {
 // `first`. C'est ce qui permet a la table de tenir en quelques octets et a la
 // navigation de se resumer a une addition.
 static const Node NODES[N_COUNT] = {
-  { "Menu",        K_MENU,  N_LIGHT, 7 },
-  { "Lighting",    K_MENU,  N_MODE,  4 },
-  { "Effects",     K_MENU,  N_SPEED, 3 },
-  { "Other walls", K_MENU,  N_LINK,  2 },
+  { "Menu",        K_MENU,  N_LIGHT,  8 },
+  { "Lighting",    K_MENU,  N_MODE,   4 },
+  { "Effects",     K_MENU,  N_SPEED,  3 },
+  { "Other walls", K_MENU,  N_LINK,   2 },
   { "Pairing code",K_QR,    0, 0 },
   { "Network",     K_INFO,  0, 0 },
   { "About",       K_INFO,  0, 0 },
+  { "Reset",       K_MENU,  N_R_REBOOT, 4 },
   { "Screen off",  K_SLEEP, 0, 0 },
   { "Mode",        K_MODE,  0, 0 },
   { "Brightness",  K_PCT,   0, 0 },
@@ -117,6 +121,12 @@ static const Node NODES[N_COUNT] = {
   { "Fireflies",   K_PCT,   0, 0 },
   { "Link",        K_LINK,  0, 0 },
   { "Neighbours",  K_INFO,  0, 0 },
+  // Du plus anodin au plus definitif, et dans cet ordre : la fleche qui depasse
+  // d'un cran tombe sur quelque chose de moins grave, jamais de plus grave.
+  { "Restart",     K_CONFIRM, 0, 0 },
+  { "Reset look",  K_CONFIRM, 0, 0 },
+  { "Forget homes",K_CONFIRM, 0, 0 },
+  { "Erase all",   K_CONFIRM, 0, 0 },
 };
 
 // Pile de navigation. Trois niveaux suffisent a l'arbre ci-dessus, et une pile
@@ -125,6 +135,14 @@ struct Frame { uint8_t node; uint8_t cursor; };
 static Frame   s_stack[4] = { { N_ROOT, 0 } };
 static uint8_t s_depth = 0;
 static bool    s_edit  = false;
+
+// Confirmation d'un effacement : le noeud arme, et l'instant ou le doigt s'est
+// pose. Trois secondes de maintien, pas un appui - sur trois boutons, un simple
+// OK est exactement le geste qu'on fait par erreur en cherchant autre chose, et
+// il ne doit pas pouvoir depairer un mur ou effacer son cablage.
+static const uint32_t CONFIRM_MS = 3000;
+static uint8_t  s_confirm  = 0;      // 0 = rien d'arme
+static uint32_t s_holdFrom = 0;
 
 static uint8_t curNode()   { const Frame& f = s_stack[s_depth];
                              return NODES[f.node].count ? NODES[f.node].first + f.cursor : f.node; }
@@ -229,6 +247,18 @@ static void drawQr() {
   s_d.display();
 }
 
+// Ce que fait vraiment chaque effacement. Le libelle du menu est court par
+// necessite ; c'est cette ligne qui doit lever l'ambiguite AVANT le geste.
+static const char* resetWhat(uint8_t n) {
+  switch (n) {
+    case N_R_REBOOT: return "restarts the wall";
+    case N_R_LOOK:   return "colours + levels";
+    case N_R_HOMES:  return "unpairs from Siri";
+    case N_R_ALL:    return "all, incl. wiring";
+    default:         return "";
+  }
+}
+
 // Une entree d'information tient en deux courtes lignes : sur 32 pixels il n'y
 // a pas de troisieme ligne, et une valeur tronquee ne renseigne personne.
 static void infoLines(uint8_t n, String& a, String& b) {
@@ -250,8 +280,33 @@ static void infoLines(uint8_t n, String& a, String& b) {
   }
 }
 
+// Barre qui se remplit pendant le maintien. Elle sert autant a doser l'effort
+// qu'a prevenir : trois secondes sans retour visuel se lisent comme un bouton
+// mort, et on relache juste avant la fin.
+static void drawConfirm(uint32_t held) {
+  s_d.clearDisplay();
+  s_d.setTextColor(SSD1306_WHITE);
+  s_d.ssd1306_command(SSD1306_SETCONTRAST);
+  s_d.ssd1306_command(0xCF);
+  s_d.setTextSize(1);
+  s_d.setCursor(0, 0);
+  s_d.print(NODES[s_confirm].label);
+  s_d.setCursor(0, 10);
+  s_d.print(resetWhat(s_confirm));
+  s_d.setCursor(0, 20);
+  s_d.print(held ? F("keep holding...") : F("hold OK for 3 s"));
+  const int16_t y = ARENA_OLED_H - 5;
+  s_d.drawRect(0, y, ARENA_OLED_W, 5, SSD1306_WHITE);
+  if (held) {
+    uint32_t w = (ARENA_OLED_W - 2) * (held > CONFIRM_MS ? CONFIRM_MS : held) / CONFIRM_MS;
+    s_d.fillRect(1, y + 1, (int16_t)w, 3, SSD1306_WHITE);
+  }
+  s_d.display();
+}
+
 static void draw() {
   if (!s_awake) return;
+  if (s_confirm) { drawConfirm(s_holdFrom ? millis() - s_holdFrom : 0); return; }
   const uint8_t n = curNode();
 
   if (NODES[n].kind == K_QR && s_edit) { drawQr(); return; }
@@ -317,6 +372,13 @@ static void draw() {
       s_d.setTextSize(2);
       s_d.print(NODES[n].label);
       break;
+    case K_CONFIRM:
+      s_d.setTextSize(2);
+      s_d.print(NODES[n].label);
+      s_d.setTextSize(1);
+      s_d.setCursor(0, 25);
+      s_d.print(resetWhat(n));
+      break;
     case K_INFO: {
       String a, b;
       infoLines(n, a, b);
@@ -335,9 +397,11 @@ static void draw() {
 // ---------------------------------------------------------------------------
 static void sleepNow() {
   if (!s_awake) return;
-  s_awake  = false;
-  s_edit   = false;
-  s_depth  = 0;
+  s_awake    = false;
+  s_edit     = false;
+  s_confirm  = 0;
+  s_holdFrom = 0;
+  s_depth    = 0;
   s_stack[0].node = N_ROOT;
   s_stack[0].cursor = 0;              // on revient en haut, pas au milieu d'un reglage
   s_d.clearDisplay();
@@ -360,6 +424,54 @@ void showQr() {
   s_stack[1] = { N_PAIR, 0 };
   s_edit = true;
   poke();
+  draw();
+}
+
+// Le geste est alle au bout : on execute, on l'ecrit a l'ecran, et on redemarre
+// quand il le faut. Le message reste une seconde - un mur qui repart sans un mot
+// laisse croire que rien ne s'est passe.
+static void runReset(uint8_t n) {
+  s_d.clearDisplay();
+  s_d.setTextColor(SSD1306_WHITE);
+  s_d.setTextSize(2);
+  s_d.setCursor(0, 8);
+
+  switch (n) {
+    case N_R_REBOOT:
+      s_d.print(F("restarting"));
+      s_d.display();
+      delay(600);
+      ESP.restart();
+      return;
+    case N_R_LOOK:
+      arenaled::resetLook();
+      s_d.print(F("look reset"));
+      break;
+    case N_R_HOMES:
+      s_d.print(F("unpaired"));
+      s_d.display();
+      delay(600);
+      arenanet::forgetHomes();       // redemarre de lui-meme dans la version Matter
+      delay(1500);
+      ESP.restart();
+      return;
+    case N_R_ALL:
+      arenaled::resetAll();
+      arenanet::resetNetwork();
+      arenapeers::resetAll();
+      s_d.print(F("erased"));
+      s_d.display();
+      delay(600);
+      arenanet::forgetHomes();
+      delay(1500);
+      ESP.restart();
+      return;
+    default: break;
+  }
+  s_d.display();
+  delay(900);
+  s_confirm  = 0;
+  s_holdFrom = 0;
   draw();
 }
 
@@ -439,6 +551,12 @@ static void onOk(bool longPress) {
     draw();
     return;
   }
+  if (NODES[n].kind == K_CONFIRM) {   // arme, mais n'execute rien
+    s_confirm  = n;
+    s_holdFrom = 0;
+    draw();
+    return;
+  }
   if (NODES[n].kind == K_SLEEP) { sleepNow(); return; }
   if (NODES[n].kind == K_INFO)  { draw(); return; }   // rien a regler
 
@@ -508,6 +626,29 @@ static bool pollRepeat(Btn& b, uint32_t now) {
 void tick() {
   if (!s_found) return;
   const uint32_t now = millis();
+
+  // Pendant une confirmation, les boutons ne veulent plus dire la meme chose :
+  // OK se maintient, et TOUTE fleche annule. On court-circuite donc la gestion
+  // normale plutot que de la faire cohabiter, ou un pas de menu passerait sous
+  // l'ecran de confirmation sans qu'on le voie.
+  if (s_confirm) {
+    s_lastIn = now;                            // ne pas s'endormir en pleine decision
+    encTake();
+    if (digitalRead(PIN_ARENA_BTN_UP) == LOW || digitalRead(PIN_ARENA_BTN_DOWN) == LOW) {
+      s_confirm = 0; s_holdFrom = 0; draw();
+      return;
+    }
+    if (digitalRead(PIN_ARENA_BTN_OK) == LOW) {
+      if (!s_holdFrom) s_holdFrom = now;
+      if (now - s_holdFrom >= CONFIRM_MS) { runReset(s_confirm); return; }
+      drawConfirm(now - s_holdFrom);
+    } else if (s_holdFrom) {                   // relache trop tot = on renonce
+      s_confirm = 0; s_holdFrom = 0; draw();
+    } else {
+      drawConfirm(0);
+    }
+    return;
+  }
 
   const int8_t d = encTake();
   if (d) onStep(d > 0 ? 1 : -1);

@@ -41,4 +41,8 @@ Link        linkFromName(const char* s);
 // mode RELAY son sens de balayage, et il est stable : la MAC ne bouge pas.
 uint8_t rank();
 
+// Efface le reglage de liaison memorise. Le mur repart independant, ce qui est
+// le seul etat sur quand on ne sait pas chez qui il va atterrir.
+void resetAll();
+
 }  // namespace arenapeers

@@ -258,6 +258,12 @@ static void receive() {
 // ---------------------------------------------------------------------------
 //  Cycle de vie
 // ---------------------------------------------------------------------------
+void resetAll() {
+  s_prefs.clear();
+  s_link = LINK_OFF;
+  Serial.println("[peers] reglage de liaison efface");
+}
+
 void begin() {
   s_prefs.begin("arenapeer", false);
   s_link = (Link)s_prefs.getUChar("link", (uint8_t)LINK_OFF);

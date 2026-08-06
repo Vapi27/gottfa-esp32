@@ -898,6 +898,27 @@ bool     limited()    { return s_limited; }
 uint32_t frameCount() { return s_frames; }
 uint16_t fps()        { return s_fps; }
 
+// Voir arenaled.h pour pourquoi il y en a deux.
+void resetLook() {
+  s_mode    = MODE_CLASSIC;
+  s_lastOn  = MODE_CLASSIC;
+  s_bootOn  = true;
+  s_bright  = ARENA_BRIGHT_DEFAULT;
+  s_speed   = ARENA_SPEED_DEFAULT;
+  s_gi      = ARENA_GI_DEFAULT;
+  s_warm    = ARENA_WARM_DEFAULT;
+  s_density = 110;
+  s_inc     = true;
+  s_latched = 0;
+  save();
+  Serial.println("[led] apparence remise aux valeurs d'usine");
+}
+
+void resetAll() {
+  s_prefs.clear();      // le cablage part avec : c'est le but, pas un effet de bord
+  Serial.println("[led] NVS 'arena' efface en entier");
+}
+
 void save() {
   // Compare-and-clear: a setter on the HTTP task can re-arm s_dirtyAt while the
   // multi-millisecond NVS write below is in flight; clearing unconditionally at

@@ -15,6 +15,13 @@ const char* ip();
 // sont sinon 4 adresses IP anonymes et 4 accessoires identiques dans Maison.
 // Par defaut derive de la MAC (unique d'usine), remplacable par /api/name.
 const String& wallName();
+
+// Efface le nom du mur et les identifiants WiFi memorises. Sans effet sur
+// l'appairage Matter, qui vit dans son propre magasin.
+void resetNetwork();
+// Quitte toutes les maisons Matter. Emporte le WiFi avec lui dans la version
+// Matter : c'est l'appairage qui le fournit, il n'est stocke nulle part ici.
+void forgetHomes();
 const char* mode();          // "STA" / "SoftAP"
 
 }  // namespace arenanet

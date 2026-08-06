@@ -386,6 +386,31 @@ header h1 img{filter:saturate(.9)}
   </section>
 
   <footer>Wall Pinball Playfield &middot; pinballs.store &middot; <span id="s-fw">–</span> &middot; uptime <span id="s-up">–</span></footer>
+  <!-- ===================== Reset ========================================== -->
+  <section>
+    <h2>Reset</h2>
+    <p class="hint">
+      Four levels, from harmless to final. They are separate because they answer
+      different questions &mdash; &ldquo;I don't like this setting&rdquo; is not
+      the same as &ldquo;I'm giving this wall away&rdquo;. All four are also on the
+      wall's own screen, under <b>Reset</b>.
+    </p>
+    <div class="modes">
+      <button onclick="doReset('reboot')">Restart</button>
+      <button onclick="doReset('look')">Reset look</button>
+      <button onclick="doReset('homes')">Forget homes</button>
+      <button onclick="doReset('all')">Erase everything</button>
+    </div>
+    <p class="hint" style="margin-top:10px">
+      <b>Restart</b> keeps everything. <b>Reset look</b> puts colours and levels back
+      to factory, and deliberately leaves the LED count, order and power budget alone
+      &mdash; those describe how <i>this</i> wall is built, and wiping them turns a
+      working wall into a mis-driven one. <b>Forget homes</b> unpairs it from Siri and
+      drops the network with it, since pairing is what provides it. <b>Erase
+      everything</b> does all of that plus the wiring and the mapping.
+    </p>
+  </section>
+
 </main>
 
 <script>
@@ -401,6 +426,27 @@ const $ = id => document.getElementById(id);
 let st = {}, holdUntil = 0;
 
 const api = u => fetch(u).then(r => r.ok ? r.text() : Promise.reject(r.status));
+// --- Remises a zero -------------------------------------------------------
+const RESET_ASK = {
+  reboot: "Restart the wall now?",
+  look:   "Put colours and levels back to factory?\n\nThe LED count, order and power budget are kept.",
+  homes:  "Unpair this wall from every home?\n\nIt drops off the network too, and you will have to pair it again from the Home app.",
+  all:    "Erase EVERYTHING on this wall?\n\nSettings, name, wiring, mapping and pairing. There is no undo."
+};
+function doReset(what) {
+  if (!confirm(RESET_ASK[what] || 'Are you sure?')) return;
+  // Deuxieme demande pour les deux irreversibles : une seule boite de dialogue
+  // se clique par reflexe, et ces deux-la ne se rattrapent pas.
+  if ((what === 'all' || what === 'homes') &&
+      !confirm("Last check.\n\nType-free confirmation: press OK only if you really mean it.")) return;
+  toast('sending...');
+  fetch('/api/reset?what=' + what)
+    .then(r => r.json())
+    .then(j => toast(j.ok ? (j.reboot ? 'done - the wall is restarting' : 'done')
+                          : ('refused: ' + (j.t || ''))))
+    .catch(() => toast('done - the wall is restarting'));
+}
+
 // --- Les autres murs ------------------------------------------------------
 // La detection tourne toujours. Ce reglage ne decide que de la reaction, et il
 // demande l'accord des deux murs : un mur laisse sur "Independent" n'impose

@@ -46,6 +46,11 @@ namespace arenanet {
 static AsyncWebServer s_server(80);
 static Preferences    s_prefs;
 
+// Un redemarrage demande par HTTP ne doit PAS partir depuis le gestionnaire :
+// la reponse n'est pas encore sur le fil, et l'appelant ne verrait qu'une
+// connexion coupee - impossible de distinguer "c'est fait" de "ca a plante".
+static uint32_t       s_rebootAt = 0;
+
 // Identite de la carte. La MAC est gravee en usine, donc unique sans reglage ni
 // numero de serie a gerer : deux murs sortis de la meme image ne peuvent pas se
 // confondre. Le proprietaire peut ensuite mettre "Volcano" ou "Arena".
@@ -218,6 +223,19 @@ static bool pullOta(const String& url, bool fs, String& err) {
   e = esp_ota_set_boot_partition(part);
   if (e != ESP_OK) { err = String("set_boot: ") + esp_err_to_name(e); return false; }
   return true;
+}
+
+void resetNetwork() {
+  s_prefs.clear();
+  Serial.println("[net] nom et identifiants WiFi effaces");
+}
+
+void forgetHomes() {
+#ifdef ARENA_MATTER
+  arena_matter_forget();
+#else
+  Serial.println("[net] pas de Matter dans cette image - rien a oublier");
+#endif
 }
 
 static String stateJson() {
@@ -538,6 +556,46 @@ static void startServer() {
     }
     arenapf::save();
     r->send(200, "application/json", arenapf::toJson());
+  });
+
+  // --- Remise a zero : /api/reset?what=look|network|homes|all -----------
+  // Quatre niveaux, du plus anodin au plus definitif. Ils sont separes parce
+  // qu'ils ne repondent pas a la meme question : "je n'aime pas ce reglage"
+  // n'appelle pas le meme geste que "je donne ce mur a quelqu'un".
+  s_server.on("/api/reset", HTTP_GET, [](AsyncWebServerRequest* r) {
+    const String w = r->hasParam("what") ? r->getParam("what")->value() : String("");
+    if (w == "look") {
+      arenaled::resetLook();
+      r->send(200, "application/json", "{\"ok\":true,\"did\":\"look\"}");
+      return;
+    }
+    if (w == "network") {
+      resetNetwork();
+      r->send(200, "application/json", "{\"ok\":true,\"did\":\"network\",\"reboot\":true}");
+      s_rebootAt = millis() + 400;      // laisser la reponse partir
+      return;
+    }
+    if (w == "homes") {
+      r->send(200, "application/json", "{\"ok\":true,\"did\":\"homes\",\"reboot\":true}");
+      forgetHomes();
+      return;
+    }
+    if (w == "all") {
+      arenaled::resetAll();
+      resetNetwork();
+      arenapeers::resetAll();
+      r->send(200, "application/json", "{\"ok\":true,\"did\":\"all\",\"reboot\":true}");
+      forgetHomes();
+      s_rebootAt = millis() + 800;
+      return;
+    }
+    if (w == "reboot") {
+      r->send(200, "application/json", "{\"ok\":true,\"did\":\"reboot\"}");
+      s_rebootAt = millis() + 400;
+      return;
+    }
+    r->send(400, "application/json",
+            "{\"ok\":false,\"t\":\"what= look | network | homes | all | reboot\"}");
   });
 
   // --- Voisinage : /api/link?v=off|mirror|relay --------------------------
@@ -900,6 +958,14 @@ void begin() {
 }
 
 void loop() {
+  // Redemarrage differe demande par /api/reset : la reponse a eu le temps de
+  // partir, l'appelant sait donc que l'ordre a ete accepte.
+  if (s_rebootAt && (int32_t)(millis() - s_rebootAt) >= 0) {
+    Serial.println("[net] redemarrage demande");
+    delay(50);
+    ESP.restart();
+  }
+
   // Le balayage tourne ICI : il bloque plusieurs secondes et n'a rien a faire
   // dans un handler HTTP.
   if (s_scanWanted) {

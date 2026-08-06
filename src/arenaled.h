@@ -119,4 +119,14 @@ uint16_t fps();
 
 void save();               // persist mode/brightness/speed/colour/count to NVS
 
+// Deux remises a zero, et la distinction n'est pas cosmetique. resetLook() rend
+// l'APPARENCE a ses valeurs d'usine - mode, luminosite, vitesse, halo, blanc
+// chaud, densite, filament, couleur - et laisse intacts le nombre de pixels,
+// leur ordre, le budget de courant et la cartographie : ceux-la decrivent
+// comment CE mur est construit, et les effacer transforme un mur qui marche en
+// mur mal pilote. resetAll() efface tout, y compris ces faits materiels, et ne
+// doit servir qu'a preparer une carte pour quelqu'un d'autre.
+void resetLook();
+void resetAll();
+
 }  // namespace arenaled
