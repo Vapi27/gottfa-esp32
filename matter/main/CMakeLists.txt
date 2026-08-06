@@ -38,6 +38,7 @@ idf_component_register(
          "${ARENA_SRC}/arena_map.cpp"
          "${ARENA_SRC}/arena_attract.cpp"
          "${ARENA_SRC}/arena_oled.cpp"
+         "${ARENA_SRC}/arena_peers.cpp"
          ${ARENA_LIB_SRCS}
     INCLUDE_DIRS "." "${ARENA_SRC}" "../../include" "../libs/ESPAsyncWebServer/src" "../../lib/Adafruit_NeoPixel"
                  "../../lib/Adafruit_GFX" "../../lib/Adafruit_SSD1306" "../../lib/Adafruit_BusIO"

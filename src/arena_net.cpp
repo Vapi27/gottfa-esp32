@@ -39,6 +39,7 @@ extern "C" void arena_matter_event_log(char* out, size_t n);
 #include "arena_pf.h"
 #include "arena_attract.h"
 #include "arena_oled.h"
+#include "arena_peers.h"
 
 namespace arenanet {
 
@@ -264,6 +265,11 @@ static String stateJson() {
   // fil inverse - et il n'y a pas de port serie sur un mur accroche.
   j += ",\"oled\":" + String(arenaoled::found() ? "true" : "false");
   j += ",\"bustype\":"  + String((int32_t)espShowBusType);
+  // Les autres murs vus sur le reseau, et le comportement choisi face a eux.
+  j += ",\"link\":\"" + String(arenapeers::linkName(arenapeers::link())) + "\"";
+  j += ",\"rank\":"  + String((int)arenapeers::rank());
+  j += ",\"peers\":" + arenapeers::json();
+
   // Qui est ce mur. Indispensable des qu'il y en a plusieurs : c'est ce qui
   // permet de balayer le reseau et de dire lequel est lequel.
   j += ",\"name\":\"" + s_name + "\"";
@@ -532,6 +538,18 @@ static void startServer() {
     }
     arenapf::save();
     r->send(200, "application/json", arenapf::toJson());
+  });
+
+  // --- Voisinage : /api/link?v=off|mirror|relay --------------------------
+  // Comment ce mur se comporte quand il en voit d'autres. La detection, elle,
+  // tourne toujours : savoir qui est la ne change rien a l'affichage.
+  s_server.on("/api/link", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (r->hasParam("v"))
+      arenapeers::setLink(arenapeers::linkFromName(r->getParam("v")->value().c_str()));
+    r->send(200, "application/json",
+            String("{\"link\":\"") + arenapeers::linkName(arenapeers::link()) +
+            "\",\"rank\":" + String((int)arenapeers::rank()) +
+            ",\"peers\":" + arenapeers::json() + "}");
   });
 
   // --- Nom du mur : /api/name?v=Volcano ----------------------------------

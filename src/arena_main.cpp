@@ -19,6 +19,7 @@ static bool netHasIp() {
 #include "arena_attract.h"
 #include "arena_oled.h"
 #include "arena_net.h"
+#include "arena_peers.h"
 #ifdef ARENA_MATTER
 extern void arena_matter_init();
 extern void arena_matter_sync();   // reflechit le mode reel vers Maison/Siri
@@ -83,6 +84,7 @@ void setup() {
 #endif
   arenanet::begin();      // WiFi + http://arena.local/
   arenaoled::begin();     // ecran de controle, inerte si aucun panneau
+  arenapeers::begin();    // voisinage : les murs se voient et se repondent
 
   Serial.printf("[boot] ready — %u LEDs, mode=%s, %s %s\n",
                 arenaled::count(), arenaled::modeName(arenaled::mode()),
@@ -115,4 +117,5 @@ void loop() {
   arenaled::tick();
   arenaoled::tick();       // self-rate-limited to LED_FRAME_HZ
   arenanet::loop();
+  arenapeers::tick();      // balise UDP + adoption de l'etat des voisins
 }

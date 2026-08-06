@@ -277,6 +277,23 @@ header h1 img{filter:saturate(.9)}
     </p>
   </section>
 
+  <!-- ===================== Other walls ==================================== -->
+  <section>
+    <h2>Other walls</h2>
+    <p class="hint">
+      Each wall announces itself on your network, so they can act as one. Detection
+      always runs &mdash; choosing a behaviour below is what makes them respond to
+      each other.
+    </p>
+    <div class="modes" id="linkmodes">
+      <button data-l="off"    onclick="setLink('off')">Independent</button>
+      <button data-l="mirror" onclick="setLink('mirror')">Mirror</button>
+      <button data-l="relay"  onclick="setLink('relay')">Sweep</button>
+    </div>
+    <p class="hint" id="link-help" style="margin-top:10px"></p>
+    <div id="peer-list" class="hint" style="margin-top:10px"></div>
+  </section>
+
   <!-- ===================== Voice assistants (Matter) ===================== -->
   <section>
     <h2>Siri &amp; voice assistants</h2>
@@ -384,6 +401,39 @@ const $ = id => document.getElementById(id);
 let st = {}, holdUntil = 0;
 
 const api = u => fetch(u).then(r => r.ok ? r.text() : Promise.reject(r.status));
+// --- Les autres murs ------------------------------------------------------
+// La detection tourne toujours. Ce reglage ne decide que de la reaction, et il
+// demande l'accord des deux murs : un mur laisse sur "Independent" n'impose
+// rien et ne subit rien.
+const LINK_HELP = {
+  off:    "Each wall does its own thing. Others are still listed below.",
+  mirror: "Change the mode or brightness on any wall and every other wall follows at once.",
+  relay:  "Same, but staggered: the change sweeps from one wall to the next, about a quarter second apart."
+};
+function setLink(v) {
+  fetch('/api/link?v=' + v).then(r => r.json()).then(j => { applyLink(j.link); toast('walls: ' + j.link); })
+                           .catch(() => toast('could not change it'));
+}
+function applyLink(v) {
+  document.querySelectorAll('#linkmodes button').forEach(b =>
+    b.classList.toggle('on', b.dataset.l === v));
+  const h = $('link-help');
+  if (h) h.textContent = LINK_HELP[v] || '';
+}
+function applyPeers(p, rank) {
+  const e = $('peer-list');
+  if (!e) return;
+  if (!p || !p.length) {
+    e.innerHTML = '<i>No other wall seen on this network.</i>';
+    return;
+  }
+  e.innerHTML = '<b>' + p.length + ' other wall' + (p.length > 1 ? 's' : '') +
+    ' seen</b> &middot; this one is #' + ((rank | 0) + 1) + ' in the sweep order<br>' +
+    p.map(w => '&bull; <a href="http://' + w.ip + '/">' + w.name + '</a> &mdash; ' +
+               w.mode + ', ' + Math.round(w.bright * 100 / 255) + '%' +
+               (w.link === 'off' ? ' <i>(independent)</i>' : '')).join('<br>');
+}
+
 // --- Identite du mur ------------------------------------------------------
 // Avec plusieurs murs sur le reseau, la page doit dire lequel on regarde avant
 // toute autre chose, sinon on regle la luminosite du mauvais salon. Le nom part
@@ -471,6 +521,8 @@ function apply() { push('count=' + $('count').value + '&budget=' + $('budget').v
 function render(s) {
   st = s;
   applyWallName(s.name);
+  applyLink(s.link);
+  applyPeers(s.peers, s.rank);
   $('s-mode').textContent  = label(s.mode);
   if (s.mode && s.mode !== 'off') lastOn = s.mode;
   const pw = $('pwr');
