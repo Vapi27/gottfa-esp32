@@ -108,7 +108,7 @@
 // En 128x64 il est trace a 2 px par module, bien plus confortable a scanner.
 #define ARENA_OLED_ENABLE      1
 #define ARENA_OLED_W         128
-#define ARENA_OLED_H          32   // 64 si tu montes le grand panneau
+#define ARENA_OLED_H          64   // 32 pour le 0,91" allonge
 #define ARENA_OLED_ADDR     0x3C   // 0x3D sur quelques modules
 // L'ecran s'eteint apres ce delai sans action. 0 = ne s'eteint jamais.
 //

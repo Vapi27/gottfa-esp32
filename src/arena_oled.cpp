@@ -96,6 +96,13 @@ static void drawQr() {
   const int16_t x0 = (ARENA_OLED_W - side) / 2 - 24;   // leave room for the text
   const int16_t y0 = (ARENA_OLED_H - side) / 2;
 
+  // Contraste bas pour le QR. A pleine luminosite un OLED "bave" : chaque pixel
+  // allume deborde sur ses voisins eteints, les modules se rejoignent et
+  // l'appareil photo ne distingue plus la grille. Un QR se scanne mieux terne.
+  // Signale a l'usage : "too bright for scanning".
+  s_d.ssd1306_command(SSD1306_SETCONTRAST);
+  s_d.ssd1306_command(0x20);
+
   s_d.fillRect(x0, y0, side, side, SSD1306_BLACK);
   for (uint8_t r = 0; r < ARENA_QR_SIDE; r++)
     for (uint8_t c = 0; c < ARENA_QR_SIDE; c++)
@@ -146,6 +153,10 @@ static void draw() {
   s_d.setTextColor(SSD1306_WHITE);
 
   if (s_item == IT_SIRI && s_edit) { drawQr(); s_d.display(); return; }
+
+  // Contraste nominal partout ailleurs : le menu se lit de loin, lui.
+  s_d.ssd1306_command(SSD1306_SETCONTRAST);
+  s_d.ssd1306_command(0xCF);
 
   // Header: the item, and whether the knob is currently changing it.
   s_d.setTextSize(1);
