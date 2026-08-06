@@ -26,4 +26,9 @@ bool found();          // true if a panel answered — lets the caller skip its 
 // screen and restarts the sleep countdown. Calling it while awake is harmless.
 void poke();
 
+// Affiche le code d'appairage en plein ecran, sans passer par l'encodeur.
+// C'est LA chose qu'un proprietaire doit pouvoir obtenir quand le mur n'est pas
+// encore sur le reseau - et pendant les essais, quand le bouton n'est pas cable.
+void showQr();
+
 }  // namespace arenaoled

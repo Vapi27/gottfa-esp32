@@ -204,6 +204,14 @@ static void sleepNow() {
   s_d.ssd1306_command(SSD1306_DISPLAYOFF); // powered down, not just black
 }
 
+void showQr() {
+  if (!s_found) return;
+  s_item = IT_SIRI;
+  s_edit = true;
+  poke();
+  draw();
+}
+
 void poke() {
   s_lastIn = millis();
   if (s_awake || !s_found) return;
@@ -337,6 +345,7 @@ void tick() {
 namespace arenaoled {
 void begin() {}
 void tick()  {}
+void showQr(){}
 bool found() { return false; }
 void poke()  {}
 }

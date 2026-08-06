@@ -627,6 +627,11 @@ static void startServer() {
   // tant qu'on interroge.
   s_server.on("/api/oled", HTTP_GET, [](AsyncWebServerRequest* r) {
     if (!arenaoled::found()) { r->send(404, "text/plain", "aucun panneau detecte"); return; }
+    if (r->hasParam("qr")) {
+      arenaoled::showQr();
+      r->send(200, "text/plain", "code d'appairage affiche");
+      return;
+    }
     arenaoled::poke();
     r->send(200, "text/plain", "ecran reveille");
   });
