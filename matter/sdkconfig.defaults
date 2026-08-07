@@ -153,3 +153,9 @@ CONFIG_AUTOSTART_ARDUINO=y
 CONFIG_ARDUINO_LOOP_STACK_SIZE=16384
 CONFIG_ENABLE_OTA_REQUESTOR=n
 CONFIG_ESPTOOLPY_FLASHSIZE_4MB=y
+
+# Retour arriere automatique : une image fraichement installee demarre a
+# l essai, et le prochain demarrage repart sur l ancienne si personne ne l a
+# declaree saine. La moitie logicielle est validateImageWhenHealthy() dans
+# arena_net.cpp - sans elle CHAQUE mise a jour serait annulee.
+CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE=y

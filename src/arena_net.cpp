@@ -5,6 +5,8 @@
 #include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
 #include <Preferences.h>
+#include <esp_ota_ops.h>   // validation de l'image apres une OTA
+
 // esp_read_mac : dans esp_mac.h depuis IDF 5, dans esp_system.h avant.
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 0, 0)
 #include <esp_mac.h>
@@ -50,6 +52,37 @@ static Preferences    s_prefs;
 // la reponse n'est pas encore sur le fil, et l'appelant ne verrait qu'une
 // connexion coupee - impossible de distinguer "c'est fait" de "ca a plante".
 static uint32_t       s_rebootAt = 0;
+
+// Retour arriere automatique : la MOITIE manquante.
+//
+// CONFIG_BOOTLOADER_APP_ROLLBACK_ENABLE fait demarrer toute image fraichement
+// installee a l'essai. Si personne ne la declare saine, le prochain demarrage
+// repart sur l'ANCIENNE - ce qui est exactement le filet qu'on veut... et ce
+// qui annulerait CHAQUE mise a jour si cet appel manquait. Les deux moities
+// vont ensemble, il n'y a pas de demi-mesure possible.
+//
+// On ne valide pas au demarrage : une image qui plante trois secondes apres
+// avoir demarre serait declaree bonne avant de tomber. On attend d'avoir une
+// adresse ET une minute de fonctionnement, ce qui couvre le seul mode de panne
+// que le retour arriere sait reparer - une image qui ne tient pas debout.
+static bool s_imgValidated = false;
+
+static void validateImageWhenHealthy() {
+  if (s_imgValidated) return;
+  if (millis() < 60000) return;
+  const char* ip = arenanet::ip();
+  if (!ip || !strcmp(ip, "0.0.0.0")) return;
+
+  esp_ota_img_states_t st;
+  const esp_partition_t* run = esp_ota_get_running_partition();
+  if (esp_ota_get_state_partition(run, &st) == ESP_OK && st == ESP_OTA_IMG_PENDING_VERIFY) {
+    if (esp_ota_mark_app_valid_cancel_rollback() == ESP_OK)
+      Serial.println("[ota] image declaree saine - plus de retour arriere");
+    else
+      Serial.println("[ota] ECHEC de la validation - la carte reviendra a l'ancienne image");
+  }
+  s_imgValidated = true;
+}
 
 // Identite de la carte. La MAC est gravee en usine, donc unique sans reglage ni
 // numero de serie a gerer : deux murs sortis de la meme image ne peuvent pas se
@@ -958,6 +991,8 @@ void begin() {
 }
 
 void loop() {
+  validateImageWhenHealthy();
+
   // Redemarrage differe demande par /api/reset : la reponse a eu le temps de
   // partir, l'appelant sait donc que l'ordre a ete accepte.
   if (s_rebootAt && (int32_t)(millis() - s_rebootAt) >= 0) {

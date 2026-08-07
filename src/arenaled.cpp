@@ -419,11 +419,25 @@ void musicPush(uint8_t e, uint8_t b, uint8_t t) {
 }
 
 #if ARENA_MIC_ENABLE
+// L'ADC ne se configurait nulle part. Sans ces deux lignes on depend du defaut
+// du coeur Arduino, qui a change entre versions - et une attenuation trop faible
+// ecrete tout signal depassant ~1 V, ce qui se voit comme un micro sourd puis
+// sature d'un coup.
+static void micBegin() {
+  analogReadResolution(12);                      // 0..4095, donc mi-echelle a 2048
+  analogSetPinAttenuation(PIN_ARENA_MIC, ADC_11db);   // pleine echelle ~3,1 V
+  Serial.printf("[led] micro sur GPIO%d (ADC1)\n", PIN_ARENA_MIC);
+}
+
 static void musicSampleMic() {
   // 160 reads ~ 1.6 ms per frame. Mean-removed RMS = energy; a one-pole
   // low-pass splits a bass proxy from the rest. Crude next to an FFT, and
   // enough: lighting needs an envelope, not a spectrum.
-  static float lp = 2048;
+  // Demarre a 0, pas a 2048 : x est deja debiaise juste en dessous
+  // (analogRead - 2048), donc un filtre initialise a mi-echelle met une
+  // trentaine d'echantillons a redescendre et annonce une basse enorme au
+  // premier appel.
+  static float lp = 0;
   float sumSq = 0, sumLpSq = 0;
   for (int i = 0; i < 160; i++) {
     const float x = (float)analogRead(PIN_ARENA_MIC) - 2048.0f;
@@ -945,6 +959,9 @@ void save() {
 }
 
 void begin() {
+#if ARENA_MIC_ENABLE
+  micBegin();
+#endif
   s_prefs.begin("arena", false);
   {
     String mn = s_prefs.getString("modeN", "");

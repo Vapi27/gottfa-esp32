@@ -93,11 +93,22 @@
 // (auto-gain, best) or MAX4466 — OUT->GPIO34, VCC->3V3, GND->GND. Leave 0 with
 // no mic: a floating ADC pin reads WiFi noise as music and the wall dances to
 // static (measured: 290 mA of it). /api/music works either way.
-#define ARENA_MIC_ENABLE       0
-#define PIN_ARENA_MIC         34
+// Micro embarque. Le mode Music retombe sur musicPush() (energie envoyee par
+// l'API) quand il vaut 0 - c'est ce qui masquait le fait que la broche etait
+// invalide : le chemin micro n'etait meme pas compile.
+#define ARENA_MIC_ENABLE       1
+// Micro. DOIT etre sur ADC1 (GPIO1-10) : ADC2 est utilise par le pilote WiFi sur
+// l'ESP32-S3, et une lecture y echoue des que la radio emet. GPIO34 - la valeur
+// precedente - n'est ni l'un ni l'autre, et appartient a la PSRAM octale sur un
+// module N16R8 : le mode Music lisait donc du vide.
+#define PIN_ARENA_MIC          1   // ADC1_CH0
 
 #define ARENA_BUTTON_ENABLE    1
-#define PIN_ARENA_BUTTON       0   // active LOW (internal pull-up)
+// Bouton de facade. PAS sur GPIO0 : c'est la broche de selection du mode de
+// demarrage du S3, et un client qui l'appuie en branchant l'alimentation obtient
+// une carte partie en mode televersement - un mur qui parait mort. GPIO0 reste
+// pour un poussoir BOOT cote carte, hors de portee.
+#define PIN_ARENA_BUTTON      18   // actif a l'etat bas (tirage interne)
 // --- Ecran de controle SSD1306 + encodeur rotatif ---------------------------
 // Meme panneau que le compagnon GottFA80+ (Adafruit SSD1306 en I2C) : une seule
 // reference pour les deux cartes. Absent = tout le module est inerte, le mur
