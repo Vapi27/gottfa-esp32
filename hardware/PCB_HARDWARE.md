@@ -148,6 +148,23 @@ chaînage doit passer sur un connecteur détrompé, pas sur un USB-C.
 
 ### B — Rail 3,3 V
 
+**Référence retenue : SY8089A1AAC** (Silergy) — LCSC **C479074**, SOT-23-5,
+*Extended* chez JLCPCB. Vérifié le 2026-08-07 : entrée **2,5–5,5 V**, **2 A**,
+synchrone, 1,5 MHz, sortie ajustable par diviseur (`VOUT = 0,6 × (1 + RH/RL)` —
+formule du datasheet). Pour 3,3 V : **RH 68 k / RL 15 k** → 3,32 V. Self 2,2 µH
+(saturation ≥ 2,5 A), 22 µF de part et d'autre.
+
+Pourquoi celui-là et pas le MT2492 (C89358, moitié moins cher) : le MT2492
+démarre à **4,5 V d'entrée minimum**. Un rail USB-C nominal 5 V descend sous
+cette barre avec un câble médiocre sous charge — le convertisseur décrocherait
+précisément quand le mur tire le plus. La plage 2,5–5,5 V du SY8089 régule
+jusqu'au fond de l'affaissement. Second choix à specs égales : TLV62569DBVR
+(TI, C141836), même plage, même courant — **brochage à vérifier avant toute
+substitution**, les SOT-23-5 de bucks ne sont pas interchangeables.
+
+Les deux candidats sont *Extended* : aucun avantage de forfait à espérer, la
+carte en paie déjà (le module ESP32 est *Extended* aussi).
+
 Convertisseur **abaisseur à découpage**, 5 V → 3,3 V, **1,5 A minimum**.
 Pas de régulateur linéaire : un AMS1117 dissiperait `(5 − 3,3) × 0,5 = 0,85 W`
 dans un boîtier SOT-223, à côté d'un plan qui porte déjà 9 A.
