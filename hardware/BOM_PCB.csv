@@ -7,20 +7,20 @@ L1,1,inductance 2.2 uH saturation >= 2.5 A,blindee type 0630,generique,OK,"self 
 R8 R9,2,68 kOhm + 15 kOhm 1%,0603,generique basic,OK,"diviseur de retour U4 : 0.6x(1+68/15) = 3.32 V"
 C17 C18,2,22 uF X5R 10 V,0805,generique basic,OK,entree et sortie de U4
 U5,1,AP2552W6-7 interrupteur a limitation de courant,SOT-26,C441824,OK verifie (1171 en stock - 0.46 USD/100),"limiteur sortie LED - ATTENTION : ENABLE ACTIF BAS, brocher EN vers la masse sinon sortie morte en permanence"
-U6,1,74AHCT1G125,SOT-23-5,A CHOISIR,ATTENTION a verifier,tampon 5 V sur la ligne de donnees LED (VIH = 0.7 x VDD respecte)
-MIC1,1,micro MEMS analogique,port haut,C5373228 / C966934 / C481297,ATTENTION candidats non valides,"ni sensibilite ni stock confirmes - a valider a la main avant de figer"
-J1,1,receptacle USB-C 16 broches,type TYPE-C-31-M-12 courant,a confirmer,ATTENTION a verifier,alimentation 5 V / 3 A + flash USB natif (GPIO19/20)
-J2,1,JST-XH 3 broches,B3B-XH-A,a confirmer,ATTENTION a verifier,sortie plateau : 5V / DATA / GND - 2.0 A max (budget firmware)
+U6,1,SN74AHCT1G125DCKR (TI),SC-70-5,C350557,OK verifie (9150 en stock - 0.05-0.09 USD),"tampon 5 V donnees LED - AHCT : VIH fixe 2.0 V (TTL) donc pilotable en 3.3 V - TI authentique au prix d un clone - variante SOT-23-5 si soudage main : C7484"
+MIC1,1,LMA2718S381-OSK02 (LinkMems),"SMD-4P 2.8x1.7 mm, port haut",C47148419,OK verifie (1050 en stock - 0.31 USD/5),"MEMS ANALOGIQUE : VDD 1.6-3.6 V (3.3 V OK), -38 dBV, SNR 58 dB(A), Zout 300 ohms -> couplage AC vers MAX9814 - les 3 candidats initiaux etaient MORTS (C5373228 deliste, C966934 stock 0, C481297 epuise)"
+J1,1,TYPE-C-31-M-12 (HRO),"CMS coude, 16 broches",C165948,OK verifie (193830 en stock - 0.10-0.17 USD),"5 A / 20 V confirmes -> 66% de marge sur le besoin 3 A - empreinte standard de la communaute ESP32-S3 - alternative SHOU HAN a 0.05 USD rejetee : donnee pour exactement 3 A, zero marge"
+J2,1,B3B-XH-A(LF)(SN) JST authentique,"traversant, pas REEL 2.50 mm (pas 2.54 !)",C144394,OK verifie (133120 en stock - 0.04-0.05 USD),"sortie plateau 5V/DATA/GND - 3 A AC/DC en AWG22 confirme dans la datasheet JST -> 2.0 A continu = 66% du nominal - clone Boomele 5x moins cher rejete : courant admissible invérifiable sur une ligne de puissance"
 J3,1,connecteur ecran 4 broches,2.54 ou 1.25 selon stock,stock interne,-,SSD1306 128x32 I2C 0x3C : GND / 3V3 / SCL / SDA
-F1,1,fusible 5 A,1206,a confirmer,ATTENTION a verifier,assurance contre un chargeur defaillant - pas une protection de fonctionnement
-D1,1,TVS unidirectionnel 5 V,SOD-123 type SMF5.0A,a confirmer,ATTENTION a verifier,ecretage du transitoire a l'enfichage
+F1,1,0452005.MRL Littelfuse Nano2 Slo-Blo,"2410 (6.1x2.5 mm) - PAS 1206 : aucun 1206 5 A temporise n a de stock > 500",C66503,OK verifie (10130 en stock - 0.16-0.31 USD),"5 A temporise, 125 V, coupure 50 A - courant normal 2.92 A = 58% du calibre - assurance contre un chargeur defaillant, pas une protection de fonctionnement"
+D1,1,SMF5.0A (MDD),SOD-123FL,C193402,OK verifie (313700 en stock - 0.02-0.03 USD),"unidirectionnel, standoff 5 V / clamp 9.2 V / 200 W - specs identiques au Littelfuse 4x plus cher - ecretage du transitoire a l enfichage"
 D2,1,WS2812B-2020 pixel de statut,2.2x2 mm,C965555,OK verifie (35115 en stock - ~0.06 USD),"MONTE DE SERIE - GPIO48, alim 3.3 V : VIH 0.7x3.3=2.31 V respecte par la donnee 3.3 V (montage prouve sur devkit) - orange=flash cyan=diag vert=lien OK"
 R1 R2,2,5.1 kOhm 1%,0603,generique basic,OK,CC1/CC2 vers masse - sans elles aucun chargeur ne debite
 R3,1,330 Ohm,0603,generique basic,OK,serie sur DATA en sortie du tampon U6
 R4,1,10 kOhm 1%,0603,generique basic,OK,"RLIM de U5 : seuil typ 2.45 A, fenetre 2.30-2.60 A a ±6% (point verifie fiche : 1.632 A @ 15 k) - budget firmware 2.0 A dessous, chargeur 3 A dessus"
 R5,1,10 kOhm,0603,generique basic,OK,tirage EN vers 3V3 (demarrage propre)
 R6 R7,2,4.7 kOhm,0603,generique basic - DNP,option,tirages I2C : NE PAS monter si le module ecran en porte deja
-C1 C2,2,470 uF 10 V faible ESR,polymere,a confirmer,ATTENTION a verifier,reservoir - la chaine LED appelle par bouffees a chaque trame
+C1 C2,2,R6RL010471C077MH0XX (Gyunrui),"polymere solide, D6.3xL7.7 mm",C53237865,OK verifie (2840 en stock - 0.07-0.10 USD),"470 uF 10 V, ESR 20 mOhm @ 100 kHz confirme datasheet, ripple 2.5 A rms - reservoir du rail 5 V, la chaine appelle par bouffees a 60 Hz - plan B si stock fond : C41410213"
 C3-C6,4,100 nF X7R,0402/0603,generique basic,OK,decouplage rail 5 V
 C7,1,1 uF,0402/0603,generique basic,OK,EN du module (RC de demarrage avec R5)
 C8-C11,4,100 nF + 10 uF,0402/0603,generique basic,OK,decouplage U1 au plus pres des broches d'alimentation

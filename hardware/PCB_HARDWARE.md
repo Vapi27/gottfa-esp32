@@ -252,31 +252,39 @@ déjà les deux : une ligne, `ARENA_OLED_H`.
 
 ---
 
-## 4bis. Références — état de vérification
+## 4bis. Références — TOUTES vérifiées
 
-Vérifiées sur les pages LCSC / JLCPCB le 2026-08-07. Les prix sont des « à partir
-de » : à confirmer dans le panier à la quantité réellement commandée.
+Chaque ligne a été confirmée sur sa page LCSC/JLCPCB (et datasheet quand la
+valeur en dépendait) le 2026-08-07. Les prix sont les paliers lus ce jour-là.
 
-| Rôle | Référence | LCSC | État |
-|---|---|---|---|
-| Module | ESP32-S3-WROOM-1-N16R8 | **C2913202** | ✅ vérifié — 25,5 × 18 × 3,1 mm, *Extended*, ~3,78 $ |
-| Module, sans PSRAM | ESP32-S3-WROOM-1-N16 | **C2913199** | ✅ vérifié — ~3,75 $, 1 146 en stock. Non retenu : voir §1 |
-| Module, antenne externe | ESP32-S3-WROOM-1U-N16R8 | **C3013946** | ✅ vérifié |
-| Protection ESD USB | USBLC6-2SC6 (ST) | **C7519** | ✅ vérifié — SOT-23-6, 3,5 pF |
-| Protection ESD USB, équivalent | USBLC6-2SC6 (UMW) | **C2687116** | ✅ vérifié — souvent moins cher |
-| Ampli micro | MAX9814ETD+T | **C41714** | ✅ vérifié — CAG, gain 40/50/60 dB |
-| Limiteur de courant | AP2552 | — | ⚠️ **à trouver** — famille confirmée par le datasheet Diodes, référence LCSC non identifiée |
-| Micro MEMS analogique | LMA2718T381-OAK02 | C5373228 | ⚠️ **non vérifié** — datasheet inaccessible depuis ici |
-| Micro MEMS analogique | MSM381A2718Z9QM2 | C966934 | ⚠️ **non vérifié** |
-| Micro MEMS analogique | ZTS6211E | C481297 | ⚠️ **non vérifié** |
+| Rôle | Référence | LCSC | Stock | Note |
+|---|---|---|---|---|
+| Module | ESP32-S3-WROOM-1-N16R8 | **C2913202** | — | PSRAM livrée désactivée (§1) |
+| ESD USB | USBLC6-2SC6 (ST) | **C7519** | — | équivalent UMW C2687116 |
+| Ampli micro | MAX9814ETD+T | **C41714** | — | CAG, alimenté en 3,3 V |
+| Abaisseur 3,3 V | SY8089A1AAC | **C479074** | — | 2,5–5,5 V d'entrée : régule dans l'affaissement (§B) |
+| Limiteur sortie LED | AP2552W6-7 | **C441824** | 1 171 | ⚠ **EN actif bas → masse** (§ protection) |
+| Tampon données 5 V | SN74AHCT1G125DCKR | **C350557** | 9 150 | TI en SC-70-5 au prix d'un clone ; SOT-23-5 : C7484 |
+| Micro MEMS | LMA2718S381-OSK02 | **C47148419** | 1 050 | analogique, 1,6–3,6 V, −38 dBV — **les 3 candidats initiaux étaient morts** (délisté / stock 0 / épuisé) |
+| USB-C | TYPE-C-31-M-12 | **C165948** | 193 830 | 5 A / 20 V confirmés = 66 % de marge |
+| Sortie plateau | B3B-XH-A(LF)(SN) JST | **C144394** | 133 120 | 3 A AWG22 (datasheet JST) ; **pas réel 2,50 mm**, pas 2,54 |
+| Fusible | 0452005.MRL Littelfuse | **C66503** | 10 130 | **2410, pas 1206** : aucun 1206 5 A temporisé n'a de stock > 500 |
+| TVS 5 V | SMF5.0A (MDD) | **C193402** | 313 700 | unidirectionnel, clamp 9,2 V, 4× moins cher que Littelfuse à specs égales |
+| Réservoir | 470 µF/10 V polymère Gyunrui | **C53237865** | 2 840 | ESR 20 mΩ confirmé datasheet ; plan B : C41410213 |
+| Pixel de statut | WS2812B-2020 | **C965555** | 35 115 | monté de série, GPIO48, alim 3,3 V (prouvé devkit) |
 
-Les trois micros MEMS sont des candidats trouvés au catalogue, **pas des choix** :
-ni la sensibilité, ni la tension d'alimentation, ni le stock n'ont pu être
-confirmés — LCSC sert une coquille aux requêtes automatiques. À valider à la main
-avant de figer la nomenclature.
+Écarts notables décidés en vérifiant, à connaître avant de router :
+- **F1 passe en boîtier 2410** — le 1206 demandé n'existe pas en 5 A temporisé
+  correctement stocké.
+- **U6 est en SC-70-5** (plus petit que le SOT-23-5 pressenti) — prendre C7484
+  si un prototype se soude à la main.
+- **J2 a un pas de 2,50 mm**, pas 2,54 : l'empreinte juste est la XH officielle.
+- Le clone d'embase 5× moins cher et le connecteur USB-C à 0,05 $ ont été
+  **rejetés sciemment** : courant admissible invérifiable pour l'un, donné pour
+  exactement 3 A (zéro marge) pour l'autre.
 
-Abandonné en cours de route : **CH224K (C970725)**, contrôleur de négociation PD.
-La référence est bonne, le besoin ne l'est pas — voir §3bis.
+Abandonné en cours de route : **CH224K (C970725)**, contrôleur PD. La référence
+est bonne, le besoin ne l'est pas — voir §3bis.
 
 ## 5. Ce qui reste hors carte
 
