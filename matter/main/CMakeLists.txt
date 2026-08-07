@@ -52,3 +52,25 @@ idf_component_register(
 # driven the LED chain on GPIO27 of an S3.
 target_compile_options(${COMPONENT_LIB} PRIVATE
     "-DCHIP_HAVE_CONFIG_H" "-DARENA_MATTER" "-DARENA_LED")
+
+# Garde-fou sur les corrections portees dans les sources tierces.
+#
+# Ces deux fichiers sont versionnes ici et modifies : sans le premier correctif
+# la chaine LED reste noire par intermittence, sans le second un mutex fuit et
+# la cadence tombe a 20 images/s. Les deux ont deja regresse silencieusement en
+# passant inapercus dans une mise a jour de bibliotheque. Un echec de
+# construction coute une minute ; un mur noir chez un client coute davantage.
+foreach(GUARD
+        "../components/arduino-esp32/cores/esp32/esp32-hal-rmt.c|allow_pd"
+        "../../lib/Adafruit_NeoPixel/esp.c|espShowRmtFail")
+  string(REPLACE "|" ";" G "${GUARD}")
+  list(GET G 0 GFILE)
+  list(GET G 1 GNEEDLE)
+  file(READ "${CMAKE_CURRENT_LIST_DIR}/${GFILE}" GTEXT)
+  string(FIND "${GTEXT}" "${GNEEDLE}" GPOS)
+  if(GPOS EQUAL -1)
+    message(FATAL_ERROR
+      "Correction perdue : '${GNEEDLE}' absent de ${GFILE}. "
+      "Voir matter/patches/README.md avant de continuer.")
+  endif()
+endforeach()

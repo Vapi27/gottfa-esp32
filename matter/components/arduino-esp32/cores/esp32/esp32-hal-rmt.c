@@ -529,7 +529,15 @@ bool rmtInit(int pin, rmt_ch_dir_t channel_direction, rmt_reserve_memsize_t mem_
   // channel particular configuration
   if (channel_direction == RMT_TX_MODE) {
     // TX Channel
-    rmt_tx_channel_config_t tx_cfg;
+    // La structure etait declaree SANS initialisation et arduino-esp32 3.2.0
+    // n'assigne pas flags.allow_pd, ajoute par IDF 5.4 : le bit valait donc ce
+    // qui trainait sur la pile. Or rmt_tx.c refuse la creation du canal si
+    // allow_pd vaut 1 sur une puce sans retention RMT (le S3 en fait partie) :
+    //   ESP_RETURN_ON_FALSE(config->flags.allow_pd == 0, ESP_ERR_NOT_SUPPORTED,
+    //                       TAG, "not able to power down in light sleep")
+    // D'ou un rmtInit() qui echouait par intermittence au demarrage - chaine LED
+    // noire, et aucun rapport avec la broche choisie. Mesure du 2026-08-02.
+    rmt_tx_channel_config_t tx_cfg = {};
     tx_cfg.gpio_num = pin;
     // CLK_APB for ESP32|S2|S3|C3 -- CLK_PLL_F80M for C6 -- CLK_XTAL for H2
     tx_cfg.clk_src = RMT_CLK_SRC_DEFAULT;
@@ -540,6 +548,7 @@ bool rmtInit(int pin, rmt_ch_dir_t channel_direction, rmt_reserve_memsize_t mem_
     tx_cfg.flags.with_dma = 0;
     tx_cfg.flags.io_loop_back = 0;
     tx_cfg.flags.io_od_mode = 0;
+    tx_cfg.flags.allow_pd = 0;      // obligatoire : voir le commentaire ci-dessus
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 1, 2)
     tx_cfg.intr_priority = 0;
 #endif
@@ -558,7 +567,7 @@ bool rmtInit(int pin, rmt_ch_dir_t channel_direction, rmt_reserve_memsize_t mem_
 
   } else {
     // RX Channel
-    rmt_rx_channel_config_t rx_cfg;
+    rmt_rx_channel_config_t rx_cfg = {};   // meme defaut que la config TX
     rx_cfg.gpio_num = pin;
     // CLK_APB for ESP32|S2|S3|C3 -- CLK_PLL_F80M for C6 -- CLK_XTAL for H2
     rx_cfg.clk_src = RMT_CLK_SRC_DEFAULT;
@@ -567,6 +576,7 @@ bool rmtInit(int pin, rmt_ch_dir_t channel_direction, rmt_reserve_memsize_t mem_
     rx_cfg.flags.invert_in = 0;
     rx_cfg.flags.with_dma = 0;
     rx_cfg.flags.io_loop_back = 0;
+    rx_cfg.flags.allow_pd = 0;
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(5, 1, 2)
     rx_cfg.intr_priority = 0;
 #endif
