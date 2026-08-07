@@ -118,7 +118,7 @@ Il se déclenche donc **sous** les 3 A du chargeur, ce qu'aucun fusible ni PTC n
 sait faire dans cette fenêtre. ⚠ Référence LCSC **non confirmée** — à vérifier
 sur stock avant de figer la nomenclature.
 
-## 4. Blocs de la carte## 4. Blocs de la carte
+## 4. Blocs de la carte
 
 ### A — Entrée d'alimentation (USB-C 5 V)
 

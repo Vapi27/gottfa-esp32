@@ -1,0 +1,29 @@
+ref,qte,composant,valeur / boitier,LCSC,statut,role
+U1,1,ESP32-S3-WROOM-1-N16R8,module 25.5x18x3.1 mm,C2913202,OK verifie,"MCU WiFi/BLE - 16 Mo flash imposes par la table de partitions, PSRAM livree desactivee (CONFIG_SPIRAM off)"
+U2,1,USBLC6-2SC6,SOT-23-6,C7519 (ST) ou C2687116 (UMW),OK verifie,protection ESD D+/D-
+U3,1,MAX9814ETD+T,TDFN-14,C41714,OK verifie,ampli micro a controle de gain automatique - alimente en 3.3 V
+U4,1,abaisseur 5V vers 3.3V >= 1.5 A,+ L 2.2-4.7 uH + 2x22 uF sortie,A CHOISIR,ATTENTION a verifier,rail 3.3 V - PAS de regulateur lineaire (0.85 W dissipes)
+U5,1,AP2552 (famille AP2552/AP2553),SOT-26,A TROUVER,ATTENTION a verifier,limiteur de courant sortie LED - seuil 2.36 A regle par R4
+U6,1,74AHCT1G125,SOT-23-5,A CHOISIR,ATTENTION a verifier,tampon 5 V sur la ligne de donnees LED (VIH = 0.7 x VDD respecte)
+MIC1,1,micro MEMS analogique,port haut,C5373228 / C966934 / C481297,ATTENTION candidats non valides,"ni sensibilite ni stock confirmes - a valider a la main avant de figer"
+J1,1,receptacle USB-C 16 broches,type TYPE-C-31-M-12 courant,a confirmer,ATTENTION a verifier,alimentation 5 V / 3 A + flash USB natif (GPIO19/20)
+J2,1,JST-XH 3 broches,B3B-XH-A,a confirmer,ATTENTION a verifier,sortie plateau : 5V / DATA / GND - 2.0 A max (budget firmware)
+J3,1,connecteur ecran 4 broches,2.54 ou 1.25 selon stock,stock interne,-,SSD1306 128x32 I2C 0x3C : GND / 3V3 / SCL / SDA
+F1,1,fusible 5 A,1206,a confirmer,ATTENTION a verifier,assurance contre un chargeur defaillant - pas une protection de fonctionnement
+D1,1,TVS unidirectionnel 5 V,SOD-123 type SMF5.0A,a confirmer,ATTENTION a verifier,ecretage du transitoire a l'enfichage
+D2,1,SK6812MINI pixel de statut,DNP / option,-,option,GPIO48 - orange=flash cyan=diag vert=lien OK - alim 3.3 V comme sur le devkit
+R1 R2,2,5.1 kOhm 1%,0603,generique basic,OK,CC1/CC2 vers masse - sans elles aucun chargeur ne debite
+R3,1,330 Ohm,0603,generique basic,OK,serie sur DATA en sortie du tampon U6
+R4,1,10 kOhm 1%,0603,generique basic,OK,RLIM de U5 : 10 k = seuil 2.36 A (max de la plage)
+R5,1,10 kOhm,0603,generique basic,OK,tirage EN vers 3V3 (demarrage propre)
+R6 R7,2,4.7 kOhm,0603,generique basic - DNP,option,tirages I2C : NE PAS monter si le module ecran en porte deja
+C1 C2,2,470 uF 10 V faible ESR,polymere,a confirmer,ATTENTION a verifier,reservoir - la chaine LED appelle par bouffees a chaque trame
+C3-C6,4,100 nF X7R,0402/0603,generique basic,OK,decouplage rail 5 V
+C7,1,1 uF,0402/0603,generique basic,OK,EN du module (RC de demarrage avec R5)
+C8-C11,4,100 nF + 10 uF,0402/0603,generique basic,OK,decouplage U1 au plus pres des broches d'alimentation
+C12-C15,4,100 nF,0402/0603,generique basic - option,option,anti-rebond boutons si cable de facade > 10 cm
+C16+,3,passifs micro (couplage 100 nF + strap gain),0402/0603,generique basic,OK,MIC1 vers U3 - GAIN strap GND = 40 dB au depart
+S1 S2 S3,3,poussoir tactile CMS,type TS-1187A,generique basic,OK,haut GPIO15 / bas GPIO17 / OK GPIO7 - vers masse (pull-up interne)
+S4,1,poussoir tactile CMS,idem,generique basic,OK,bouton de facade GPIO18 - JAMAIS GPIO0 (broche de strap)
+S5 S6,2,pads ou micro-poussoirs BOOT / RESET,cote carte,generique,OK,BOOT=GPIO0 RESET=EN - hors de portee du client
+ENC1,1,encodeur EC11,traversant - EMPREINTE SEULE (DNP),-,option,A=GPIO4 B=GPIO5 SW=GPIO7 - le firmware lit boutons ET encodeur
