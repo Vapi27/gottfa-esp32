@@ -14,7 +14,7 @@ J2,1,JST-XH 3 broches,B3B-XH-A,a confirmer,ATTENTION a verifier,sortie plateau :
 J3,1,connecteur ecran 4 broches,2.54 ou 1.25 selon stock,stock interne,-,SSD1306 128x32 I2C 0x3C : GND / 3V3 / SCL / SDA
 F1,1,fusible 5 A,1206,a confirmer,ATTENTION a verifier,assurance contre un chargeur defaillant - pas une protection de fonctionnement
 D1,1,TVS unidirectionnel 5 V,SOD-123 type SMF5.0A,a confirmer,ATTENTION a verifier,ecretage du transitoire a l'enfichage
-D2,1,SK6812MINI pixel de statut,DNP / option,-,option,GPIO48 - orange=flash cyan=diag vert=lien OK - alim 3.3 V comme sur le devkit
+D2,1,WS2812B-2020 pixel de statut,2.2x2 mm,C965555,OK verifie (35115 en stock - ~0.06 USD),"MONTE DE SERIE - GPIO48, alim 3.3 V : VIH 0.7x3.3=2.31 V respecte par la donnee 3.3 V (montage prouve sur devkit) - orange=flash cyan=diag vert=lien OK"
 R1 R2,2,5.1 kOhm 1%,0603,generique basic,OK,CC1/CC2 vers masse - sans elles aucun chargeur ne debite
 R3,1,330 Ohm,0603,generique basic,OK,serie sur DATA en sortie du tampon U6
 R4,1,10 kOhm 1%,0603,generique basic,OK,"RLIM de U5 : seuil typ 2.45 A, fenetre 2.30-2.60 A a ±6% (point verifie fiche : 1.632 A @ 15 k) - budget firmware 2.0 A dessous, chargeur 3 A dessus"

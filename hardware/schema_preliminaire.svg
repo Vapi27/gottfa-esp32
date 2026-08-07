@@ -157,8 +157,8 @@
 
   <line x1="920" y1="275" x2="948" y2="275" stroke="#888" stroke-width="1.5" stroke-dasharray="5 4"/>
   <text x="953" y="279" font-size="10" fill="#666">TP DATA2 (chaîne 2, inactive)</text>
-  <line x1="920" y1="305" x2="948" y2="305" stroke="#888" stroke-width="1.5" stroke-dasharray="5 4"/>
-  <text x="953" y="309" font-size="10" fill="#666">STATUS_PX → D2 (option)</text>
+  <line x1="920" y1="305" x2="948" y2="305" stroke="#2e7d32" stroke-width="1.5"/>
+  <text x="953" y="309" font-size="10" fill="#111">STATUS_PX → D2</text>
   <line x1="920" y1="340" x2="948" y2="340" stroke="#2e7d32" stroke-width="1.5"/>
   <text x="953" y="344" font-size="10" fill="#111">SDA → J3 écran</text>
   <line x1="920" y1="375" x2="948" y2="375" stroke="#2e7d32" stroke-width="1.5"/>
@@ -262,11 +262,11 @@
   <text x="746" y="964" font-size="11" fill="#555">polarisation mesurée par le firmware — aucun réglage</text>
 
   <!-- statut -->
-  <rect x="1140" y="840" width="300" height="150" fill="none" stroke="#888" stroke-width="1.5" stroke-dasharray="6 4"/>
-  <text x="1156" y="864" font-size="13" font-weight="bold" fill="#666">D2 — pixel de statut (option)</text>
-  <text x="1156" y="886" font-size="11" fill="#666">SK6812MINI ← STATUS_PX (GPIO48)</text>
-  <text x="1156" y="906" font-size="11" fill="#666">alim 3,3 V, comme sur le devkit</text>
-  <text x="1156" y="926" font-size="11" fill="#666">orange = flash · cyan = diag · vert = lien OK</text>
+  <rect x="1140" y="840" width="300" height="150" fill="#eceff1" stroke="#37474f" stroke-width="1.5"/>
+  <text x="1156" y="864" font-size="13" font-weight="bold" fill="#111">D2 — pixel de statut</text>
+  <text x="1156" y="886" font-size="11" fill="#333">WS2812B-2020 ← STATUS_PX (GPIO48)</text>
+  <text x="1156" y="906" font-size="11" fill="#333">C965555 ✓ · alim 3,3 V (prouvé devkit)</text>
+  <text x="1156" y="926" font-size="11" fill="#333">orange = flash · cyan = diag · vert = lien OK</text>
 
   <!-- pied -->
   <text x="40" y="1022" font-size="10" fill="#999">pinballs.store — schéma préliminaire v0.1 · ne pas router avant d'avoir vérifié les réf. ⚠ (U6, MIC1, J1, J2, C1·C2) · sources : arena_config.h + mesures wattmètre du 2026-08-07</text>
