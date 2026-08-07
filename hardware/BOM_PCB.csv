@@ -6,7 +6,7 @@ U4,1,SY8089A1AAC abaisseur synchrone 2 A / 1.5 MHz,"SOT-23-5, entree 2.5-5.5 V",
 L1,1,inductance 2.2 uH saturation >= 2.5 A,blindee type 0630,generique,OK,"self de U4 - le 1.5 MHz autorise une petite self"
 R8 R9,2,68 kOhm + 15 kOhm 1%,0603,generique basic,OK,"diviseur de retour U4 : 0.6x(1+68/15) = 3.32 V"
 C17 C18,2,22 uF X5R 10 V,0805,generique basic,OK,entree et sortie de U4
-U5,1,AP2552 (famille AP2552/AP2553),SOT-26,A TROUVER,ATTENTION a verifier,limiteur de courant sortie LED - seuil 2.36 A regle par R4
+U5,1,AP2552W6-7 interrupteur a limitation de courant,SOT-26,C441824,OK verifie (1171 en stock - 0.46 USD/100),"limiteur sortie LED - ATTENTION : ENABLE ACTIF BAS, brocher EN vers la masse sinon sortie morte en permanence"
 U6,1,74AHCT1G125,SOT-23-5,A CHOISIR,ATTENTION a verifier,tampon 5 V sur la ligne de donnees LED (VIH = 0.7 x VDD respecte)
 MIC1,1,micro MEMS analogique,port haut,C5373228 / C966934 / C481297,ATTENTION candidats non valides,"ni sensibilite ni stock confirmes - a valider a la main avant de figer"
 J1,1,receptacle USB-C 16 broches,type TYPE-C-31-M-12 courant,a confirmer,ATTENTION a verifier,alimentation 5 V / 3 A + flash USB natif (GPIO19/20)
@@ -17,7 +17,7 @@ D1,1,TVS unidirectionnel 5 V,SOD-123 type SMF5.0A,a confirmer,ATTENTION a verifi
 D2,1,SK6812MINI pixel de statut,DNP / option,-,option,GPIO48 - orange=flash cyan=diag vert=lien OK - alim 3.3 V comme sur le devkit
 R1 R2,2,5.1 kOhm 1%,0603,generique basic,OK,CC1/CC2 vers masse - sans elles aucun chargeur ne debite
 R3,1,330 Ohm,0603,generique basic,OK,serie sur DATA en sortie du tampon U6
-R4,1,10 kOhm 1%,0603,generique basic,OK,RLIM de U5 : 10 k = seuil 2.36 A (max de la plage)
+R4,1,10 kOhm 1%,0603,generique basic,OK,"RLIM de U5 : seuil typ 2.45 A, fenetre 2.30-2.60 A a ±6% (point verifie fiche : 1.632 A @ 15 k) - budget firmware 2.0 A dessous, chargeur 3 A dessus"
 R5,1,10 kOhm,0603,generique basic,OK,tirage EN vers 3V3 (demarrage propre)
 R6 R7,2,4.7 kOhm,0603,generique basic - DNP,option,tirages I2C : NE PAS monter si le module ecran en porte deja
 C1 C2,2,470 uF 10 V faible ESR,polymere,a confirmer,ATTENTION a verifier,reservoir - la chaine LED appelle par bouffees a chaque trame

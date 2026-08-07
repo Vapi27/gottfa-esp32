@@ -108,15 +108,16 @@ avec un bornier et des fils qu'on manipule en accrochant la pièce.
 
 | | |
 |---|---|
-| Composant | **AP2552** (famille AP2552/AP2553), limitation réglable par résistance |
-| Seuil | jusqu'à **2,36 A** typique, ±6 % → 2,22 à 2,50 A |
-| Programmation | `RLIM`, résistance 1 %, 10 kΩ ≤ RLIM ≤ 210 kΩ |
-| Marge | budget firmware à **2,0 A**, franchement sous le seuil bas de 2,22 A |
-| Comportement | limitation à courant constant, drapeau de défaut, réarmement automatique |
+| Composant | **AP2552W6-7** (Diodes) — LCSC **C441824**, SOT-26. Vérifié le 2026-08-07 : 1 171 en stock, 0,65 $/1 → 0,46 $/100 |
+| Point de calibration (fiche) | **1,632 A à RLIM = 15 kΩ**, ±6 % — c'est de là que sort tout le calcul |
+| R4 retenu | **10 kΩ 1 %** → typ 2,45 A, fenêtre **2,30 – 2,60 A** |
+| Marge | budget firmware **2,0 A** : 15 % sous le pire cas bas (2,30 A) |
+| Plafond | pire cas haut 2,60 A, **sous** les 3 A du chargeur |
+| ⚠ Enable | **ACTIF BAS** sur cette variante : `EN` se câble **à la masse**. Relié à IN — le réflexe habituel — le limiteur reste désactivé et la sortie LED est morte en permanence. L'erreur était sur le schéma v0.1, attrapée en vérifiant la fiche. |
+| Comportement | limitation à courant constant, drapeau `FLAG`, réarmement automatique |
 
 Il se déclenche donc **sous** les 3 A du chargeur, ce qu'aucun fusible ni PTC ne
-sait faire dans cette fenêtre. ⚠ Référence LCSC **non confirmée** — à vérifier
-sur stock avant de figer la nomenclature.
+sait faire dans cette fenêtre.
 
 ## 4. Blocs de la carte
 
