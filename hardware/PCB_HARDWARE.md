@@ -24,8 +24,11 @@ Mesuré le 2026-08-07 sur le build `95f4bf1` et sur le mur `Arena`
 | Plafond appliqué | **9,0 A** | `LED_POWER_BUDGET_MA` — le firmware assombrit l'image entière plutôt que de dépasser |
 | Rafraîchissement | 60 Hz | `LED_FRAME_HZ` (4,8 ms sur le fil à 150 pixels) |
 
-Le PCB doit donc **router 9 A en continu**. C'est le chiffre dimensionnant :
-il décide de la largeur des pistes, du connecteur d'entrée et du fusible.
+⚠ **Ne pas dimensionner l'alimentation sur ces 9 A.** C'est un plafond de
+sécurité logiciel, pas un point de fonctionnement : le modèle du firmware compte
+quatre canaux par pixel, là où le blanc d'un RGBW n'en utilise qu'un. Mesuré, le
+mur maximal tire **2,92 A**. Voir §3bis, qui est la section qui décide du
+connecteur, du fusible et du cuivre.
 
 ### Référence retenue
 
@@ -166,20 +169,36 @@ le budget par ce nombre rendrait le chaînage sûr par construction. Non implém
 
 ## 4. Blocs de la carte
 
-### A — Entrée d'alimentation (5 V, 9 A)
+### A — Entrée d'alimentation (USB-C 5 V)
+
+Dimensionné sur les mesures du §3bis : besoin réel **2,92 A** au pire, cuivre et
+protection posés à **5 A** pour ouvrir la variante grand mur sans refaire la
+carte.
 
 | Rôle | Spécification | Pourquoi |
 |---|---|---|
-| Connecteur | bornier à vis 2 pôles pas 5,08 mm, ≥ 15 A | 9 A ne passent ni en JST-XH ni en barillet standard |
-| Fusible | 10 A temporisé, boîtier 2920 ou porte-fusible | au-dessus du plafond firmware de 9 A, en dessous du courant du bloc |
-| Anti-inversion | MOSFET canal P, R<sub>DSon</sub> ≤ 10 mΩ, ≥ 20 A, boîtier DFN/SO-8 | à 9 A et 10 mΩ, il dissipe 0,8 W — un boîtier SOT-23 chaufferait trop |
-| Écrêtage | TVS unidirectionnel 5 V, SMB | protège du transitoire à l'enfichage |
-| Réservoir | 2 × 1000 µF 10 V faible ESR + 4 × 100 nF | la chaîne appelle par bouffées à chaque trame |
+| Connecteur | réceptacle **USB-C 16 broches** | alimente et flashe par le même câble |
+| Négociation | 2 × **5,1 kΩ** de CC1 et CC2 vers la masse | sans elles aucun chargeur ne débite. C'est tout ce qu'il faut pour 5 V / 3 A |
+| Protection ESD | réseau type **USBLC6-2SC6** sur D+/D− | |
+| Paire USB | **90 Ω différentiel**, courte et appairée, vers GPIO19/20 | USB natif du S3 : pas de pont série à acheter |
+| Fusible | **5 A**, boîtier 1206 ou 2920 | au-dessus du besoin réel, en dessous de ce qu'un chargeur peut fournir en défaut |
+| Anti-inversion | **non nécessaire** | l'USB-C ne peut pas être branché à l'envers ; c'est un des intérêts du connecteur |
+| Écrêtage | TVS unidirectionnel 5 V, SOD-123 | transitoire à l'enfichage |
+| Réservoir | 2 × 470 µF 10 V faible ESR + 4 × 100 nF | la chaîne appelle par bouffées à chaque trame |
 
-Pistes 5 V et masse : **9 A en continu**. En cuivre 1 oz, compter environ
-**20 mm de large** pour 10 °C d'échauffement, ou passer en 2 oz, ou dégager le
-vernis et étamer la piste. À vérifier avec ton calculateur habituel — c'est le
-point où une carte se met à chauffer sans prévenir.
+Pistes 5 V et masse : **2,8 mm** en cuivre 1 oz externe (IPC-2221, +10 °C).
+
+**Empreinte à prévoir non montée : CH224K (LCSC C970725) + abaisseur.** Elle ne
+sert que le jour où un mur dépassera ~130 pixels : le CH224K négocie alors 15 ou
+20 V, l'abaisseur redescend en 5 V, et le même circuit imprimé encaisse jusqu'à
+45 W. Quelques millimètres carrés aujourd'hui contre une refonte plus tard.
+
+**Sortie de chaînage.** Un second USB-C présentant 5 V est légitime à condition
+de porter les résistances **Rp** côté source (et non Rd) — un réceptacle qui
+sort de la tension sans se déclarer est hors spécification. ⚠ Ne **jamais** y
+présenter 20 V : un téléphone branché dessus attend 5 V tant qu'il n'a pas
+négocié, et n'y survit pas. Si la variante PD est un jour peuplée, la sortie de
+chaînage doit passer sur un connecteur détrompé, pas sur un USB-C.
 
 ### B — Rail 3,3 V
 
@@ -191,7 +210,8 @@ Bobine 2,2 à 4,7 µH selon le composant retenu, 2 × 22 µF en sortie, et le
 diviseur de retour au plus près.
 
 L'ESP32-S3 appelle des pointes de l'ordre de 500 mA en émission WiFi, sur un
-rail par ailleurs calme : la marge sert à ça.
+rail par ailleurs calme : la marge sert à ça. Mesuré, toute l'électronique tient
+en **1,1 W à la prise** — c'est la seule charge de ce convertisseur.
 
 ### C — Module
 
