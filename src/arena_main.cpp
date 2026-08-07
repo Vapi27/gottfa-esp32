@@ -20,6 +20,21 @@ static bool netHasIp() {
 #include "arena_oled.h"
 #include "arena_net.h"
 #include "arena_peers.h"
+
+// Le retour arriere OTA serait du THEATRE sans cette ligne.
+//
+// initArduino() appelle esp_ota_mark_app_valid_cancel_rollback() pendant le
+// demarrage du coeur, avant meme que setup() ne tourne (esp32-hal-misc.c, sous
+// CONFIG_APP_ROLLBACK_ENABLE). Une image qui plante trois secondes plus tard
+// serait donc deja declaree bonne, et le bootloader n'aurait rien a rattraper -
+// precisement le seul cas que le filet sait reparer.
+//
+// verifyRollbackLater() est declaree faible par le coeur et rend false. La
+// redefinir ici lui dit de ne PAS valider : c'est validateImageWhenHealthy(),
+// dans arena_net.cpp, qui s'en charge - apres une adresse IP et une minute de
+// fonctionnement. Mesure du 2026-08-07 : sans cela /api/state annonce
+// otavalid=valid des la 55e seconde, ce qui trahit une validation trop precoce.
+extern "C" bool verifyRollbackLater() { return true; }
 #ifdef ARENA_MATTER
 extern void arena_matter_init();
 extern void arena_matter_sync();   // reflechit le mode reel vers Maison/Siri
