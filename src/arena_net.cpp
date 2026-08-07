@@ -316,6 +316,14 @@ static String stateJson() {
   // fil inverse - et il n'y a pas de port serie sur un mur accroche.
   j += ",\"oled\":" + String(arenaoled::found() ? "true" : "false");
   j += ",\"bustype\":"  + String((int32_t)espShowBusType);
+  // Memoire. C'est ce qui decide si la PSRAM est necessaire : ce qui compte
+  // n'est pas le total mais le plus BAS jamais atteint, car le manque de tas ne
+  // se manifeste qu'a la pointe - typiquement la poignee de main d'appairage.
+  j += ",\"heap\":"    + String((uint32_t)ESP.getFreeHeap());
+  j += ",\"heapmin\":" + String((uint32_t)ESP.getMinFreeHeap());
+  j += ",\"heapblk\":" + String((uint32_t)ESP.getMaxAllocHeap());
+  j += ",\"psram\":"   + String((uint32_t)ESP.getFreePsram());
+
   // Retour arriere OTA : l'etat de l'image qui tourne. C'est ce qui dit si le
   // filet est reellement arme, et un cable serie n'est pas une facon durable de
   // le verifier - une OTA reenumere l'USB natif et le port disparait.
