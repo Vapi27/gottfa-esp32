@@ -316,6 +316,27 @@ static String stateJson() {
   // fil inverse - et il n'y a pas de port serie sur un mur accroche.
   j += ",\"oled\":" + String(arenaoled::found() ? "true" : "false");
   j += ",\"bustype\":"  + String((int32_t)espShowBusType);
+  // Retour arriere OTA : l'etat de l'image qui tourne. C'est ce qui dit si le
+  // filet est reellement arme, et un cable serie n'est pas une facon durable de
+  // le verifier - une OTA reenumere l'USB natif et le port disparait.
+  //   "trial"   installee, pas encore declaree saine : un redemarrage revient
+  //             a l'ancienne image
+  //   "valid"   declaree saine, plus de retour en arriere
+  //   "nofw"    le bootloader n'a pas le retour arriere (option absente)
+  {
+    esp_ota_img_states_t ost;
+    const esp_partition_t* rp = esp_ota_get_running_partition();
+    const char* v = "nofw";
+    if (rp && esp_ota_get_state_partition(rp, &ost) == ESP_OK) {
+      if      (ost == ESP_OTA_IMG_PENDING_VERIFY) v = "trial";
+      else if (ost == ESP_OTA_IMG_VALID)          v = "valid";
+      else if (ost == ESP_OTA_IMG_UNDEFINED)      v = "nofw";
+      else                                        v = "other";
+    }
+    j += ",\"otavalid\":\"" + String(v) + "\"";
+    j += ",\"slot\":\"" + String(rp ? rp->label : "?") + "\"";
+  }
+
   // Les autres murs vus sur le reseau, et le comportement choisi face a eux.
   j += ",\"link\":\"" + String(arenapeers::linkName(arenapeers::link())) + "\"";
   j += ",\"rank\":"  + String((int)arenapeers::rank());
