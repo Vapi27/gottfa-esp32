@@ -252,36 +252,74 @@ déjà les deux : une ligne, `ARENA_OLED_H`.
 
 ---
 
-## 4bis. Références — TOUTES vérifiées
+## 4bis. Références — nomenclature complète
 
-Chaque ligne a été confirmée sur sa page LCSC/JLCPCB (et datasheet quand la
-valeur en dépendait) le 2026-08-07. Les prix sont les paliers lus ce jour-là.
+Toute la nomenclature est dans [BOM_PCB.csv](BOM_PCB.csv), 31 lignes, chacune
+confirmée sur sa page LCSC/JLCPCB le 2026-08-07. Ce qui suit n'est que ce qui
+ne se lit pas dans un tableau.
 
-| Rôle | Référence | LCSC | Stock | Note |
-|---|---|---|---|---|
-| Module | ESP32-S3-WROOM-1-N16R8 | **C2913202** | — | PSRAM livrée désactivée (§1) |
-| ESD USB | USBLC6-2SC6 (ST) | **C7519** | — | équivalent UMW C2687116 |
-| Ampli micro | MAX9814ETD+T | **C41714** | — | CAG, alimenté en 3,3 V |
-| Abaisseur 3,3 V | SY8089A1AAC | **C479074** | — | 2,5–5,5 V d'entrée : régule dans l'affaissement (§B) |
-| Limiteur sortie LED | AP2552W6-7 | **C441824** | 1 171 | ⚠ **EN actif bas → masse** (§ protection) |
-| Tampon données 5 V | SN74AHCT1G125DCKR | **C350557** | 9 150 | TI en SC-70-5 au prix d'un clone ; SOT-23-5 : C7484 |
-| Micro MEMS | LMA2718S381-OSK02 | **C47148419** | 1 050 | analogique, 1,6–3,6 V, −38 dBV — **les 3 candidats initiaux étaient morts** (délisté / stock 0 / épuisé) |
-| USB-C | TYPE-C-31-M-12 | **C165948** | 193 830 | 5 A / 20 V confirmés = 66 % de marge |
-| Sortie plateau | B3B-XH-A(LF)(SN) JST | **C144394** | 133 120 | 3 A AWG22 (datasheet JST) ; **pas réel 2,50 mm**, pas 2,54 |
-| Fusible | 0452005.MRL Littelfuse | **C66503** | 10 130 | **2410, pas 1206** : aucun 1206 5 A temporisé n'a de stock > 500 |
-| TVS 5 V | SMF5.0A (MDD) | **C193402** | 313 700 | unidirectionnel, clamp 9,2 V, 4× moins cher que Littelfuse à specs égales |
-| Réservoir | 470 µF/10 V polymère Gyunrui | **C53237865** | 2 840 | ESR 20 mΩ confirmé datasheet ; plan B : C41410213 |
-| Pixel de statut | WS2812B-2020 | **C965555** | 35 115 | monté de série, GPIO48, alim 3,3 V (prouvé devkit) |
+### Le piège qui invalide une vérification faite depuis LCSC
 
-Écarts notables décidés en vérifiant, à connaître avant de router :
-- **F1 passe en boîtier 2410** — le 1206 demandé n'existe pas en 5 A temporisé
-  correctement stocké.
-- **U6 est en SC-70-5** (plus petit que le SOT-23-5 pressenti) — prendre C7484
-  si un prototype se soude à la main.
-- **J2 a un pas de 2,50 mm**, pas 2,54 : l'empreinte juste est la XH officielle.
-- Le clone d'embase 5× moins cher et le connecteur USB-C à 0,05 $ ont été
-  **rejetés sciemment** : courant admissible invérifiable pour l'un, donné pour
-  exactement 3 A (zéro marge) pour l'autre.
+**lcsc.com (vente au détail) et jlcpcb.com (bibliothèque d'assemblage) ont des
+stocks SÉPARÉS.** Une pièce peut afficher « Out of Stock » sur l'un et des
+millions d'unités sur l'autre :
+
+| Référence | lcsc.com | jlcpcb.com |
+|---|---|---|
+| C25804 (10 kΩ) | Out of Stock | **3 423 487** |
+| C23186 (5,1 kΩ) | Out of Stock | **6 074 400** |
+| C23138 (330 Ω) | 0 In Stock | **2 350 491** |
+| C15849 (1 µF) | Out of Stock | **15 642 436** |
+
+Pour une carte assemblée chez JLCPCB, c'est le stock jlcpcb.com qui compte.
+Juger la disponibilité depuis une page LCSC produit des faux négatifs — et
+c'est probablement ce qui a condamné à tort les trois premiers candidats micro.
+
+### Ce qui n'existe pas en Basic (vérifié, pas supposé)
+
+- **Aucune inductance de puissance**, toutes valeurs confondues : la case à
+  cocher « Basic » est désactivée dans la catégorie. L1 sera Extended quoi qu'il
+  arrive.
+- **Aucun encodeur rotatif.**
+- **Aucune embase femelle.**
+- **Un seul poussoir haut** — et il est plat (1,5 mm), donc inutilisable pour
+  une façade. S1–S4 seront Extended ; autant prendre le bon.
+
+Les **six valeurs de résistance** et les **quatre valeurs de condensateur**
+sont toutes disponibles en Basic, de la même famille pour les résistances
+(UNI-ROYAL 0603WAF) : une empreinte, un fabricant, aucun frais de mise en place.
+
+### Les trois pièges relevés en vérifiant
+
+**Isat n'est pas Irms.** Sur `C135268`, LCSC et JLCPCB affichent ces deux
+colonnes **inversées** l'une par rapport à l'autre. La `C167869` retenue est
+cohérente entre les deux sites, ce qui est une raison de plus de la préférer.
+Le piège classique reste de regarder l'Isat et d'oublier l'Irms : la `C50543`
+tient 3,2 A de saturation mais seulement **1,65 A en continu**, sous nos 2 A.
+
+**Le 22 µF du buck perd sa capacité sous tension.** Un X5R 0805 s'effondre par
+polarisation continue. Le hasard aide : la seule 22 µF 0805 *Basic* du catalogue
+est justement une **25 V** (`C45783`), donc la moins affectée.
+
+**Le « TS-1187A » n'a pas de tige.** La référence citée partout pour ce montage
+fait 1,5 mm de haut — un bouton rase-carte. La hauteur affichée par LCSC est
+celle du poussoir entier, pas de l'actionneur. D'où la `C480275`, 7,5 mm, la
+seule qui accepte un capuchon ou un perçage de façade.
+
+### Réserve honnête sur MIC1
+
+`C47148419` est confirmé en stock **chez LCSC** (1 050 pièces). Sa présence dans
+la **bibliothèque d'assemblage JLCPCB n'a pas pu être confirmée** — la fiche ne
+rend rien d'exploitable. À valider avant de commander : si elle en est absente,
+il faudra fournir la pièce ou la souder à part.
+
+### Empreintes à graver
+
+- **ENC1** : standard **ALPS EC11E** (KiCad `RotaryEncoder_Alps_EC11E-Switch_Vertical_H20mm`),
+  recoupé sur deux plans constructeur. Ce n'est pas une empreinte propriétaire :
+  n'importe quel EC11 traversant à poussoir s'y soude, aujourd'hui et dans dix ans.
+- **L1** : NR4030 standard, 4,0 × 4,0 × 3,0 mm.
+- **J2** : pas réel **2,50 mm**, pas 2,54 — l'empreinte juste est la XH officielle.
 
 Abandonné en cours de route : **CH224K (C970725)**, contrôleur PD. La référence
 est bonne, le besoin ne l'est pas — voir §3bis.
