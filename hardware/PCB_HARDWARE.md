@@ -38,19 +38,38 @@ Variante antenne externe : **ESP32-S3-WROOM-1U-N16R8**, LCSC **C3013946** — à
 retenir si la carte finit dans un boîtier fermé, l'antenne PCB exigeant une zone
 totalement dégagée de cuivre.
 
-### Décision à trancher : la PSRAM
+### La PSRAM : tranchée, par la mesure
 
-`CONFIG_SPIRAM=y` vient de la configuration d'exemple esp-matter, pas d'un
-besoin démontré : l'application n'occupe que 19 % de la RAM interne. Un module
-**N16R8** (flash 16 Mo + PSRAM octale 8 Mo) coûte sensiblement plus qu'un
-**N16R2** ou un N16 nu.
+`CONFIG_SPIRAM=y` venait de la configuration d'exemple esp-matter, pas d'un
+besoin démontré. Testé sur la vraie carte le 2026-08-07, à source identique
+(seul `CONFIG_SPIRAM` diffère), sous une séquence de contraintes identique —
+tous les modes, la page complète, un scan WiFi, l'image du plateau :
 
-**Ne pas trancher au jugé.** CHIP alloue beaucoup pendant la poignée de main
-d'appairage, et c'est justement le moment où la carte avait déjà planté par
-manque de tas (d'où le serveur web différé dans `arena_net.cpp`). La marche à
-suivre : désactiver `CONFIG_SPIRAM`, reconstruire, **appairer réellement**, et
-seulement alors conclure. Tant que ce test n'est pas fait, la carte se dessine
-avec un **N16R8**.
+| | avec PSRAM | sans PSRAM |
+|---|---|---|
+| Tas libre | 76 783 | 60 836 |
+| **Minimum atteint sous charge** | **9 287** | **25 340** |
+| Plus gros bloc contigu | 25 600 | 14 848 |
+
+**La PSRAM dégrade la marge de RAM interne**, et le journal de démarrage dit
+pourquoi : `esp_psram: Reserving pool of 32K of internal memory for DMA/internal
+allocations`. Elle prélève 32 ko d'interne sur les 320 disponibles, au profit de
+8 Mo dont cette application ne se sert pas.
+
+Une réserve, la seule : le plus gros bloc contigu tombe de 25,6 à 14,8 ko. Une
+allocation d'un seul tenant au-delà de 14,8 ko échouerait sans PSRAM. Le pic
+d'appairage Matter n'a **pas** encore été mesuré — il demande de dépairer et
+réappairer depuis un téléphone.
+
+### Décision retenue
+
+**Monter un N16R8, et livrer avec `CONFIG_SPIRAM` désactivé.**
+
+Les deux modules coûtent quasiment la même chose — LCSC `C2913199` (N16, sans
+PSRAM) autour de 3,75 $, `C2913202` (N16R8) autour de 3,78 $, à confirmer à la
+quantité commandée. Trois centimes n'achètent pas une porte fermée : le logiciel
+prend la configuration que la mesure désigne, et les 8 Mo restent disponibles par
+une ligne de configuration le jour où une fonctionnalité en aurait besoin.
 
 ---
 
