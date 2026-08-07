@@ -433,20 +433,30 @@ static void musicSampleMic() {
   // 160 reads ~ 1.6 ms per frame. Mean-removed RMS = energy; a one-pole
   // low-pass splits a bass proxy from the rest. Crude next to an FFT, and
   // enough: lighting needs an envelope, not a spectrum.
-  // Demarre a 0, pas a 2048 : x est deja debiaise juste en dessous
-  // (analogRead - 2048), donc un filtre initialise a mi-echelle met une
-  // trentaine d'echantillons a redescendre et annonce une basse enorme au
-  // premier appel.
+  // La polarisation est MESUREE, pas supposee. Le code retranchait 2048, c'est
+  // a dire la moitie de l'echelle - ce qui imposait un etage de sortie polarise
+  // a 1,55 V. Or les front-ends courants ne le sont pas : un MAX9814 sort a
+  // 1,25 V, un ampli sur diviseur a VDD/2. Une constante ici, c'est le choix du
+  // micro decide par le firmware, et un decalage permanent lu comme du signal.
+  //
+  // Un suivi tres lent isole donc le continu. Il doit rester bien plus lent que
+  // la plus basse frequence utile, sinon il suit la musique et l'efface.
+  static float dc = 2048.0f;
   static float lp = 0;
   float sumSq = 0, sumLpSq = 0;
   for (int i = 0; i < 160; i++) {
-    const float x = (float)analogRead(PIN_ARENA_MIC) - 2048.0f;
+    const float raw = (float)analogRead(PIN_ARENA_MIC);
+    dc += 0.0005f * (raw - dc);
+    const float x = raw - dc;
     lp += 0.10f * (x - lp);
     sumSq   += x * x;
     sumLpSq += lp * lp;
   }
-  const float rms  = sqrtf(sumSq / 160.0f)   / 2048.0f;
-  const float bass = sqrtf(sumLpSq / 160.0f) / 2048.0f;
+  // Normalise sur la dynamique reellement disponible : au-dessus de la
+  // polarisation il ne reste que (4095 - dc) points, pas 2048.
+  const float span = max(256.0f, min(dc, 4095.0f - dc));
+  const float rms  = sqrtf(sumSq / 160.0f)   / span;
+  const float bass = sqrtf(sumLpSq / 160.0f) / span;
   // Adaptive scale: track the recent peak so quiet rooms still modulate.
   s_musPeak = max(rms, s_musPeak * 0.998f);
   if (s_musPeak < 0.02f) {                    // no mic wired: rail noise only
