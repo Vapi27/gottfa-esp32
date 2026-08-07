@@ -194,7 +194,16 @@
 // inside their ratings whatever effect is running.
 #define LED_MA_PER_CHANNEL    17.5f
 #define LED_MA_QUIESCENT       1.0f
-#define LED_POWER_BUDGET_MA   9000   // mA ceiling for the whole chain (9 A of a 15 A PSU)
+// Plafond de courant de TOUTE la chaine. Le firmware assombrit la trame entiere
+// plutot que de le depasser - c'est donc lui, et non le cuivre, qui garantit que
+// la carte ne tire jamais plus que son alimentation n'accepte.
+//
+// 2000 mA n'est pas un chiffre rond choisi au hasard : c'est ce qui laisse une
+// marge franche sous le seuil de l'interrupteur a limitation (AP2552 regle au
+// maximum, 2,36 A a +/-6 %, donc 2,22 A au pire). Sans cette marge la protection
+// se declencherait en usage normal, et remonter le budget la rendrait inutile.
+// A 18,2 mA par pixel mesures, 2 A couvrent 110 pixels en blanc plein.
+#define LED_POWER_BUDGET_MA   2000
 // The budget covers the LEDs ONLY. The controller draws 100-250 mA (peaks higher
 // on WiFi transmit) from the same supply and the same fuse, and never appears in
 // the estimate. Size a fuse against budget + 300 mA, not against the budget.

@@ -63,111 +63,18 @@ réappairer depuis un téléphone.
 
 ### Décision retenue
 
-**Monter un N16R8, et livrer avec `CONFIG_SPIRAM` désactivé.**
-
-Les deux modules coûtent quasiment la même chose — LCSC `C2913199` (N16, sans
-PSRAM) autour de 3,75 $, `C2913202` (N16R8) autour de 3,78 $, à confirmer à la
-quantité commandée. Trois centimes n'achètent pas une porte fermée : le logiciel
-prend la configuration que la mesure désigne, et les 8 Mo restent disponibles par
-une ligne de configuration le jour où une fonctionnalité en aurait besoin.
-
----
-
-## 2. Brochage (ESP32-S3)
-
-Relevé de `include/arena_config.h`, vérifié sans doublon.
-
-| GPIO | Fonction | Remarque |
-|---|---|---|
-| **16** | Données chaîne LED 1 | la sortie principale |
-| 6 | Données chaîne LED 2 | `LED_CHAIN2_ENABLE 0` — désactivée, et elle **recopie** la chaîne 1, ce n'est pas une seconde zone indépendante |
-| **47** | I²C SDA (écran) | mêmes broches que le GottFA80+ |
-| **21** | I²C SCL (écran) | |
-| **15** | Bouton ▲ | |
-| **17** | Bouton ▼ | |
-| **7** | Bouton OK | partagé avec le poussoir de l'encodeur |
-| 4 / 5 | Encodeur A / B | optionnel, à prévoir en empreinte non montée |
-| 0 | Bouton de façade | ⚠ **à déplacer, voir §3** |
-| 34 | Micro | ⚠ **invalide, voir §3** |
-
-Interdits sur ce module : **26-32** (flash), **33-37** (PSRAM octale),
-**19/20** (USB natif), **48** (LED WS2812 embarquée sur le devkit).
-
----
-
-## 3. Deux défauts à corriger avant de router
-
-### 3.1 Le bouton de façade est sur la broche de strap
-
-`PIN_ARENA_BUTTON 0`. GPIO0 est la **broche de sélection du mode de démarrage**
-de l'ESP32-S3 : maintenue à la masse à la mise sous tension, elle fait démarrer
-la puce en mode téléversement. Sur un prototype c'est commode. Sur une pièce
-vendue, un client qui garde le doigt sur le bouton en branchant l'alimentation
-obtient un mur qui ne s'allume pas et ne répond à rien — un défaut qui revient
-en SAV comme une carte morte.
-
-**À faire : déplacer le bouton de façade sur GPIO18**, libre et sans fonction de
-strap. Garder GPIO0 pour un poussoir BOOT séparé, côté carte, non accessible
-depuis la façade.
-
-### 3.2 Le micro est sur une broche qui n'existe pas comme entrée analogique
-
-`PIN_ARENA_MIC 34`, lu par `analogRead()` dans le mode Music. Sur l'ESP32-S3,
-ADC1 couvre GPIO1-10 et ADC2 GPIO11-20 : **GPIO34 n'est aucun des deux**, et sur
-un module à PSRAM octale la broche appartient de toute façon à la PSRAM. Le mode
-Music est proposé au client dans le menu de l'écran et dans la page web, et il
-ne réagit à rien.
-
-**À trancher avant de router** : soit on retire le mode Music, soit on prévoit
-un micro et on lui donne une vraie broche ADC. Un module analogique type MAX9814
-sur GPIO8 se contente d'un fil ; un MEMS I²S sonne beaucoup mieux mais demande
-un autre chemin de code.
-
----
-
-## 3bis. Consommation réelle — MESURÉE, et elle corrige le firmware
-
-Relevé au wattmètre sur la prise secteur, mur `Arena` (42 pixels, luminosité
-255/255), bloc 5 V / 5 A :
-
-| État | À la prise |
-|---|---|
-| Mur éteint (électronique seule) | **1,1 W** |
-| Attract | 2,0 W |
-| À fond | **5,6 W** |
-
-En retirant la base et le rendement du bloc (~85 % en marginal), les LED tirent
-**0,76 A à fond pour 42 pixels, soit 18,2 mA par pixel**.
-
-`LED_MA_PER_CHANNEL` vaut 17,5 mA. **Le mesuré correspond donc à UN canal, pas
-à quatre** : sur du RGBW le blanc se fait au canal W seul. Le modèle du firmware
-multiplie par quatre et se trompe d'autant. C'est un plafond de sécurité valide,
-pas un point de fonctionnement — ne jamais dimensionner l'alimentation dessus.
-
-Extrapolation au mur maximal du firmware (150 pixels) :
-
-| | Continu | Ampères |
-|---|---|---|
-| Attract | 2,7 W | 0,55 A |
-| À fond | 13,7 W | 2,73 A |
-| **+ électronique** | | **2,92 A** |
-| Pire cas absolu (4 canaux) | 52 W | 10,5 A — plafonné à 9 A par le firmware |
-
-**Conséquence : un USB-C 5 V nu (3 A) ne laisse que 3 % de marge** sur un mur de
-150 pixels. Suffisant pour un mur de 42, insuffisant pour le plus grand que le
-firmware accepte.
-
-### Décision retenue
-
-- **Entrée USB-C 5 V directe**, deux résistances de 5,1 kΩ sur CC1/CC2. Ni PD ni
-  convertisseur pour le rail LED.
-- **`LED_POWER_BUDGET_MA` = 2400** : le garde-fou est logiciel, pas matériel. Le
-  firmware assombrit la trame entière plutôt que de dépasser, donc la carte ne
-  peut pas tirer plus que ce qu'un USB-C accepte, quoi que fasse le client.
-- **Cuivre et fusible dimensionnés 5 A**, pas 3 : le surcoût est nul et ça ouvre
-  la variante grand mur sans refaire la carte.
-- **Empreinte CH224K + abaisseur laissée non montée** : à peupler pour négocier
-  15-20 V et redescendre en 5 V, quand un mur dépassera ~130 pixels.
+- **Entrée USB-C 5 V directe**, deux résistances de 5,1 kΩ sur CC1/CC2. Ni
+  négociation PD, ni convertisseur pour le rail LED.
+- **`LED_POWER_BUDGET_MA` = 2000** : le garde-fou est logiciel. Le firmware
+  assombrit la trame entière plutôt que de dépasser, donc la carte ne peut pas
+  tirer plus que l'USB-C n'accepte, quoi que fasse le client. La valeur est
+  calée sous le seuil de la protection de sortie (§E).
+- **Cuivre et fusible dimensionnés 5 A**, pas 3 : le surcoût est nul.
+- **Pas de CH224K, pas d'abaisseur, pas d'empreinte réservée.** Abandonné : la
+  consommation mesurée ne le justifie pas, et une empreinte non peuplée sur une
+  carte de série est un coût de conception et une source d'erreur au montage
+  pour un cas qui n'arrivera peut-être jamais. Si un mur de plus de 110 pixels
+  devient un vrai besoin, ce sera une révision de carte assumée.
 
 Largeurs de piste, IPC-2221, cuivre 1 oz en couche externe, +10 °C :
 
@@ -177,16 +84,41 @@ Largeurs de piste, IPC-2221, cuivre 1 oz en couche externe, +10 °C :
 | **5 A** | **2,8 mm** ← à router |
 | 9 A | 6,3 mm |
 
-### Chaînage
+### Protection : ni fusible, ni autoréarmable — un limiteur de courant
 
-Quatre murs en attract : **1,4 A** — dans les 3 A d'un seul USB-C.
-Quatre murs à fond : **3,8 A** — ça déborde.
+Le raisonnement compte plus que la conclusion, parce qu'il se reposera à chaque
+changement d'alimentation.
 
-Le firmware connaît déjà le nombre de murs présents (`arena_peers.cpp`). Diviser
-le budget par ce nombre rendrait le chaînage sûr par construction. Non implémenté
-à ce jour.
+**Un fusible d'entrée ne sert à rien ici.** Un chargeur USB-C limite déjà son
+courant, c'est dans la spécification. Le besoin maximal est de 2,92 A et la
+source plafonne à 3 A : il n'y a pas de place entre les deux pour un fusible.
+Trop bas il saute en usage normal, à 5 A le chargeur se coupe bien avant lui.
 
-## 4. Blocs de la carte
+**Un PTC autoréarmable en sortie ne marche pas davantage**, et l'arithmétique
+est nette : un PTC se déclenche vers **deux fois** son courant de maintien. Pour
+ne pas sauter à 2,4 A, avec le déclassement thermique derrière un plateau (40 à
+50 °C), il lui faut un maintien d'environ 3,3 A, donc un déclenchement vers
+**6,6 A** — que la source ne peut pas fournir. Il ne se déclencherait jamais. Il
+n'apporterait qu'une résistance série, qui de surcroît **augmente à chaque
+déclenchement** et ne revient jamais à sa valeur d'origine.
+
+**Ce qui fonctionne : un interrupteur à limitation de courant réglable**, sur la
+sortie vers le plateau — le seul endroit où passe du câblage fait à la main,
+avec un bornier et des fils qu'on manipule en accrochant la pièce.
+
+| | |
+|---|---|
+| Composant | **AP2552** (famille AP2552/AP2553), limitation réglable par résistance |
+| Seuil | jusqu'à **2,36 A** typique, ±6 % → 2,22 à 2,50 A |
+| Programmation | `RLIM`, résistance 1 %, 10 kΩ ≤ RLIM ≤ 210 kΩ |
+| Marge | budget firmware à **2,0 A**, franchement sous le seuil bas de 2,22 A |
+| Comportement | limitation à courant constant, drapeau de défaut, réarmement automatique |
+
+Il se déclenche donc **sous** les 3 A du chargeur, ce qu'aucun fusible ni PTC ne
+sait faire dans cette fenêtre. ⚠ Référence LCSC **non confirmée** — à vérifier
+sur stock avant de figer la nomenclature.
+
+## 4. Blocs de la carte## 4. Blocs de la carte
 
 ### A — Entrée d'alimentation (USB-C 5 V)
 
@@ -206,11 +138,6 @@ carte.
 | Réservoir | 2 × 470 µF 10 V faible ESR + 4 × 100 nF | la chaîne appelle par bouffées à chaque trame |
 
 Pistes 5 V et masse : **2,8 mm** en cuivre 1 oz externe (IPC-2221, +10 °C).
-
-**Empreinte à prévoir non montée : CH224K (LCSC C970725) + abaisseur.** Elle ne
-sert que le jour où un mur dépassera ~130 pixels : le CH224K négocie alors 15 ou
-20 V, l'abaisseur redescend en 5 V, et le même circuit imprimé encaisse jusqu'à
-45 W. Quelques millimètres carrés aujourd'hui contre une refonte plus tard.
 
 **Sortie de chaînage.** Un second USB-C présentant 5 V est légitime à condition
 de porter les résistances **Rp** côté source (et non Rd) — un réceptacle qui
@@ -306,6 +233,32 @@ fait à la main dans l'app Maison. Si tu tiens au QR à l'écran, il faut le
 déjà les deux : une ligne, `ARENA_OLED_H`.
 
 ---
+
+## 4bis. Références — état de vérification
+
+Vérifiées sur les pages LCSC / JLCPCB le 2026-08-07. Les prix sont des « à partir
+de » : à confirmer dans le panier à la quantité réellement commandée.
+
+| Rôle | Référence | LCSC | État |
+|---|---|---|---|
+| Module | ESP32-S3-WROOM-1-N16R8 | **C2913202** | ✅ vérifié — 25,5 × 18 × 3,1 mm, *Extended*, ~3,78 $ |
+| Module, sans PSRAM | ESP32-S3-WROOM-1-N16 | **C2913199** | ✅ vérifié — ~3,75 $, 1 146 en stock. Non retenu : voir §1 |
+| Module, antenne externe | ESP32-S3-WROOM-1U-N16R8 | **C3013946** | ✅ vérifié |
+| Protection ESD USB | USBLC6-2SC6 (ST) | **C7519** | ✅ vérifié — SOT-23-6, 3,5 pF |
+| Protection ESD USB, équivalent | USBLC6-2SC6 (UMW) | **C2687116** | ✅ vérifié — souvent moins cher |
+| Ampli micro | MAX9814ETD+T | **C41714** | ✅ vérifié — CAG, gain 40/50/60 dB |
+| Limiteur de courant | AP2552 | — | ⚠️ **à trouver** — famille confirmée par le datasheet Diodes, référence LCSC non identifiée |
+| Micro MEMS analogique | LMA2718T381-OAK02 | C5373228 | ⚠️ **non vérifié** — datasheet inaccessible depuis ici |
+| Micro MEMS analogique | MSM381A2718Z9QM2 | C966934 | ⚠️ **non vérifié** |
+| Micro MEMS analogique | ZTS6211E | C481297 | ⚠️ **non vérifié** |
+
+Les trois micros MEMS sont des candidats trouvés au catalogue, **pas des choix** :
+ni la sensibilité, ni la tension d'alimentation, ni le stock n'ont pu être
+confirmés — LCSC sert une coquille aux requêtes automatiques. À valider à la main
+avant de figer la nomenclature.
+
+Abandonné en cours de route : **CH224K (C970725)**, contrôleur de négociation PD.
+La référence est bonne, le besoin ne l'est pas — voir §3bis.
 
 ## 5. Ce qui reste hors carte
 
