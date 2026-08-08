@@ -90,10 +90,10 @@ avec du vernis épargne.
 | LED_DATA | **16** | U6 broche 2 |
 | I²C SDA | **47** | J3 broche 4 |
 | I²C SCL | **21** | J3 broche 3 |
-| BTN_UP | **15** | S1 → GND |
-| BTN_DOWN | **17** | S2 → GND |
-| BTN_OK | **7** | S3 → GND (partagé avec ENC1 SW) |
-| BTN_FACE | **18** | S4 → GND |
+| BTN_UP (gauche) | **15** | S1 → GND |
+| BTN_DOWN (droite) | **17** | S2 → GND |
+| BTN_OK (milieu) | **7** | S3 → GND (partagé avec ENC1 SW) |
+| ~~BTN_FACE~~ | ~~18~~ | **supprimé** — trois boutons suffisent, le menu couvre tout. GPIO18 redevient libre. |
 | ENC_A / ENC_B | **4 / 5** | ENC1 (empreinte non montée) |
 | MIC_OUT | **1** | U3 broche 6 |
 | STATUS_PX | **48** | D2 (WS2812B-2020) |
@@ -103,6 +103,16 @@ avec du vernis épargne.
 
 Alimentation : **+3V3** · C8 10 µF + C9–C12 100 nF, un par broche d'alimentation,
 au plus près.
+
+**S1, S2 et S3 sont des poussoirs à actionnement LATÉRAL** (ALPS SKSGPCE010,
+`C127472`), à poser **en bord de carte, actionneur débordant du contour** :
+gauche, droite, et OK au milieu. On presse par la tranche — rien ne traverse le
+circuit, le dos reste net.
+
+⚠ Conséquence pour le routage : prévoir le **dégagement du contour** en face de
+chaque actionneur (1,4 mm de course), et ne pas router de piste sous l'empreinte
+côté bord. L'effort étant latéral, **élargir les pastilles** et poser les trois
+poussoirs sur la même arête pour que la façade soit droite.
 
 Aucun tirage externe sur les boutons : le firmware active les tirages internes
 (`INPUT_PULLUP`). Chaque poussoir se câble simplement entre sa broche et la masse.
