@@ -198,7 +198,18 @@
 // the estimate exceeds LED_POWER_BUDGET_MA, the whole frame is scaled down before
 // it is pushed out. That keeps the PSU, the bus wires and the injection points
 // inside their ratings whatever effect is running.
-#define LED_MA_PER_CHANNEL    17.5f
+// Courant d'un canal a pleine intensite. MESURE, plus estime.
+//
+// Valait 17,5 mA, tire du datasheet. Cinq points au wattmetre le 2026-08-07
+// donnent une pente de 0,129 W par pixel a la prise, soit 25,8 mA/pixel, la ou
+// le firmware en estimait 18,2 : il SOUS-estimait d'environ 20 %, et c'est le
+// mauvais sens pour un plafond de courant - il aurait laisse passer plus que
+// prevu, jusqu'a faire mordre le limiteur materiel AP2552 (seuil bas 2,30 A).
+//
+// On retient 25 mA, valeur de la prise NON corrigee du rendement du bloc. Le
+// firmware surestime donc legerement, ce qui est le bon sens pour une securite.
+// Corriger si le rendement du bloc est un jour mesure : a 85 %, ce serait 21 mA.
+#define LED_MA_PER_CHANNEL    25.0f
 #define LED_MA_QUIESCENT       1.0f
 // Plafond de courant de TOUTE la chaine. Le firmware assombrit la trame entiere
 // plutot que de le depasser - c'est donc lui, et non le cuivre, qui garantit que

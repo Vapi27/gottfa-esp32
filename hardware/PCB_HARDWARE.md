@@ -19,16 +19,17 @@ Mesuré le 2026-08-07 sur le build `95f4bf1` et sur le mur `Arena`
 | Pixels maximum | **150** | `LED_MAX` |
 | Pixels par défaut | 100 | `LED_COUNT_DEFAULT` |
 | Mur de référence | 42 | `/api/state` |
-| Courant par canal | 17,5 mA | `LED_MA_PER_CHANNEL` |
-| Courant théorique maximal | **10,5 A** | 150 × 4 canaux × 17,5 mA |
-| Plafond appliqué | **9,0 A** | `LED_POWER_BUDGET_MA` — le firmware assombrit l'image entière plutôt que de dépasser |
+| Courant par canal | **25,0 mA** | `LED_MA_PER_CHANNEL` — corrigé sur mesure, valait 17,5 |
+| Courant théorique maximal | **15,0 A** | 150 × 4 canaux × 25 mA — pire cas théorique, jamais atteint |
+| Plafond appliqué | **2,0 A** | `LED_POWER_BUDGET_MA` — le firmware assombrit l'image entière plutôt que de dépasser |
 | Rafraîchissement | 60 Hz | `LED_FRAME_HZ` (4,8 ms sur le fil à 150 pixels) |
 
-⚠ **Ne pas dimensionner l'alimentation sur ces 9 A.** C'est un plafond de
-sécurité logiciel, pas un point de fonctionnement : le modèle du firmware compte
-quatre canaux par pixel, là où le blanc d'un RGBW n'en utilise qu'un. Mesuré, le
-mur maximal tire **2,92 A**. Voir « Consommation réelle » plus bas, qui décide du connecteur, du
-fusible et du cuivre.
+⚠ **Ne pas dimensionner l'alimentation sur ces 15 A.** C'est le pire cas
+théorique — quatre canaux par pixel à fond — que le blanc d'un RGBW n'atteint
+jamais, puisqu'il n'utilise que le canal W. **Mesuré**, un mur de 150 pixels
+tire **3,41 A**, et le plafond firmware de 2,0 A l'arrête avant. C'est la
+section « Consommation réelle » plus bas qui décide du connecteur, du fusible et
+du cuivre.
 
 ### Référence retenue
 
