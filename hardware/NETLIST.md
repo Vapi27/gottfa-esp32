@@ -53,6 +53,36 @@ C'est l'AHCT qui rend le montage légal : son `VIH` vaut **2,0 V fixe** (entrée
 compatible TTL), là où un HCT ou un SK6812 attendrait `0,7 × VDD = 3,5 V`, hors
 de portée d'une sortie 3,3 V.
 
+## U2 — USBLC6-2SC6, protection ESD de l'USB
+
+Brochage **lu dans le schéma fonctionnel du datasheet ST** (rév. 2, figure 1) —
+le symbole importé ne porte que des numéros, et un résumé automatique du PDF m'a
+d'abord donné un brochage faux :
+
+```
+        I/O1  1 ┌─────┐ 6  I/O1
+        GND   2 │ U2  │ 5  VBUS
+        I/O2  3 └─────┘ 4  I/O2
+```
+
+| Broche | Nom | Connexion |
+|---|---|---|
+| 1 | I/O1 | **J1 broche A7/B7 (D−)** — côté connecteur |
+| 6 | I/O1 | **GPIO19** du module — côté protégé |
+| 3 | I/O2 | **J1 broche A6/B6 (D+)** — côté connecteur |
+| 4 | I/O2 | **GPIO20** du module — côté protégé |
+| 5 | VBUS | **+5V** (protège aussi le rail) |
+| 2 | GND | GND |
+
+**Les broches 1 et 6 sont le même nœud interne, 3 et 4 aussi.** La ligne
+*traverse* le composant : elle entre par le côté connecteur et ressort par le
+côté puce. Ce n'est pas un dérivé posé à côté de la piste, et c'est ce qui fait
+que la protection est efficace — le courant d'ESD ne peut pas contourner le
+composant.
+
+⚠ **À router dans ce sens** : connecteur → U2 → module. Poser U2 au plus près de
+J1, avant que la paire n'entre dans la carte.
+
 ## U3 — MAX9814ETD+T, ampli micro à CAG
 
 | Broche | Nom | Connexion |
@@ -171,6 +201,57 @@ R6/R7 4,7 kΩ vers +3V3 **non montées** si le module écran porte déjà ses ti
 
 ---
 
+## Table maîtresse — chaque net, chaque broche
+
+Tout ce qui précède, vu depuis les nets plutôt que depuis les composants.
+
+| Net | Broches reliées |
+|---|---|
+| **+5V** | J1 VBUS (A4/B4, A9/B9) → **F1** → tout le reste · D1 anode · C1 C2 C3–C6 C21 · U2 br.5 · U4 br.4 (IN) + C17 · U5 br.1 (IN) · U6 br.5 (VCC) + 100 nF · J4 VBUS · R10 |
+| **+3V3** | U4 sortie via **L1** · C18 · U1 br.2 (3V3) · C8 + C9–C12 · U3 br.5 (VDD) + 100 nF · MIC1 br.4 (VDD) + 100 nF · J3 br.2 · D2 br.4 (VDD) · R5 · R6 R7 · R11 R12 |
+| **+5V_LED** | U5 br.6 (OUT) → **J2 br.1** |
+| **GND** | commun à tout · J1 GND (A1/B1, A12/B12) · U2 br.2 · U4 br.2 · U5 br.2 · U6 br.3 · U3 br.7 **et br.15 (pastille exposée)** · MIC1 br.2 et br.3 · U1 br.1, 40, 41 · D2 br.2 · J2 br.2 · J3 br.1 · J4 GND · S1 S2 S3 · SW1 commun · R1 R2 R4 R9 · tous les découplages |
+| **USB_DM** | J1 A7/B7 → U2 br.1 · U2 br.6 → U1 br.13 (**IO19**) |
+| **USB_DP** | J1 A6/B6 → U2 br.3 · U2 br.4 → U1 br.14 (**IO20**) |
+| **CC1** | J1 A5 → R1 5,1 k → GND |
+| **CC2** | J1 B5 → R2 5,1 k → GND |
+| **CC1_OUT** | J4 A5 → R11 22 k → +3V3 |
+| **CC2_OUT** | J4 B5 → R12 22 k → +3V3 |
+| **LED_DATA** | U1 br.9 (**IO16**) → U6 br.2 (A) |
+| **LED_DATA_5V** | U6 br.4 (Y) → R3 330 Ω → **J2 br.3** |
+| **ILIM** | U5 br.5 → R4 10 k → GND |
+| **EN_LED** | U5 br.3 (EN, **actif bas**) · R10 10 k → +5V · **SW1** |
+| **EN_MCU** | U1 br.3 (EN) · R5 10 k → +3V3 · C7 1 µF → GND · **SW1** · S6 → GND |
+| **I2C_SDA** | U1 br.24 (**IO47**) → J3 br.4 · R6 → +3V3 (DNP) |
+| **I2C_SCL** | U1 br.23 (**IO21**) → J3 br.3 · R7 → +3V3 (DNP) |
+| **BTN_LEFT** | U1 br.8 (**IO15**) → S1 → GND |
+| **BTN_RIGHT** | U1 br.10 (**IO17**) → S2 → GND |
+| **BTN_OK** | U1 br.7 (**IO7**) → S3 → GND |
+| **MIC_OUT** | MIC1 br.1 → C19 100 nF → U3 br.8 (MICIN) |
+| **ADC_IN** | U3 br.6 (MICOUT) → U1 br.39 (**IO1**) |
+| **STATUS_PX** | U1 br.25 (**IO48**) → D2 br.3 (DI) |
+| **BOOT** | U1 br.27 (**IO0**) → S5 → GND |
+
+Broches de U3 à traiter à part (voir sa section) : **br.10 GAIN → GND** (40 dB),
+**br.2 ~SHDN → VDD**, **br.1 CT** et **br.3 CG** chacune 0,1 µF vers GND,
+br.9 A/R et br.14 TH en l'air, **br.13 MICBIAS non utilisée** (le MEMS
+s'alimente seul), br.4 et br.11 N.C.
+
+### SW1 — repérage des pastilles
+
+D'après la géométrie de l'empreinte importée :
+
+| Pastilles | Rôle |
+|---|---|
+| **1, 2, 3** (alignées) | **contacts électriques** — SPDT |
+| 4, 5, 6, 7 (aux quatre coins) | **ancrages mécaniques** — à relier à GND, ils ne conduisent rien |
+
+⚠ **Lequel des trois est le commun n'est pas déductible de l'empreinte.** Sur un
+SPDT c'est normalement celui du milieu (**pastille 2**), et c'est ainsi qu'il
+faut câbler : commun → GND, une position vers `EN_LED`, l'autre vers `EN_MCU`.
+**À confirmer à l'ohmmètre sur la pièce reçue**, avant de lancer la série. Une
+erreur ici ne casse rien : au pire le mur ne s'allume pas dans une position.
+
 ## À vérifier une fois le schéma saisi
 
 1. **U5 broche 3 est bien à la masse**, pas à IN.
@@ -178,3 +259,6 @@ R6/R7 4,7 kΩ vers +3V3 **non montées** si le module écran porte déjà ses ti
 3. Le diviseur R8/R9 est bien sur FB (broche 5) de U4, pas sur EN.
 4. La paire D+/D− part de U2 vers **GPIO19/20** et nulle part ailleurs.
 5. Aucune résistance de tirage ajoutée sur les boutons.
+6. **U2 est traversé, pas dérivé** : D± entrent par les broches 1 et 3, ressortent
+   par les broches 6 et 4. S'ils sont câblés en dérivation, la protection ne sert
+   à rien.
