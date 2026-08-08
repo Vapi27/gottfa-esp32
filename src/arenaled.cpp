@@ -729,19 +729,27 @@ static void applyGainGamma(Rgbw* buf, uint8_t gain) {
 // colours and relative levels are preserved — the wall just dims.
 static float meterAndLimit(Rgbw* buf) {
   const float quiescent = (s_count + OFFS) * LED_MA_QUIESCENT;
-  uint32_t sum = 0;
-  for (uint16_t i = 0; i < s_count; i++)
-    sum += buf[i].r + buf[i].g + buf[i].b + buf[i].w;
-
-  float chans = (float)sum / 255.0f;                 // dice-equivalents at full drive
-  float ma = chans * LED_MA_PER_CHANNEL + quiescent;
+  // Les couleurs et le blanc ne consomment PAS pareil : 9 mA par canal R/G/B
+  // contre 18 mA pour le W, d'apres le datasheet SK6812MINI. Les compter d'un
+  // seul coefficient surestime les couleurs du double et fausse le pire cas.
+  uint32_t sumRGB = 0, sumW = 0;
+  for (uint16_t i = 0; i < s_count; i++) {
+    sumRGB += buf[i].r + buf[i].g + buf[i].b;
+    sumW   += buf[i].w;
+  }
+  const float maLed = (float)sumRGB / 255.0f * LED_MA_RGB
+                    + (float)sumW   / 255.0f * LED_MA_W;
+  float ma = maLed + quiescent;
 
   s_limited = false;
   const float cap = (float)s_budget / (float)(s_share ? s_share : 1);
-  if (ma > cap && chans > 0.0f) {
+  if (ma > cap && maLed > 0.0f) {
     float avail = cap - quiescent;
     if (avail < 0) avail = 0;
-    for (uint16_t i = 0; i < s_count; i++) buf[i] = scale(buf[i], avail / (chans * LED_MA_PER_CHANNEL));
+    // Le facteur s'applique uniformement aux quatre canaux, donc la
+    // ponderation se conserve : il suffit de le calculer sur le total.
+    const float k = avail / maLed;
+    for (uint16_t i = 0; i < s_count; i++) buf[i] = scale(buf[i], k);
     ma = cap;
     s_limited = true;
   }

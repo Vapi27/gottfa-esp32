@@ -198,18 +198,27 @@
 // the estimate exceeds LED_POWER_BUDGET_MA, the whole frame is scaled down before
 // it is pushed out. That keeps the PSU, the bus wires and the injection points
 // inside their ratings whatever effect is running.
-// Courant d'un canal a pleine intensite. MESURE, plus estime.
+// Courant des canaux, LU DANS LE DATASHEET SK6812MINI-RGBW (Normand, rev. 01,
+// section 11, conditions d'essai) :
 //
-// Valait 17,5 mA, tire du datasheet. Cinq points au wattmetre le 2026-08-07
-// donnent une pente de 0,129 W par pixel a la prise, soit 25,8 mA/pixel, la ou
-// le firmware en estimait 18,2 : il SOUS-estimait d'environ 20 %, et c'est le
-// mauvais sens pour un plafond de courant - il aurait laisse passer plus que
-// prevu, jusqu'a faire mordre le limiteur materiel AP2552 (seuil bas 2,30 A).
+//     Iout R/G/B = 9 mA        par canal couleur
+//     Iout W     = 18 mA       le blanc dedie, le DOUBLE
+//     IDD        = 1 mA        consommation statique du controleur
 //
-// On retient 25 mA, valeur de la prise NON corrigee du rendement du bloc. Le
-// firmware surestime donc legerement, ce qui est le bon sens pour une securite.
-// Corriger si le rendement du bloc est un jour mesure : a 85 %, ce serait 21 mA.
-#define LED_MA_PER_CHANNEL    25.0f
+// Le modele precedent multipliait les quatre canaux par une constante unique,
+// ce qui surestime les couleurs d'un facteur 2 et fausse le pire cas. Il valait
+// 17,5 mA - une moyenne sans source - puis 25 mA cale sur une seule mesure au
+// wattmetre, avant que le datasheet ne donne les vrais chiffres.
+//
+// Recoupement a trois voies, le 2026-08-07 : en mode `classic` seul le canal W
+// est pilote, donc le datasheet predit 40 x 18 + 40 x 1 = 0,76 A pour 40
+// pixels. La mesure a la prise donne 5,25 W de LED, soit 0,76 A continu pour un
+// rendement de bloc de 72 % - plausible pour un petit bloc a 15 % de charge.
+// Datasheet et wattmetre concordent.
+//
+// Pire cas reel, 150 pixels tous canaux a fond : 150 x (9+9+9+18+1) = 6,9 A.
+#define LED_MA_RGB             9.0f
+#define LED_MA_W              18.0f
 #define LED_MA_QUIESCENT       1.0f
 // Plafond de courant de TOUTE la chaine. Le firmware assombrit la trame entiere
 // plutot que de le depasser - c'est donc lui, et non le cuivre, qui garantit que

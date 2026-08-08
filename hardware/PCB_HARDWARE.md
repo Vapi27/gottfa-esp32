@@ -19,17 +19,16 @@ Mesuré le 2026-08-07 sur le build `95f4bf1` et sur le mur `Arena`
 | Pixels maximum | **150** | `LED_MAX` |
 | Pixels par défaut | 100 | `LED_COUNT_DEFAULT` |
 | Mur de référence | 42 | `/api/state` |
-| Courant par canal | **25,0 mA** | `LED_MA_PER_CHANNEL` — corrigé sur mesure, valait 17,5 |
-| Courant théorique maximal | **15,0 A** | 150 × 4 canaux × 25 mA — pire cas théorique, jamais atteint |
+| Courant par canal | **R/G/B 9 mA · W 18 mA** | datasheet SK6812MINI §11 — le blanc consomme le double |
+| Courant théorique maximal | **6,9 A** | 150 × (9+9+9+18+1 mA) — tous canaux à fond |
 | Plafond appliqué | **2,0 A** | `LED_POWER_BUDGET_MA` — le firmware assombrit l'image entière plutôt que de dépasser |
 | Rafraîchissement | 60 Hz | `LED_FRAME_HZ` (4,8 ms sur le fil à 150 pixels) |
 
-⚠ **Ne pas dimensionner l'alimentation sur ces 15 A.** C'est le pire cas
-théorique — quatre canaux par pixel à fond — que le blanc d'un RGBW n'atteint
-jamais, puisqu'il n'utilise que le canal W. **Mesuré**, un mur de 150 pixels
-tire **3,41 A**, et le plafond firmware de 2,0 A l'arrête avant. C'est la
-section « Consommation réelle » plus bas qui décide du connecteur, du fusible et
-du cuivre.
+Ces **6,9 A** sont le pire cas théorique — les quatre canaux de chaque pixel à
+fond — que le blanc n'atteint jamais puisqu'il n'utilise que le canal W. Le
+plafond firmware de 2,0 A l'arrête de toute façon. C'est la section
+« Consommation réelle » plus bas qui décide du connecteur, du fusible et du
+cuivre.
 
 ### Référence retenue
 
@@ -122,6 +121,34 @@ Passer de 25 à 50 % ne coûte que **4 %** de puissance en plus : il y a une cou
 de gamma entre le réglage et la puissance émise. Un client qui baisse un peu la
 luminosité divise sa consommation par près de quatre, et les chiffres « à fond »
 ci-dessus sont un pire cas que personne n'habite au quotidien.
+
+### Recoupement à trois voies
+
+Les mesures au wattmètre, le datasheet et le modèle firmware disent-ils la même
+chose ? Vérifié le 2026-08-07, et oui — une fois le modèle corrigé.
+
+Le datasheet SK6812MINI (Normand, rév. 01, §11, conditions d'essai) donne :
+
+| | |
+|---|---|
+| `Iout R/G/B` | **9 mA** par canal couleur |
+| `Iout W` | **18 mA** — le double |
+| `IDD` | 1 mA, statique, par contrôleur |
+| `VIH` | **0,7 × VDD** — la contrainte de niveau, confirmée à la source |
+
+En mode `classic` seul le canal W est piloté. Le datasheet prédit donc, pour
+40 pixels : `40 × 18 + 40 × 1 = 760 mA`. La mesure donne 5,25 W de LED à la
+prise, soit **0,76 A continu pour un rendement de bloc de 72 %** — plausible
+pour un petit bloc chargé à 15 % de sa puissance.
+
+**Les deux sources concordent**, et l'écart restant est exactement le rendement
+du bloc, qui n'a jamais été mesuré.
+
+⚠ **Le modèle firmware a été corrigé en conséquence.** Il multipliait les quatre
+canaux par une constante unique — d'abord 17,5 mA, puis 25 mA calés sur une
+seule mesure. Il compte désormais **9 mA pour R, G et B, 18 mA pour W**, comme
+le composant. L'ancien modèle surestimait les couleurs du double et se trompait
+de pire cas.
 
 ### Décision retenue
 
