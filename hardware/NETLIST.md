@@ -124,6 +124,24 @@ Aucun tirage externe sur les boutons : le firmware active les tirages internes
 
 ---
 
+## SW1 — interrupteur marche/arrêt (ALPS SSSS811101, `C109335`)
+
+⚠ **Il ne coupe pas le rail 5 V.** Il tient **300 mA** et la carte en tire
+jusqu'à 2,92 A : le mettre en série le détruirait au premier allumage. Il
+commande deux **broches de validation**, qui ne demandent que des microampères.
+
+| Position | EN du module (U1) | EN du limiteur (U5, actif bas) | Résultat |
+|---|---|---|---|
+| **Marche** | tiré au haut par R5 | tiré à la masse par SW1 | tout fonctionne |
+| **Arrêt** | tiré à la masse par SW1 | relâché au haut par R10 | ESP en reset, sortie LED coupée |
+
+Câblage : le commun de SW1 va à la **masse**. Une position tire l'EN de U5 (avec
+**R10 10 kΩ** de rappel vers +5V), l'autre tire l'EN du module. À l'arrêt il ne
+reste que le repos du convertisseur, de l'ordre de quelques dizaines de µA.
+
+Curseur **en bord de carte**, débordant du contour comme S1–S3 : la façade garde
+une seule arête utile. Prévoir le dégagement sur 4,1 mm de course.
+
 ## Entrée et sortie
 
 **J1 USB-C** : VBUS → F1 5 A → +5V · CC1 et CC2 chacune par **5,1 kΩ vers GND** ·
