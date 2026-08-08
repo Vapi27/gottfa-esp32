@@ -84,6 +84,52 @@ Largeurs de piste, IPC-2221, cuivre 1 oz en couche externe, +10 °C :
 | **5 A** | **2,8 mm** ← à router |
 | 9 A | 6,3 mm |
 
+### Chaînage — et pourquoi on reste à 3 A
+
+Point de fonctionnement réel, extrapolé des mesures du wattmètre pour le mur
+type visé (**50 pixels**) :
+
+| | courant | à la prise |
+|---|---|---|
+| Attract | **0,37 A** | ~2,2 W |
+| À fond | **1,10 A** | ~6,5 W |
+
+Combien de murs sur un seul chargeur :
+
+| Chargeur | Tous à fond | Tous en attract |
+|---|---|---|
+| **USB-C nu, 3 A** ← retenu | 2 | **8** |
+| PD 5 V / 5 A | 4 | 13 |
+
+**Décision : on reste à 3 A, sans négociation PD.** Le gain réel serait de deux
+murs à fond, alors que la carte en tient déjà huit en attract — le mode où un
+mur de salon passe sa vie.
+
+Ce que le 5 A aurait imposé, et qui l'a fait écarter :
+
+- **Un contrôleur de négociation à bord.** Sans lui la carte est un consommateur
+  passif et obtient 3 A quoi qu'on branche.
+- **Un câble e-marqué.** Un cordon USB-C ordinaire est plafonné à 3 A par la
+  spécification, et la source refuse de monter sans la puce d'identification
+  dans le connecteur.
+- **Une alimentation d'un type rare.** L'offre 5 V / 5 A est *optionnelle* en PD
+  et pratiquement personne ne l'utilise à part le Raspberry Pi 5 — ces blocs
+  existent pour lui. Un client qui achète au hasard n'en aura pas.
+
+Le mode de panne est le pire qui soit pour un produit vendu : si l'alimentation
+ou le câble ne suit pas, le mur **fonctionne quand même**, en silence, à 3 A, et
+personne ne comprend pourquoi il s'assombrit. Quatre murs, ce sont deux chargeurs
+à quelques euros — moins cher qu'un seul retour.
+
+L'argument s'inverserait pour une vitrine de six murs sur un seul câble : il
+faudrait repeupler un CH224K (`C970725`) et assumer la contrainte de cordon. Le
+cuivre et le fusible étant **déjà dimensionnés 5 A**, cette variante ne
+demanderait pas de revoir le routage.
+
+**Le garde-fou du chaînage reste logiciel** : `/api/link?shared=1` divise le
+plafond de chaque mur par le nombre de murs vus, sans quoi quatre murs à 2 A
+réclameraient 8 A à un chargeur qui en donne 3.
+
 ### Protection : ni fusible, ni autoréarmable — un limiteur de courant
 
 Le raisonnement compte plus que la conclusion, parce qu'il se reposera à chaque
