@@ -873,15 +873,31 @@ static void applyPending() {
   s_strip.clear();
   s_strip.show();
   s_strip.updateLength(s_count + OFFS);
-  s_strip.begin();
+  // PAS de begin() ici, et c'est tout sauf un detail.
+  //
+  // Adafruit_NeoPixel::begin() fait `pinMode(pin, OUTPUT)`. Sur ESP32 cet appel
+  // passe par le gestionnaire de peripheriques, qui ARRACHE la broche au canal
+  // RMT pour la rendre a un GPIO ordinaire - puis `digitalWrite(pin, LOW)` la
+  // laisse au niveau bas. Ensuite espShow() voit `pin == rmtPin`, en conclut
+  // que le RMT est deja pret, et n'en refait rien : il ecrit dans un canal qui
+  // n'est plus relie a la broche.
+  //
+  // Symptome : toute la chaine s'eteint au premier changement de longueur, et
+  // AUCUN compteur ne bronche - rmtfail reste a 0, rmtframes continue de
+  // monter, fps affiche 63. Le firmware se croit en parfaite sante pendant que
+  // le mur est noir. Constate sur la vraie machine le 2026-08-07 en passant de
+  // 42 a 40 pixels, et d'abord pris pour un fil de masse debranche.
+  //
+  // updateLength() ne touche ni a la broche ni au RMT - elle ne fait que
+  // reallouer le tampon - donc il n'y a rien a reinitialiser. show() ne
+  // regarde que `pixels`, jamais `begun`.
   s_strip.clear();
   s_strip.show();
 #if LED_CHAIN2_ENABLE
   s_strip2.clear();
   s_strip2.show();
   s_strip2.updateLength(s_count + OFFS);
-  s_strip2.begin();
-  s_strip2.clear();
+  s_strip2.clear();                     // idem : surtout pas de begin()
   s_strip2.show();
 #endif
 }
