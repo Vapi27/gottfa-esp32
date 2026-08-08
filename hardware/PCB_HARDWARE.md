@@ -13,7 +13,7 @@ Mesuré le 2026-08-07 sur le build `95f4bf1` et sur le mur `Arena`
 | Contrainte | Valeur | D'où elle vient |
 |---|---|---|
 | Flash | **16 Mo minimum** | `partitions_s3.csv` finit à `0x820000` = 8,12 Mo. Un module 8 Mo ne tient pas. |
-| PSRAM | **octale** | `CONFIG_SPIRAM=y` + `CONFIG_SPIRAM_MODE_OCT=y` dans le `sdkconfig` compilé |
+| PSRAM | **aucune** | `CONFIG_SPIRAM` désactivé — mesuré meilleur sans, appairage compris (voir plus bas) |
 | RAM interne | 62 388 / 327 680 o (19 %) | sortie du build |
 | Taille de l'application | 974 ko dans un emplacement de 3 Mo | sortie du build |
 | Pixels maximum | **150** | `LED_MAX` |
@@ -32,34 +32,43 @@ connecteur, du fusible et du cuivre.
 
 ### Référence retenue
 
-**ESP32-S3-WROOM-1-N16R8** — LCSC **C2913202**, **25,5 × 18 × 3,1 mm**, pièce
-*Extended* chez JLCPCB (inspection aux rayons X, MSL 3).
+**ESP32-S3-WROOM-1-N16** — LCSC **C2913199**, **25,5 × 18 × 3,1 mm**, *Extended*
+chez JLCPCB. **Sans PSRAM** : l'appairage Matter a été refait en entier sur une
+image sans elle, et il passe avec 12,9 ko de marge de tas EN PLUS (voir plus bas).
+Le **N16R8** (`C2913202`) reste un remplacement broche-à-broche pour ~0,03 $ de
+plus, si tu préfères garder la porte ouverte — dans ce cas, livrer quand même
+avec `CONFIG_SPIRAM` désactivé.
 Variante antenne externe : **ESP32-S3-WROOM-1U-N16R8**, LCSC **C3013946** — à
 retenir si la carte finit dans un boîtier fermé, l'antenne PCB exigeant une zone
 totalement dégagée de cuivre.
 
-### La PSRAM : tranchée, par la mesure
+### La PSRAM : tranchée, appairage réel à l'appui
 
 `CONFIG_SPIRAM=y` venait de la configuration d'exemple esp-matter, pas d'un
-besoin démontré. Testé sur la vraie carte le 2026-08-07, à source identique
-(seul `CONFIG_SPIRAM` diffère), sous une séquence de contraintes identique —
-tous les modes, la page complète, un scan WiFi, l'image du plateau :
+besoin démontré. Testé sur la vraie carte, à source identique (seul
+`CONFIG_SPIRAM` diffère) :
 
 | | avec PSRAM | sans PSRAM |
 |---|---|---|
-| Tas libre | 76 783 | 60 836 |
-| **Minimum atteint sous charge** | **9 287** | **25 340** |
+| Tas libre | 79 207 | 65 124 |
+| **Plancher sous charge** | **9 287** | **22 448** |
 | Plus gros bloc contigu | 25 600 | 14 848 |
 
 **La PSRAM dégrade la marge de RAM interne**, et le journal de démarrage dit
 pourquoi : `esp_psram: Reserving pool of 32K of internal memory for DMA/internal
 allocations`. Elle prélève 32 ko d'interne sur les 320 disponibles, au profit de
-8 Mo dont cette application ne se sert pas.
+8 Mo dont cette application ne se sert jamais.
 
-Une réserve, la seule : le plus gros bloc contigu tombe de 25,6 à 14,8 ko. Une
-allocation d'un seul tenant au-delà de 14,8 ko échouerait sans PSRAM. Le pic
-d'appairage Matter n'a **pas** encore été mesuré — il demande de dépairer et
-réappairer depuis un téléphone.
+**Le test qui décide a été fait le 2026-08-07 : dépairage et réappairage complets
+depuis l'app Maison, sur l'image sans PSRAM.** L'appairage est le seul moment où
+CHIP alloue vraiment — c'est lui qui avait fait planter cette carte par manque de
+tas, au point qu'on a dû différer le serveur web au démarrage. Il **passe**, sans
+redémarrage, et le plancher reste à **22 448 octets**, soit **12,9 ko de marge de
+plus** qu'avec la PSRAM.
+
+La seule réserve identifiée — un plus gros bloc contigu tombant à 14,8 ko — ne
+s'est pas matérialisée : aucune allocation d'un seul tenant de l'appairage ne
+dépasse cette taille.
 
 ### Décision retenue
 
