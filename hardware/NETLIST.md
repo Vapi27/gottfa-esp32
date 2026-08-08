@@ -148,6 +148,22 @@ une seule arête utile. Prévoir le dégagement sur 4,1 mm de course.
 D+/D− → U2 → GPIO20/19 · masses du connecteur à la masse.
 D1 (TVS) et C1·C2 (2 × 470 µF) + C21 (22 µF) + C3–C6 (100 nF) sur +5V.
 
+**J4 chaînage** : VBUS pris **après F1** · GND commun · D+/D− **non connectés**
+(on ne relaie pas l'USB de données) · CC1 et CC2 chacune par **R11/R12 22 kΩ
+vers +3V3**.
+
+⚠ Ce sont des **Rp** (tirage vers le haut, côté source), et non les Rd de 5,1 kΩ
+de l'entrée. Un réceptacle USB-C qui présente de la tension sans se déclarer est
+hors spécification. 22 kΩ annonce **1,5 A** ; ne pas mettre 10 kΩ (3 A) : la
+carte partage déjà les 3 A de son propre chargeur, ce serait un mensonge.
+
+⚠ **Le vrai garde-fou est logiciel.** Quatre murs, chacun plafonné à 2 A,
+réclameraient 8 A à un chargeur qui en donne 3 — il replierait et toute la
+chaîne s'écroulerait. Le réglage **`/api/link?shared=1`** fait diviser le
+plafond de chaque mur par le nombre de murs vus sur le réseau : quatre murs
+chaînés se partagent 2 A au lieu d'en demander 8. À activer sur chaque mur d'une
+chaîne, et à laisser sur 0 si chacun a son propre chargeur.
+
 **J2 plateau** : 1 = +5V_LED (sortie de U5) · 2 = GND · 3 = DATA (sortie de R3).
 
 **J3 écran** : 1 = GND · 2 = +3V3 · 3 = SCL (GPIO21) · 4 = SDA (GPIO47).

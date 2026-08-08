@@ -100,6 +100,14 @@ uint16_t count();
 void    setBudgetMa(uint16_t ma);          // power ceiling for the whole chain
 uint16_t budgetMa();
 
+// Nombre de murs qui se PARTAGENT la meme alimentation (1 = seul). Le plafond
+// effectif devient budgetMa() / share : quatre murs chaines sur un chargeur de
+// 3 A ne peuvent pas en reclamer 8 chacun de leur cote. Pose par arena_peers
+// quand le proprietaire declare ses murs chaines ; ne touche PAS a la valeur
+// enregistree, qui reste celle du budget d'un mur seul.
+void    setBudgetShare(uint8_t n);
+uint8_t budgetShare();
+
 // Pixel colour order, e.g. "grbw" (SK6812 default) / "rgbw" / "gbrw" / ...
 // Changing it re-types the chain live — no reflash, no reboot.
 bool        setOrder(const char* s);       // false if the string is not a known order

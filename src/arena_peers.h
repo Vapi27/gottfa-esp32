@@ -45,4 +45,10 @@ uint8_t rank();
 // le seul etat sur quand on ne sait pas chez qui il va atterrir.
 void resetAll();
 
+// Les murs partagent-ils la meme alimentation (chainage USB-C) ? Quand c'est
+// vrai, chaque mur divise son plafond de courant par le nombre de murs vus, ce
+// qui empeche une chaine de reclamer plus que le chargeur ne donne.
+bool sharedPower();
+void setSharedPower(bool on);
+
 }  // namespace arenapeers

@@ -43,6 +43,10 @@ static uint8_t  s_speed     = ARENA_SPEED_DEFAULT;
 static Rgbw     s_color     = { ARENA_WARM_R, ARENA_WARM_G, ARENA_WARM_B, ARENA_WARM_W };
 static uint16_t s_count     = LED_COUNT_DEFAULT;
 static uint16_t s_budget    = LED_POWER_BUDGET_MA;
+// Diviseur d'alimentation partagee. Voir arenaled.h : ce n'est pas un reglage
+// de gout, c'est ce qui empeche N murs sur un seul chargeur de lui reclamer N
+// fois son courant et de le faire replier.
+static uint8_t  s_share     = 1;
 static char     s_order[8]  = ARENA_ORDER_DEFAULT;
 static uint32_t s_bootMs    = 0;       // soft-start reference
 
@@ -733,11 +737,12 @@ static float meterAndLimit(Rgbw* buf) {
   float ma = chans * LED_MA_PER_CHANNEL + quiescent;
 
   s_limited = false;
-  if (ma > (float)s_budget && chans > 0.0f) {
-    float avail = (float)s_budget - quiescent;
+  const float cap = (float)s_budget / (float)(s_share ? s_share : 1);
+  if (ma > cap && chans > 0.0f) {
+    float avail = cap - quiescent;
     if (avail < 0) avail = 0;
     for (uint16_t i = 0; i < s_count; i++) buf[i] = scale(buf[i], avail / (chans * LED_MA_PER_CHANNEL));
-    ma = (float)s_budget;
+    ma = cap;
     s_limited = true;
   }
   return ma / 1000.0f;
@@ -842,6 +847,8 @@ void setColor(Rgbw c) { s_color = c; markDirty(); }
 Rgbw color() { return s_color; }
 uint16_t count() { return s_count; }
 uint16_t budgetMa() { return s_budget; }
+void     setBudgetShare(uint8_t n) { s_share = n ? n : 1; }
+uint8_t  budgetShare()             { return s_share; }
 
 void setCount(uint16_t n) {
   if (n < 1) n = 1;

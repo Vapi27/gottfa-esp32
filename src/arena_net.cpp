@@ -348,6 +348,8 @@ static String stateJson() {
   // Les autres murs vus sur le reseau, et le comportement choisi face a eux.
   j += ",\"link\":\"" + String(arenapeers::linkName(arenapeers::link())) + "\"";
   j += ",\"rank\":"  + String((int)arenapeers::rank());
+  j += ",\"shared\":" + String(arenapeers::sharedPower() ? 1 : 0);
+  j += ",\"share\":"  + String((int)arenaled::budgetShare());
   j += ",\"peers\":" + arenapeers::json();
 
   // Qui est ce mur. Indispensable des qu'il y en a plusieurs : c'est ce qui
@@ -666,6 +668,11 @@ static void startServer() {
   s_server.on("/api/link", HTTP_GET, [](AsyncWebServerRequest* r) {
     if (r->hasParam("v"))
       arenapeers::setLink(arenapeers::linkFromName(r->getParam("v")->value().c_str()));
+    // Alimentation partagee : chainage USB-C. Separe du mode de liaison, parce
+    // qu'on peut vouloir des murs synchronises sur des chargeurs distincts, ou
+    // des murs independants sur le meme chargeur.
+    if (r->hasParam("shared"))
+      arenapeers::setSharedPower(r->getParam("shared")->value() != "0");
     r->send(200, "application/json",
             String("{\"link\":\"") + arenapeers::linkName(arenapeers::link()) +
             "\",\"rank\":" + String((int)arenapeers::rank()) +

@@ -58,6 +58,7 @@ struct Peer {
 static int         s_sock = -1;
 static Preferences s_prefs;
 static Link        s_link = LINK_OFF;
+static bool        s_sharedPwr = false;
 static uint8_t     s_mac[6] = {0};
 
 static Peer     s_peers[MAX_PEERS];
@@ -110,6 +111,16 @@ void setLink(Link l) {
 }
 
 uint8_t count() { return s_nPeers; }
+
+bool sharedPower() { return s_sharedPwr; }
+
+void setSharedPower(bool on) {
+  s_sharedPwr = on;
+  s_prefs.putUChar("shpwr", on ? 1 : 0);
+  // Applique tout de suite : le proprietaire vient peut-etre de brancher le
+  // deuxieme mur, et attendre la prochaine balise serait attendre l'ecroulement.
+  arenaled::setBudgetShare(on ? (uint8_t)(s_nPeers + 1) : 1);
+}
 
 // ---------------------------------------------------------------------------
 //  Rang
@@ -267,6 +278,7 @@ void resetAll() {
 void begin() {
   s_prefs.begin("arenapeer", false);
   s_link = (Link)s_prefs.getUChar("link", (uint8_t)LINK_OFF);
+  s_sharedPwr = s_prefs.getUChar("shpwr", 0) != 0;
   esp_read_mac(s_mac, ESP_MAC_WIFI_STA);
   memcpy(s_omac, s_mac, 6);
 }
@@ -300,6 +312,10 @@ void tick() {
   uint32_t now = millis();
   receive();
   expire();
+
+  // Le nombre de murs bouge : un mur qu'on debranche doit rendre sa part de
+  // courant aux autres, sinon la chaine reste bridee sans raison.
+  if (s_sharedPwr) arenaled::setBudgetShare((uint8_t)(s_nPeers + 1));
 
   if (s_pending && (int32_t)(now - s_pendingAt) >= 0) {
     s_pending = false;
