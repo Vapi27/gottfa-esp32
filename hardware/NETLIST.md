@@ -104,13 +104,18 @@ avec du vernis épargne.
 Alimentation : **+3V3** · C8 10 µF + C9–C12 100 nF, un par broche d'alimentation,
 au plus près.
 
-**S1, S2 et S3 sont des poussoirs à actionnement LATÉRAL** (ALPS SKSGPCE010,
-`C127472`), à poser **en bord de carte, actionneur débordant du contour** :
-gauche, droite, et OK au milieu. On presse par la tranche — rien ne traverse le
-circuit, le dos reste net.
+**S1, S2 et S3 sont des poussoirs à poussée LATÉRALE** (Panasonic **EVQP7A01P**,
+`C79167`, série EVQ-P7 « Side Push »), à poser **en bord de carte, actionneur
+débordant du contour** : gauche, droite, et OK au milieu. On presse par la
+tranche — rien ne traverse le circuit, le dos reste net.
+
+⚠ **Ne pas se fier au champ « Right Angle » de LCSC** pour juger du sens
+d'actionnement : il désigne souvent l'orientation des BROCHES. L'ALPS
+`C127472`, annoncé « Right Angle », est actionné **par le dessus** — vérifié sur
+la fiche constructeur après coup. Seule la documentation du fabricant tranche.
 
 ⚠ Conséquence pour le routage : prévoir le **dégagement du contour** en face de
-chaque actionneur (1,4 mm de course), et ne pas router de piste sous l'empreinte
+chaque actionneur (0,25 mm de course, corps 3,6 × 3,5 mm), et ne pas router de piste sous l'empreinte
 côté bord. L'effort étant latéral, **élargir les pastilles** et poser les trois
 poussoirs sur la même arête pour que la façade soit droite.
 
