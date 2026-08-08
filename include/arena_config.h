@@ -150,6 +150,12 @@
 #define PIN_ARENA_ENC_B        5
 #define PIN_ARENA_ENC_SW       7
 
+// Encodeur rotatif : ABANDONNE sur la carte de serie. Trois poussoirs lateraux
+// en bord de carte font le meme travail sans piece traversante ni bouton qui
+// depasse au dos. A 0, GPIO4 et GPIO5 sont LIBRES et aucune interruption n'est
+// accrochee a des broches non connectees.
+#define ARENA_ENC_ENABLE       0
+
 // Navigation a trois boutons : deux fleches et OK. C'est le montage retenu pour
 // la carte definitive - trois poussoirs CMS coutent moins qu'un encodeur, se
 // posent a plat derriere la face avant, et se serigraphient sans ambiguite.

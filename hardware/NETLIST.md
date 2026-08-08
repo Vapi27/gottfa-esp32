@@ -92,9 +92,9 @@ avec du vernis épargne.
 | I²C SCL | **21** | J3 broche 3 |
 | BTN_UP (gauche) | **15** | S1 → GND |
 | BTN_DOWN (droite) | **17** | S2 → GND |
-| BTN_OK (milieu) | **7** | S3 → GND (partagé avec ENC1 SW) |
+| BTN_OK (milieu) | **7** | S3 → GND |
 | ~~BTN_FACE~~ | ~~18~~ | **supprimé** — trois boutons suffisent, le menu couvre tout. GPIO18 redevient libre. |
-| ENC_A / ENC_B | **4 / 5** | ENC1 (empreinte non montée) |
+| ~~ENC_A / ENC_B~~ | ~~4 / 5~~ | **encodeur abandonné** — GPIO4 et GPIO5 sont libres (`ARENA_ENC_ENABLE 0`) |
 | MIC_OUT | **1** | U3 broche 6 |
 | STATUS_PX | **48** | D2 (WS2812B-2020) |
 | USB D− / D+ | **19 / 20** | U2 → J1 |

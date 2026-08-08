@@ -7,9 +7,10 @@
 // diagnostics au meme niveau, et il fallait la parcourir en entier pour changer
 // une seule chose.
 //
-// L'encodeur reste lu s'il est cable : ses crans valent haut et bas, son
-// poussoir vaut OK. Les deux entrees mènent au meme code, donc une carte peut
-// porter l'un, l'autre, ou les deux, sans firmware different.
+// L'encodeur rotatif est ABANDONNE (ARENA_ENC_ENABLE 0) : trois poussoirs
+// lateraux en bord de carte font le meme travail sans piece traversante. Le code
+// de lecture reste sous condition pour qui voudrait le recabler, mais aucune
+// interruption n'est posee sur GPIO4/5, qui sont donc libres.
 #include "arena_config.h"
 #if ARENA_OLED_ENABLE
 
@@ -39,6 +40,7 @@ static uint32_t s_lastIn = 0;
 //  des crans exactement quand le proprietaire tourne vite, ce qui se lit comme
 //  un bouton casse et non comme un echantillon manque.
 // ---------------------------------------------------------------------------
+#if ARENA_ENC_ENABLE
 static volatile int8_t  s_encDelta = 0;
 static volatile uint8_t s_encPrev  = 0;
 
@@ -65,6 +67,11 @@ static int8_t encTake() {
   interrupts();
   return d;
 }
+#else
+// Pas d'encodeur cable : rien a lire, et surtout aucune interruption posee sur
+// des broches en l'air. GPIO4 et GPIO5 restent disponibles.
+static inline int8_t encTake() { return 0; }
+#endif
 
 // ---------------------------------------------------------------------------
 //  Arbre de menus
@@ -587,17 +594,19 @@ void begin() {
   pinMode(PIN_ARENA_BTN_DOWN, INPUT_PULLUP);
   pinMode(PIN_ARENA_BTN_OK,   INPUT_PULLUP);
 
+#if ARENA_ENC_ENABLE
   pinMode(PIN_ARENA_ENC_A, INPUT_PULLUP);
   pinMode(PIN_ARENA_ENC_B, INPUT_PULLUP);
   s_encPrev = (uint8_t)((digitalRead(PIN_ARENA_ENC_A) << 1) | digitalRead(PIN_ARENA_ENC_B));
   attachInterrupt(digitalPinToInterrupt(PIN_ARENA_ENC_A), encIsr, CHANGE);
   attachInterrupt(digitalPinToInterrupt(PIN_ARENA_ENC_B), encIsr, CHANGE);
+#endif
 
   s_d.setRotation(0);
-  Serial.printf("[oled] SSD1306 %dx%d SDA%d/SCL%d - up=%d down=%d ok=%d (encodeur %d/%d)\n",
+  Serial.printf("[oled] SSD1306 %dx%d SDA%d/SCL%d - up=%d down=%d ok=%d%s\n",
                 ARENA_OLED_W, ARENA_OLED_H, PIN_ARENA_OLED_SDA, PIN_ARENA_OLED_SCL,
                 PIN_ARENA_BTN_UP, PIN_ARENA_BTN_DOWN, PIN_ARENA_BTN_OK,
-                PIN_ARENA_ENC_A, PIN_ARENA_ENC_B);
+                ARENA_ENC_ENABLE ? " (+ encodeur)" : "");
   if (ARENA_OLED_BOOT_QR) showQr();
   else                    poke();
 }
