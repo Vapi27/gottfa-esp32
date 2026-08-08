@@ -27,8 +27,8 @@ Mesuré le 2026-08-07 sur le build `95f4bf1` et sur le mur `Arena`
 ⚠ **Ne pas dimensionner l'alimentation sur ces 9 A.** C'est un plafond de
 sécurité logiciel, pas un point de fonctionnement : le modèle du firmware compte
 quatre canaux par pixel, là où le blanc d'un RGBW n'en utilise qu'un. Mesuré, le
-mur maximal tire **2,92 A**. Voir §3bis, qui est la section qui décide du
-connecteur, du fusible et du cuivre.
+mur maximal tire **2,92 A**. Voir « Consommation réelle » plus bas, qui décide du connecteur, du
+fusible et du cuivre.
 
 ### Référence retenue
 
@@ -70,6 +70,58 @@ La seule réserve identifiée — un plus gros bloc contigu tombant à 14,8 ko �
 s'est pas matérialisée : aucune allocation d'un seul tenant de l'appairage ne
 dépasse cette taille.
 
+### Consommation réelle — MESURÉE sur cinq points
+
+Relevé au wattmètre sur la prise secteur, mode `classic` (toutes LED allumées),
+le 2026-08-07. **Cinq points, deux pentes** — et non plus une mesure unique
+extrapolée, qui était le défaut de la version précédente.
+
+**Pente par pixel**, à 100 % :
+
+| pixels | mesure |
+|---|---|
+| 10 | 2,1 W |
+| 20 | 3,0 W |
+| 40 | 5,9 W |
+
+Régression : **0,129 W par pixel**, socle **0,65 W**, R² = 0,989.
+Soit **25,9 mA par pixel** à 5 V.
+
+⚠ **Correction.** La version précédente annonçait 18,2 mA par pixel, déduits
+d'un point unique. Trois points en donnent **25,9**, soit **40 % de plus**. Tout
+ce qui en découlait était optimiste d'autant.
+
+Le **socle de 0,65 W** sort de la régression sans avoir rien eu à débrancher :
+il couvre l'électronique du mur *et* les pertes du bloc. Les 1,1 W relevés à
+vide étaient donc surtout des pertes du bloc à charge nulle, qui s'effondrent
+dès qu'il débite.
+
+**Ce que tire un mur, à fond :**
+
+| pixels | à la prise | continu |
+|---|---|---|
+| 42 (mur de référence) | 6,1 W | 1,03 A |
+| **50 (cible produit)** | **7,1 W** | **1,21 A** |
+| 100 | 13,6 W | 2,31 A |
+| 150 (`LED_MAX`) | 20,0 W | **3,41 A** |
+
+⚠ **Un mur de 150 pixels dépasse les 3 A d'un chargeur USB-C.** C'est
+`LED_POWER_BUDGET_MA` qui l'en empêche : il assombrit la trame plutôt que de
+laisser le chargeur replier.
+
+**La luminosité n'est pas proportionnelle :**
+
+| réglage | LED seules | part du maximum |
+|---|---|---|
+| 25 % | 1,25 W | **24 %** |
+| 50 % | 1,45 W | **28 %** |
+| 100 % | 5,25 W | 100 % |
+
+Passer de 25 à 50 % ne coûte que **4 %** de puissance en plus : il y a une courbe
+de gamma entre le réglage et la puissance émise. Un client qui baisse un peu la
+luminosité divise sa consommation par près de quatre, et les chiffres « à fond »
+ci-dessus sont un pire cas que personne n'habite au quotidien.
+
 ### Décision retenue
 
 - **Entrée USB-C 5 V directe**, deux résistances de 5,1 kΩ sur CC1/CC2. Ni
@@ -95,49 +147,34 @@ Largeurs de piste, IPC-2221, cuivre 1 oz en couche externe, +10 °C :
 
 ### Chaînage — et pourquoi on reste à 3 A
 
-Point de fonctionnement réel, extrapolé des mesures du wattmètre pour le mur
-type visé (**50 pixels**) :
+Sur la base des mesures ci-dessus, pour le mur type visé (**50 pixels**) :
+**7,1 W à fond**, soit **1,21 A**.
 
-| | courant | à la prise |
-|---|---|---|
-| Attract | **0,37 A** | ~2,2 W |
-| À fond | **1,10 A** | ~6,5 W |
+| Chargeur | Murs à fond |
+|---|---|
+| **USB-C nu, 3 A (15 W)** ← retenu | **2** |
+| PD 5 V / 5 A (25 W) | 3 |
 
-Combien de murs sur un seul chargeur :
+**Décision : on reste à 3 A, sans négociation PD.** Le gain serait d'un seul mur
+de plus à pleine luminosité, contre trois contraintes lourdes : un contrôleur de
+négociation à bord (sans lui la carte obtient 3 A quoi qu'on branche), un câble
+e-marqué (un cordon ordinaire est plafonné à 3 A), et une alimentation d'un type
+rare — l'offre 5 V / 5 A est *optionnelle* en PD et pratiquement personne ne
+l'utilise à part le Raspberry Pi 5.
 
-| Chargeur | Tous à fond | Tous en attract |
-|---|---|---|
-| **USB-C nu, 3 A** ← retenu | 2 | **8** |
-| PD 5 V / 5 A | 4 | 13 |
+Le mode de panne tranche : si l'alimentation ou le câble ne suit pas, le mur
+**fonctionne quand même**, en silence, à 3 A, et personne ne comprend pourquoi il
+s'assombrit. Deux chargeurs coûtent moins qu'un retour.
 
-**Décision : on reste à 3 A, sans négociation PD.** Le gain réel serait de deux
-murs à fond, alors que la carte en tient déjà huit en attract — le mode où un
-mur de salon passe sa vie.
+Et le pire cas « tous à fond » n'existe guère : à 50 % de luminosité un mur ne
+consomme que **28 %** de son maximum, donc un même chargeur en tient bien
+davantage en usage réel.
 
-Ce que le 5 A aurait imposé, et qui l'a fait écarter :
-
-- **Un contrôleur de négociation à bord.** Sans lui la carte est un consommateur
-  passif et obtient 3 A quoi qu'on branche.
-- **Un câble e-marqué.** Un cordon USB-C ordinaire est plafonné à 3 A par la
-  spécification, et la source refuse de monter sans la puce d'identification
-  dans le connecteur.
-- **Une alimentation d'un type rare.** L'offre 5 V / 5 A est *optionnelle* en PD
-  et pratiquement personne ne l'utilise à part le Raspberry Pi 5 — ces blocs
-  existent pour lui. Un client qui achète au hasard n'en aura pas.
-
-Le mode de panne est le pire qui soit pour un produit vendu : si l'alimentation
-ou le câble ne suit pas, le mur **fonctionne quand même**, en silence, à 3 A, et
-personne ne comprend pourquoi il s'assombrit. Quatre murs, ce sont deux chargeurs
-à quelques euros — moins cher qu'un seul retour.
-
-L'argument s'inverserait pour une vitrine de six murs sur un seul câble : il
-faudrait repeupler un CH224K (`C970725`) et assumer la contrainte de cordon. Le
-cuivre et le fusible étant **déjà dimensionnés 5 A**, cette variante ne
-demanderait pas de revoir le routage.
+Cuivre et fusible restent **dimensionnés 5 A** : la variante vitrine (repeupler
+un CH224K, `C970725`) ne demanderait pas de revoir le routage.
 
 **Le garde-fou du chaînage reste logiciel** : `/api/link?shared=1` divise le
-plafond de chaque mur par le nombre de murs vus, sans quoi quatre murs à 2 A
-réclameraient 8 A à un chargeur qui en donne 3.
+plafond de chaque mur par le nombre de murs vus.
 
 ### Protection : ni fusible, ni autoréarmable — un limiteur de courant
 
