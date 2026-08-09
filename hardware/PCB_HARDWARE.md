@@ -325,7 +325,7 @@ en moins que sur le devkit.
 
 | Rôle | Spécification | Pourquoi |
 |---|---|---|
-| Adaptateur de niveau | **74AHCT1G125**, SOT-23-5, alimenté en 5 V | voir ci-dessous |
+| Adaptateur de niveau | **SN74AHCT1G125DCKR**, **SC-70-5** (le suffixe DCKR = SC-70 ; DBV = SOT-23), alimenté en 5 V | voir ci-dessous |
 | Résistance série | 330 Ω, en sortie de l'adaptateur | amortit le front, réduit le rayonnement |
 | Connecteur données | JST-XH 3 broches (données + masse de référence) | le courant ne passe pas par là |
 | Connecteur puissance | bornier à vis, séparé | 9 A ne passent pas dans un JST-XH |
@@ -352,7 +352,7 @@ pas parcourir toute la chaîne par le premier connecteur. Sortir deux paires
 | Connecteur écran | 4 broches (VCC / GND / SCL / SDA), pas 1,25 mm ou 2,54 mm selon ton stock |
 | Tirages I²C | 2 × 4,7 kΩ vers 3,3 V, **à ne pas monter** si le module en porte déjà |
 | Boutons | 3 poussoirs tactiles CMS : ▲ GPIO15, ▼ GPIO17, OK GPIO7 |
-| Encodeur | empreinte EC11 sur GPIO4/5/7, **non montée** — le firmware lit les deux |
+| ~~Encodeur~~ | **abandonné** — GPIO4 porte désormais `LED_FAULT` de U5 ; y remettre une empreinte EC11 mettrait un contact en parallèle d'une sortie à drain ouvert et rendrait la détection de court-circuit aveugle |
 | Bouton de façade | 1 poussoir sur **GPIO18** (et non GPIO0, voir §3.1) |
 
 Pas de résistance de tirage sur les boutons : le firmware active les tirages

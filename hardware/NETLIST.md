@@ -27,9 +27,9 @@ Boucle de retour courte : router FB au plus loin de LX.
 
 | Broche | Nom | Connexion |
 |---|---|---|
-| 1 | IN | **+5V** |
-| 6 | OUT | **+5V_LED** → J2 broche 1 |
-| 3 | EN/~EN | ⚠ **GND** — voir ci-dessous |
+| 1 | IN | **+5V** · **C5 100 nF** vers GND au plus près — *« connect a 0.1uF or greater ceramic capacitor from IN to GND as close to IC as possible »* |
+| 6 | OUT | **+5V_LED** · **C26 2,2 µF** vers GND → J2 broche 1 — *« bypassing the device output with a 0.1uF to 4.7uF ceramic capacitor improves the immunity to short-circuit transients »* |
+| 3 | EN/~EN | **net `EN_LED`** : R10 10 kΩ vers +5V, tiré à la masse par **SW1** — actif bas, voir ci-dessous |
 | 5 | ILIM | **R4 10 k 1 %** vers GND |
 | 4 | ~FAULT | **GPIO4** du module — drain ouvert, actif bas, tirage INTERNE de l'ESP |
 | 2 | GND | GND |
@@ -50,7 +50,9 @@ SORTIE » en priorité sur tout le reste, et `/api/state` expose `ledfault` et
 ⚠ **La broche 3 est un enable ACTIF BAS** sur cette variante — le symbole
 l'affiche `EN/~{EN}` justement parce que la famille existe dans les deux
 polarités. Reliée à IN, réflexe habituel du concepteur, **le limiteur reste
-désactivé et la sortie LED est morte en permanence**. Elle va à la masse.
+désactivé et la sortie LED est morte en permanence**. Elle est tirée à la masse
+**par SW1**, avec R10 en rappel vers +5V — et non câblée en dur à la masse, sans
+quoi l'interrupteur marche/arrêt n'aurait plus de prise dessus.
 
 ## U6 — SN74AHCT1G125DCKR, tampon 5 V des données LED
 
@@ -84,7 +86,7 @@ d'abord donné un brochage faux :
 | 6 | I/O1 | **GPIO19** du module — côté protégé |
 | 3 | I/O2 | **J1 broche A6/B6 (D+)** — côté connecteur |
 | 4 | I/O2 | **GPIO20** du module — côté protégé |
-| 5 | VBUS | **+5V** (protège aussi le rail) |
+| 5 | VBUS | **+5V** · **C4 100 nF** vers GND, contre le boîtier |
 | 2 | GND | GND |
 
 **Les broches 1 et 6 sont le même nœud interne, 3 et 4 aussi.** La ligne
@@ -229,8 +231,14 @@ avec du vernis épargne.
 | BOOT | **0** | S5 → GND |
 | EN | — | R5 10 k vers +3V3, C7 1 µF vers GND, S6 → GND |
 
-Alimentation : **+3V3** · C8 10 µF + C9–C12 100 nF, un par broche d'alimentation,
-au plus près.
+Alimentation : **+3V3** · **C8 22 µF** + **C9 et C10 100 nF**, tous groupés au plus
+près de la **broche 2**, retour de masse vers la broche 1 ou 40.
+
+⚠ Le module n'a qu'**UNE SEULE broche d'alimentation** (la 2). La formulation
+« un condensateur par broche d'alimentation » décrivait un composant qui
+n'existe pas, et aurait fait disperser les condensateurs autour du boîtier au
+routage — ce qui dégrade l'inductance de boucle au lieu de l'améliorer.
+Espressif dessine 22 µF + 0,1 µF, pas davantage.
 
 **S1, S2 et S3 sont des poussoirs à poussée LATÉRALE** (Panasonic **EVQP7A01P**,
 `C79167`, série EVQ-P7 « Side Push »), à poser **en bord de carte, actionneur
@@ -277,12 +285,12 @@ D+/D− → U2 → GPIO20/19 · masses du connecteur à la masse.
 D1 (TVS) et C1·C2 (2 × 470 µF) + C21 (22 µF) + C3–C6 (100 nF) sur +5V.
 
 **J4 chaînage** : VBUS pris **après F1** · GND commun · D+/D− **non connectés**
-(on ne relaie pas l'USB de données) · CC1 et CC2 chacune par **R11/R12 22 kΩ
+(on ne relaie pas l'USB de données) · CC1 et CC2 chacune par **R11/R12 12 kΩ
 vers +3V3**.
 
 ⚠ Ce sont des **Rp** (tirage vers le haut, côté source), et non les Rd de 5,1 kΩ
 de l'entrée. Un réceptacle USB-C qui présente de la tension sans se déclarer est
-hors spécification. 22 kΩ annonce **1,5 A** ; ne pas mettre 10 kΩ (3 A) : la
+hors spécification. **12 kΩ** annonce 1,5 A pour un tirage vers 3,3 V (table 6 AN1953 : 36 k / 12 k / 4,7 k). ⚠ Les valeurs 56 k / 22 k / 10 k qu'on lit partout sont celles d'un tirage vers 5 V — les appliquer à 3,3 V n'annonce rien de valide. Ne pas mettre 4,7 kΩ (3 A) : la
 carte partage déjà les 3 A de son propre chargeur, ce serait un mensonge.
 
 ⚠ **Le vrai garde-fou est logiciel.** Quatre murs, chacun plafonné à 2 A,
@@ -305,9 +313,9 @@ Tout ce qui précède, vu depuis les nets plutôt que depuis les composants.
 
 | Net | Broches reliées |
 |---|---|
-| **+5V** | J1 VBUS (A4/B4, A9/B9) → **F1** → tout le reste · D1 anode · C1 C2 C3–C6 C21 · U2 br.5 · U4 br.4 (IN) + C17 · U5 br.1 (IN) · U6 br.5 (VCC) + 100 nF · J4 VBUS · R10 |
+| **+5V** | J1 VBUS (A4/B4, A9/B9) → **F1** → tout le reste · D1 anode · C1 C2 C3–C6 C21 · U2 br.5 + C4 100 nF · U4 br.4 (IN) + C17 · U5 br.1 (IN) + C5 100 nF · U6 br.5 (VCC) + 100 nF · J4 VBUS · R10 |
 | **+3V3** | U4 sortie via **L1** · C18 · U1 br.2 (3V3) · C8 + C9–C12 · U3 br.5 (VDD) + 100 nF · MIC1 br.4 (VDD) + 100 nF · J3 br.2 · D2 br.4 (VDD) · R5 · R6 R7 · R11 R12 |
-| **+5V_LED** | U5 br.6 (OUT) → **J2 br.1** |
+| **+5V_LED** | U5 br.6 (OUT) · **C26 2,2 µF** vers GND au plus près · → **J2 br.1** |
 | **GND** | commun à tout · J1 GND (A1/B1, A12/B12) · U2 br.2 · U4 br.2 · U5 br.2 · U6 br.3 · U3 br.7 **et br.15 (pastille exposée)** · MIC1 br.2 et br.3 · U1 br.1, 40, 41 · D2 br.2 · J2 br.2 · J3 br.1 · J4 GND · S1 S2 S3 · SW1 commun · R1 R2 R4 R9 · tous les découplages |
 | **USB_DM** | J1 A7/B7 → U2 br.1 · U2 br.6 → U1 br.13 (**IO19**) |
 | **USB_DP** | J1 A6/B6 → U2 br.3 · U2 br.4 → U1 br.14 (**IO20**) |
@@ -330,11 +338,6 @@ Tout ce qui précède, vu depuis les nets plutôt que depuis les composants.
 | **ADC_IN** | U3 br.6 (MICOUT) → U1 br.39 (**IO1**) |
 | **STATUS_PX** | U1 br.25 (**IO48**) → D2 br.3 (DI) |
 | **BOOT** | U1 br.27 (**IO0**) → S5 → GND |
-
-Broches de U3 à traiter à part (voir sa section) : **br.10 GAIN → GND** (40 dB),
-**br.2 ~SHDN → VDD**, **br.1 CT** et **br.3 CG** chacune 0,1 µF vers GND,
-br.9 A/R et br.14 TH en l'air, **br.13 MICBIAS non utilisée** (le MEMS
-s'alimente seul), br.4 et br.11 N.C.
 
 ### SW1 — repérage des pastilles
 
