@@ -56,7 +56,7 @@ désactivé et la sortie LED est morte en permanence**. Elle va à la masse.
 
 | Broche | Nom | Connexion |
 |---|---|---|
-| 5 | VCC | **+5V** · 100 nF vers GND |
+| 5 | VCC | **+5V** · **C6** 100 nF vers GND, au plus près |
 | 2 | A | **GPIO16** du module (LED_DATA, 3,3 V) |
 | 1 | #OE | **GND** (sortie toujours validée) |
 | 4 | Y | **R3 330 Ω** → J2 broche 3 (DATA) |
@@ -100,24 +100,35 @@ J1, avant que la paire n'entre dans la carte.
 
 | Broche | Nom | Connexion |
 |---|---|---|
-| 5 | VDD | **+3V3** · 100 nF vers GND |
+| 5 | VDD | **+3V3** · **C20** 100 nF vers GND, au plus près |
 | 7, 15 | GND, EP | GND — **la pastille exposée doit être soudée**, c'est aussi le retour thermique |
 | 8 | MICIN | **C19 100 nF** ← MIC1 broche 1 (OUT) |
 | 13 | MICBIAS | **non utilisé** — un MEMS s'alimente lui-même, cette broche sert aux capsules électret. Laisser en l'air ou 1 µF vers GND. |
 | 6 | MICOUT | **GPIO1** du module (ADC1_CH0) |
 | 10 | GAIN | **GND** = 40 dB. En l'air = 50 dB, VDD = 60 dB. Prévoir 3 pastilles pour choisir à la main. |
 | 9 | A/R | en l'air (rapport attaque/relâchement 1:4000) |
-| 1 | CT | 0,1 µF vers GND (constante de temps du CAG) |
-| 3 | CG | 0,1 µF vers GND |
+| 1 | CT | **C22** 100 nF vers GND (constante de temps du CAG) |
+| 3 | CG | **C23** 100 nF vers GND |
 | 14 | TH | en l'air (seuil par défaut) |
 | 2 | ~SHDN | **VDD** (actif bas : à VDD, l'ampli fonctionne) |
 | 4, 11 | N.C. | ne rien connecter |
+
+**Les cinq condensateurs du bloc micro**, chacun son rôle — aucun n'est
+optionnel, et la nomenclature n'en prévoyait d'abord que deux :
+
+| | rôle |
+|---|---|
+| **C19** | couplage MIC1 br.1 → U3 br.8 (MICIN) |
+| **C20** | découplage de `VDD` de U3 (br.5) |
+| **C22** | sur `CT` (br.1) — constante de temps du contrôle de gain |
+| **C23** | sur `CG` (br.3) |
+| **C24** | découplage de `VDD` de MIC1 (br.4) |
 
 ## MIC1 — ZTS6216, micro MEMS analogique
 
 | Broche | Nom | Connexion |
 |---|---|---|
-| 4 | VDD | **+3V3** · 100 nF vers GND au plus près |
+| 4 | VDD | **+3V3** · **C24** 100 nF vers GND, au plus près |
 | 1 | OUT | **C19 100 nF** → U3 broche 8 (MICIN) |
 | 2, 3 | GND | GND |
 
