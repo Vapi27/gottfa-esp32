@@ -31,8 +31,21 @@ Boucle de retour courte : router FB au plus loin de LX.
 | 6 | OUT | **+5V_LED** → J2 broche 1 |
 | 3 | EN/~EN | ⚠ **GND** — voir ci-dessous |
 | 5 | ILIM | **R4 10 k 1 %** vers GND |
-| 4 | ~FAULT | pastille de test (collecteur ouvert, laisser en l'air sinon) |
+| 4 | ~FAULT | **GPIO4** du module — drain ouvert, actif bas, tirage INTERNE de l'ESP |
 | 2 | GND | GND |
+
+⚠ **Ne jamais tirer `~FAULT` vers le 5 V.** U5 est alimenté en 5 V mais sa
+sortie est à drain ouvert : c'est le tirage qui fixe le niveau haut. Tiré au
+5 V, il mettrait **5 V sur une broche de l'ESP**. Le tirage interne de l'ESP
+(vers 3,3 V) suffit — le signal est lent, aucune résistance externe n'est
+nécessaire.
+
+Le firmware le surveille : il **ignore les 1,5 premières secondes** (le limiteur
+limite forcément au démarrage, le temps de charger la capacité de la chaîne) et
+exige ensuite **200 ms de persistance** avant de déclarer un défaut. Un défaut
+fugitif est du bruit ; un court-circuit dure. L'écran affiche alors « DEFAUT
+SORTIE » en priorité sur tout le reste, et `/api/state` expose `ledfault` et
+`ledfaultn`.
 
 ⚠ **La broche 3 est un enable ACTIF BAS** sur cette variante — le symbole
 l'affiche `EN/~{EN}` justement parce que la famille existe dans les deux
@@ -123,8 +136,9 @@ avec du vernis épargne.
 | BTN_UP (gauche) | **15** | S1 → GND |
 | BTN_DOWN (droite) | **17** | S2 → GND |
 | BTN_OK (milieu) | **7** | S3 → GND |
-| ~~BTN_FACE~~ | ~~18~~ | **supprimé** — trois boutons suffisent, le menu couvre tout. GPIO18 redevient libre. |
-| ~~ENC_A / ENC_B~~ | ~~4 / 5~~ | **encodeur abandonné** — GPIO4 et GPIO5 sont libres (`ARENA_ENC_ENABLE 0`) |
+| ~~BTN_FACE~~ | ~~18~~ | **supprimé** (`ARENA_FACE_BTN_ENABLE 0`) — GPIO18 réellement libre |
+| **LED_FAULT** | **4** | U5 broche 4 (~FAULT) — récupéré de l'encodeur abandonné |
+| ~~ENC_B~~ | ~~5~~ | libre (`ARENA_ENC_ENABLE 0`) |
 | MIC_OUT | **1** | U3 broche 6 |
 | STATUS_PX | **48** | D2 (WS2812B-2020) |
 | USB D− / D+ | **19 / 20** | U2 → J1 |
@@ -220,6 +234,7 @@ Tout ce qui précède, vu depuis les nets plutôt que depuis les composants.
 | **LED_DATA** | U1 br.9 (**IO16**) → U6 br.2 (A) |
 | **LED_DATA_5V** | U6 br.4 (Y) → R3 330 Ω → **J2 br.3** |
 | **ILIM** | U5 br.5 → R4 10 k → GND |
+| **LED_FAULT** | U5 br.4 → U1 br.4 (**IO4**) — drain ouvert, tirage interne |
 | **EN_LED** | U5 br.3 (EN, **actif bas**) · R10 10 k → +5V · **SW1** |
 | **EN_MCU** | U1 br.3 (EN) · R5 10 k → +3V3 · C7 1 µF → GND · **SW1** · S6 → GND |
 | **I2C_SDA** | U1 br.24 (**IO47**) → J3 br.4 · R6 → +3V3 (DNP) |

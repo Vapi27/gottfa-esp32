@@ -120,6 +120,12 @@ void clearIdentify();
 int  identifyingLed();                     // -1 when idle
 
 // --- telemetry --------------------------------------------------------------
+// Defaut signale par le limiteur de sortie U5. Vrai seulement si le signal a
+// persiste : voir ARENA_FAULT_HOLD_MS. Le compteur, lui, garde la trace des
+// episodes meme brefs une fois passe le demarrage.
+bool     ledFault();
+uint16_t ledFaultCount();
+
 float    lastAmps();       // A estimated for the frame just pushed
 bool     limited();        // true if the power limiter had to scale the last frame
 uint32_t frameCount();

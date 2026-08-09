@@ -352,6 +352,11 @@ static String stateJson() {
   j += ",\"share\":"  + String((int)arenaled::budgetShare());
   j += ",\"peers\":" + arenapeers::json();
 
+  // Defaut du limiteur de sortie : le seul signal materiel qui dit qu'il se
+  // passe quelque chose AU BOUT du cable, la ou personne ne regarde.
+  j += ",\"ledfault\":"  + String(arenaled::ledFault() ? 1 : 0);
+  j += ",\"ledfaultn\":" + String((int)arenaled::ledFaultCount());
+
   // Qui est ce mur. Indispensable des qu'il y en a plusieurs : c'est ce qui
   // permet de balayer le reseau et de dire lequel est lequel.
   j += ",\"name\":\"" + s_name + "\"";

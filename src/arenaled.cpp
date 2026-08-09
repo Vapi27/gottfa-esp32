@@ -948,6 +948,36 @@ void identifyZone(int zoneIdx, uint32_t ms) {
 void clearIdentify() { s_idLed = s_idZone = -1; s_idUntil = 0; }
 int  identifyingLed() { return s_idLed; }
 
+// ---------------------------------------------------------------------------
+//  Defaut du limiteur de sortie (U5, AP2552, ~FAULT actif bas)
+// ---------------------------------------------------------------------------
+static bool     s_fault      = false;
+static uint16_t s_faultCount = 0;
+static uint32_t s_faultSince = 0;
+
+bool     ledFault()      { return s_fault; }
+uint16_t ledFaultCount() { return s_faultCount; }
+
+static void pollFault() {
+  const uint32_t now = millis();
+  // A la mise sous tension, le limiteur limite forcement : il charge la
+  // capacite de la chaine. Signaler ce passage serait crier au loup a chaque
+  // allumage, et plus personne ne regarderait l'alerte ensuite.
+  if (now < ARENA_FAULT_IGNORE_MS) return;
+
+  const bool low = digitalRead(PIN_ARENA_LED_FAULT) == LOW;
+  if (!low) { s_faultSince = 0; s_fault = false; return; }
+
+  if (!s_faultSince) { s_faultSince = now; return; }
+  if (!s_fault && now - s_faultSince >= ARENA_FAULT_HOLD_MS) {
+    s_fault = true;
+    s_faultCount++;
+    Serial.printf("[led] DEFAUT sortie plateau : le limiteur U5 bride depuis %lu ms "
+                  "(court-circuit ou chaine trop gourmande) - episode n°%u\n",
+                  (unsigned long)(now - s_faultSince), s_faultCount);
+  }
+}
+
 float    lastAmps()   { return s_amps; }
 bool     limited()    { return s_limited; }
 uint32_t frameCount() { return s_frames; }
@@ -1000,6 +1030,7 @@ void save() {
 }
 
 void begin() {
+  pinMode(PIN_ARENA_LED_FAULT, INPUT_PULLUP);   // ~FAULT de U5, drain ouvert
 #if ARENA_MIC_ENABLE
   micBegin();
 #endif
@@ -1078,6 +1109,8 @@ void tick() {
     if (millis() - s_pausedAt < ARENA_PAUSE_MAX_MS) return;
     s_paused = false;
   }
+  pollFault();
+
   uint32_t now = millis();
   if (now - s_lastFrame < (uint32_t)(1000 / LED_FRAME_HZ)) return;
   s_lastFrame = now;

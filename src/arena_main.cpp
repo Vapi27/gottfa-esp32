@@ -56,7 +56,7 @@ static bool     s_btnHandled = false;
 static const uint32_t BTN_LONG_MS = 1000;
 
 static void buttonPoll() {
-  bool down = (digitalRead(PIN_ARENA_BUTTON) == LOW);
+  bool down = ARENA_FACE_BTN_ENABLE && (digitalRead(PIN_ARENA_BUTTON) == LOW);
   if (down) arenaoled::poke();
   uint32_t now = millis();
 
@@ -81,7 +81,9 @@ void setup() {
   Serial.println("\n" ARENA_FW_NAME " v" ARENA_FW_VERSION);
 
 #if ARENA_BUTTON_ENABLE
+#if ARENA_FACE_BTN_ENABLE
   pinMode(PIN_ARENA_BUTTON, INPUT_PULLUP);
+#endif
 #endif
 
   if (!LittleFS.begin(true))

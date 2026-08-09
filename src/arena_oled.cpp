@@ -313,6 +313,25 @@ static void drawConfirm(uint32_t held) {
 
 static void draw() {
   if (!s_awake) return;
+  // Un defaut de sortie passe AVANT tout le reste : c'est la seule chose que le
+  // proprietaire doit voir sans avoir a chercher. Il ne s'affiche que s'il a
+  // persiste, donc jamais pour le passage en limitation du demarrage.
+  if (arenaled::ledFault()) {
+    s_d.clearDisplay();
+    s_d.setTextColor(SSD1306_WHITE);
+    s_d.ssd1306_command(SSD1306_SETCONTRAST);
+    s_d.ssd1306_command(0xCF);
+    s_d.setTextSize(1);
+    s_d.setCursor(0, 0);
+    s_d.print(F("DEFAUT SORTIE"));
+    s_d.setTextSize(1);
+    s_d.setCursor(0, 12);
+    s_d.print(F("verifie le cablage"));
+    s_d.setCursor(0, 22);
+    s_d.print(F("du plateau"));
+    s_d.display();
+    return;
+  }
   if (s_confirm) { drawConfirm(s_holdFrom ? millis() - s_holdFrom : 0); return; }
   const uint8_t n = curNode();
 

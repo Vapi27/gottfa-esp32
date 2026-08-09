@@ -108,6 +108,9 @@
 // demarrage du S3, et un client qui l'appuie en branchant l'alimentation obtient
 // une carte partie en mode televersement - un mur qui parait mort. GPIO0 reste
 // pour un poussoir BOOT cote carte, hors de portee.
+// Bouton de facade : ABANDONNE sur la carte de serie (trois poussoirs lateraux
+// suffisent, le menu couvre tout). A 0, GPIO18 est reellement libre.
+#define ARENA_FACE_BTN_ENABLE  0
 #define PIN_ARENA_BUTTON      18   // actif a l'etat bas (tirage interne)
 // --- Ecran de controle SSD1306 + encodeur rotatif ---------------------------
 // Meme panneau que le compagnon GottFA80+ (Adafruit SSD1306 en I2C) : une seule
@@ -171,6 +174,22 @@
 #define PIN_ARENA_BTN_UP      15
 #define PIN_ARENA_BTN_DOWN    17
 #define PIN_ARENA_BTN_OK       PIN_ARENA_ENC_SW
+
+// Retour de defaut du limiteur de sortie U5 (AP2552, broche 4 ~FAULT).
+// Collecteur ouvert, actif BAS. Tire au haut par le tirage INTERNE de l'ESP :
+// pas de resistance externe, le signal est lent et le tirage interne suffit.
+// !! Ne JAMAIS le tirer vers le 5 V : U5 est alimente en 5 V, mais sa sortie
+// est a drain ouvert, donc c'est le tirage qui fixe le niveau haut - a 5 V on
+// mettrait 5 V sur une broche de l'ESP.
+// GPIO4 est libre depuis l'abandon de l'encodeur.
+#define PIN_ARENA_LED_FAULT    4
+
+// Le limiteur passe en limitation a CHAQUE mise sous tension, le temps de
+// charger la capacite de la chaine : ~FAULT s'active sans qu'il y ait de
+// probleme. On l'ignore donc pendant le demarrage, puis on exige qu'il persiste
+// - un defaut fugitif est du bruit, un court-circuit dure.
+#define ARENA_FAULT_IGNORE_MS 1500     // apres le boot (le soft-start dure 900 ms)
+#define ARENA_FAULT_HOLD_MS    200     // duree minimale pour declarer un defaut
 #endif
 
 
