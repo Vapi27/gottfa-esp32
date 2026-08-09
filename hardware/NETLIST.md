@@ -105,13 +105,48 @@ J1, avant que la paire n'entre dans la carte.
 | 8 | MICIN | **C19 100 nF** ← MIC1 broche 1 (OUT) |
 | 13 | MICBIAS | **non utilisé** — un MEMS s'alimente lui-même, cette broche sert aux capsules électret. Laisser en l'air ou 1 µF vers GND. |
 | 6 | MICOUT | **GPIO1** du module (ADC1_CH0) |
-| 10 | GAIN | **GND** = 40 dB. En l'air = 50 dB, VDD = 60 dB. Prévoir 3 pastilles pour choisir à la main. |
+| 10 | GAIN | **EN L'AIR** = 60 dB — voir ci-dessous, j'avais inversé la table |
 | 9 | A/R | en l'air (rapport attaque/relâchement 1:4000) |
 | 1 | CT | **C22** 100 nF vers GND (constante de temps du CAG) |
 | 3 | CG | **C23** 100 nF vers GND |
 | 14 | TH | en l'air (seuil par défaut) |
 | 2 | ~SHDN | **VDD** (actif bas : à VDD, l'ampli fonctionne) |
 | 4, 11 | N.C. | ne rien connecter |
+
+### Le gain de U3 : broche 10 en l'air
+
+Table du datasheet MAX9814, **vérifiée** — la version précédente de ce document
+l'avait inversée :
+
+| broche 10 | gain |
+|---|---|
+| **VDD** | 40 dB |
+| **GND** | 50 dB |
+| **en l'air** | **60 dB** ← retenu |
+
+Le dimensionnement, à partir de la sensibilité du ZTS6216 (−38 dBV/Pa,
+soit 12,6 mV/Pa) :
+
+| scène | niveau du micro | à 40 dB | à 60 dB |
+|---|---|---|---|
+| Conversation (60 dB SPL) | 0,25 mV | 25 mV | **252 mV** |
+| Musique de salon (75 dB) | 1,42 mV | 142 mV | **1,4 V** |
+| Musique forte (90 dB) | 7,96 mV | 796 mV | saturé, rattrapé par le CAG |
+
+L'ADC vise environ 1 V utile. **À 40 dB, la musique de salon ne produirait que
+140 mV** — le mode Music réagirait à peine, et seulement aux passages forts. À
+60 dB elle tombe pile dans la plage, et la compression du contrôle automatique
+de gain écrête les pointes au lieu de saturer l'entrée.
+
+C'est précisément le rôle du CAG, et la raison d'avoir choisi ce composant
+plutôt qu'un ampli à gain fixe : on peut viser haut sans craindre les fortes
+sonorités.
+
+⚠ **En l'air veut dire vraiment en l'air** : pas de piste, et un drapeau « non
+connecté » sur la broche pour que le contrôle de règles ne la signale pas.
+Prévoir tout de même **deux pastilles à côté**, une vers GND et une vers VDD :
+si la mise au point montre que 60 dB sature en permanence dans une pièce
+bruyante, une goutte de soudure descend à 50 ou 40 sans refaire la carte.
 
 **Les cinq condensateurs du bloc micro**, chacun son rôle — aucun n'est
 optionnel, et la nomenclature n'en prévoyait d'abord que deux :
