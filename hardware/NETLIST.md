@@ -98,22 +98,60 @@ J1, avant que la paire n'entre dans la carte.
 
 ## U3 — MAX9814ETD+T, ampli micro à CAG
 
+Brochage et valeurs **lus dans le datasheet Maxim** (19-0764 rév. 2, table
+« Pin Description » + « Applications Information »). La version précédente de ce
+document se trompait sur **six lignes** — valeurs de condensateurs, broches N.C.,
+et la broche 12 purement absente.
+
 | Broche | Nom | Connexion |
 |---|---|---|
-| 5 | VDD | **+3V3** · **C20** 100 nF vers GND, au plus près |
-| 7, 15 | GND, EP | GND — **la pastille exposée doit être soudée**, c'est aussi le retour thermique |
+| 5 | VDD | **+3V3** · **C20 1 µF** vers GND — *« Bypass to GND with a 1 µF capacitor »* |
+| 7, 15 | GND, EP | GND — *« Connect the TDFN EP to GND »*, c'est aussi le retour thermique |
+| **4, 11** | N.C. | ⚠ **à la MASSE** — *« No Connection. Connect to GND »*. Pas « en l'air ». |
 | 8 | MICIN | **C19 100 nF** ← MIC1 broche 1 (OUT) |
-| 13 | MICBIAS | **non utilisé** — un MEMS s'alimente lui-même, cette broche sert aux capsules électret. Laisser en l'air ou 1 µF vers GND. |
-| 6 | MICOUT | **GPIO1** du module (ADC1_CH0) |
-| 10 | GAIN | **EN L'AIR** = 60 dB — voir ci-dessous, j'avais inversé la table |
-| 9 | A/R | en l'air (rapport attaque/relâchement 1:4000) |
-| 1 | CT | **C22** 100 nF vers GND (constante de temps du CAG) |
-| 3 | CG | **C23** 100 nF vers GND |
-| 14 | TH | en l'air (seuil par défaut) |
+| 6 | MICOUT | **GPIO1** (broche 39 du module, ADC1_CH0) |
+| **12** | **BIAS** | ⚠ **C25 470 nF** vers GND — *« Bypass BIAS with a 470nF capacitor to ground »* |
+| 1 | CT | **C22 470 nF** vers GND — fixe attaque et relâchement |
+| 3 | CG | **C23 2,2 µF** vers GND — *« to ensure zero offset at the output »* |
+| 13 | MICBIAS | source du diviseur de seuil (voir br.14) — ne polarise aucune capsule, un MEMS s'alimente seul |
+| 14 | TH | **R14 100 k** de MICBIAS vers TH, **R15 68 k** de TH vers GND |
+| 9 | A/R | **en l'air** = rapport attaque/relâchement 1:4000 |
+| 10 | GAIN | **en l'air** = 60 dB |
 | 2 | ~SHDN | **VDD** (actif bas : à VDD, l'ampli fonctionne) |
-| 4, 11 | N.C. | ne rien connecter |
 
-### Le gain de U3 : broche 10 en l'air
+### Trois pièges du datasheet
+
+**Les broches 4 et 11, marquées « N.C. », vont à la masse.** Le texte est
+explicite : *« No Connection. Connect to GND »*. Les laisser flotter est
+l'interprétation naturelle du sigle, et elle est fausse ici.
+
+**La broche 12 (BIAS) n'est pas optionnelle.** C'est la référence de
+polarisation interne de l'ampli, bufferisée et à faible bruit. Sans son 470 nF,
+les 60 dB de gain amplifient le bruit de cette référence. Elle était **absente**
+de la première version de ce document.
+
+**CT et CG ne sont pas des 100 nF.** `CT` à 470 nF donne 1,1 ms d'attaque et
+4,4 s de relâchement (table 2 du datasheet, A/R en l'air) : le contrôle de gain
+réagit vite au transitoire et redescend lentement, ce qui évite qu'il « pompe »
+sur la musique. `CG` doit être un **2,2 µF** — c'est lui qui annule le décalage
+continu en sortie.
+
+### Le seuil du CAG — broche 14
+
+*« To set the output-voltage threshold, an external resistor-divider must be
+connected from MICBIAS to ground, with the output applied to TH. »* Le
+débattement de sortie est alors limité à **deux fois V_TH**.
+
+MICBIAS vaut 2 V. Avec **R14 100 k** et **R15 68 k** :
+`V_TH = 2 × 68/168 = 0,81 V` → écrêtage à **1,6 V crête**, confortablement sous
+la pleine échelle de l'ADC (3,1 V).
+
+⚠ **Ne pas relier TH à MICBIAS** : le datasheet précise que cela **désactive le
+CAG**, ce qui annulerait la raison d'avoir choisi ce composant.
+
+### Le gain — broche 10 en l'air
+
+
 
 Table du datasheet MAX9814, **vérifiée** — la version précédente de ce document
 l'avait inversée :
