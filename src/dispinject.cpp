@@ -9,6 +9,9 @@
 namespace {
   bool     g_on   = false;
   uint8_t  g_ctrl = 0;          // latched steady-state flags (bit0/bit1)
+  uint8_t  g_ctrl2 = 0;         // latched CONTROL2 flags (bit0 = diag request)
+  uint32_t g_lastCtrl2Ms = 0;
+  uint32_t g_quiet2Until = 0;
   uint32_t g_lastCtrlMs = 0;    // millis() of the last control frame sent
   uint32_t g_killUntil  = 0;    // while > millis(): OR CTRL_GAME_KILL into every frame
   uint32_t g_quietUntil = 0;    // keep repeating flags==0 until here (explicit clear)
@@ -28,6 +31,15 @@ namespace {
     uint8_t frame[2] = { 0xFE, f };
     Serial2.write(frame, 2);
     g_lastCtrlMs = millis();
+  }
+  // One CONTROL2 frame. Same clamp and same reasoning as writeCtrl: the payload can never
+  // reach a marker value, so a byte lost on the wire resynchronises on the next marker.
+  void writeCtrl2(uint8_t flags) {
+    uint8_t f = (uint8_t)(flags & 0x7F);
+    if (f > 0x7D) f &= 0x7D;
+    uint8_t frame[2] = { 0xFD, f };
+    Serial2.write(frame, 2);
+    g_lastCtrl2Ms = millis();
   }
   // Steady flags + the kill one-shot while its window is open.
   uint8_t liveFlags(uint32_t now) {
@@ -105,6 +117,11 @@ void tick() {
 
   if (holding && (now - g_lastDispMs) >= REPEAT_MS) { send(g_holdVal); }
 
+  // CONTROL2 is repeated on its own cadence: diag mode must be held up independently of whether
+  // auto-restart or the overlay happen to be armed.
+  bool quiet2 = g_quiet2Until && (int32_t)(g_quiet2Until - now) > 0;
+  if ((g_ctrl2 || quiet2) && (now - g_lastCtrl2Ms) >= REPEAT_MS) { writeCtrl2(g_ctrl2); }
+
   if (!g_ctrl && !killOpen && !quiet) return;        // nothing armed: let the FPGA fail-safe hold
   if (now - g_lastCtrlMs < REPEAT_MS) return;
   writeCtrl(liveFlags(now));
@@ -112,12 +129,27 @@ void tick() {
 
 uint8_t ctrl() { return g_ctrl; }
 
+// Diagnostic mode request. bit0 is a LEVEL in the FPGA, so this is the CONNECT/DISCONNECT pair:
+// raise it and the FPGA enters diag (freezing the 6502) as long as we keep saying so; drop it and
+// it leaves. Dropping to 0 opens the same 3 s explicit-zero window as setCtrl(), so DISCONNECT is
+// immediate instead of waiting out the FPGA's 5 s fail-safe.
+void setCtrl2(uint8_t flags) {
+  uint8_t f = (uint8_t)(flags & 0x7D);
+  if (f == g_ctrl2) return;
+  g_ctrl2 = f;
+  g_quiet2Until = f ? 0 : (millis() + QUIET_MS);
+  if (g_on) writeCtrl2(f);
+}
+
+uint8_t ctrl2() { return g_ctrl2; }
+
 } // namespace dispinject
 
 #else  // BOARD_C3: no Serial2 / no display tier -> no-ops
 namespace dispinject {
   void begin() {} void send(uint32_t) {} void sendCtrl(uint8_t) {}
   void setCtrl(uint8_t) {} void pulseKill() {} void tick() {} uint8_t ctrl() { return 0; }
+  void setCtrl2(uint8_t) {} uint8_t ctrl2() { return 0; }
   void holdValue(uint32_t, uint32_t) {}
 }
 #endif

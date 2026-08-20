@@ -550,9 +550,19 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
   else if(!strcmp(cmd,"reboot"))  { rebootAt = millis() + 500;        // reboot the ESP (deploy tab)
     JsonDocument a; a["t"]="toast"; a["m"]="redémarrage de l'ESP…"; String s; serializeJson(a,s); txt(nullptr,s);
     Serial.println("[sys] reboot requested via web"); }
-  else if(!strcmp(cmd,"exit"))    { exitAt = millis() + 60;           // leave diag: pulse the board reset (S8) line
-    JsonDocument a; a["t"]="toast"; a["m"]="sortie du test — le jeu redémarre…"; String s; serializeJson(a,s); txt(nullptr,s);
-    Serial.println("[diag] exit-diag requested via web"); }
+  // ENTER diag without touching the machine: CONTROL2 0xFD bit0 is a LEVEL the FPGA latches into
+  // lisy_active. Before this frame existed the only way in was a long-press on the door test
+  // switch, which is why the ESP could only ever wait for the operator.
+  else if(!strcmp(cmd,"enter"))   { dispinject::setCtrl2(dispinject::CTRL2_DIAG);
+    JsonDocument a; a["t"]="toast"; a["m"]="entrée en test…"; String s; serializeJson(a,s); txt(nullptr,s);
+    Serial.println("[diag] enter-diag requested via web (CONTROL2)"); }
+  // LEAVE diag gracefully: drop CONTROL2 and the FPGA releases lisy_active with the 6502 intact —
+  // no reboot, no ROM re-copy from the SD card. The reset pulse stays as the fallback for an FPGA
+  // running a bitstream older than CONTROL2, where dropping the frame does nothing.
+  else if(!strcmp(cmd,"exit"))    { dispinject::setCtrl2(0);
+    exitAt = millis() + 1200;                                        // > 2 repeats at 4 Hz, then judge
+    JsonDocument a; a["t"]="toast"; a["m"]="sortie du test…"; String s; serializeJson(a,s); txt(nullptr,s);
+    Serial.println("[diag] exit-diag requested via web (CONTROL2, reset en repli)"); }
   else if(!strcmp(cmd,"disp")) {   // 80B display text: {c:'disp',p:0|1,txt:'...'} -> lisyctrl 0x50..0x77
     if(!outputs) return;           // row p = 20 chars (space-padded, uppercased); the disp80b_diag FSM
     int p = d["p"] | 0;            // streams the 10941 latch protocol to the glass (~10 Hz restream)
@@ -582,12 +592,17 @@ void diag::onText(AsyncWebSocketClient*c, const char*data, size_t len){
 void diag::tick(){
   if(rebootAt && (int32_t)(millis()-rebootAt) > 0){ Serial.println("[sys] restarting"); delay(50); ESP.restart(); }
 
-  if(exitAt && (int32_t)(millis()-exitAt) > 0){ exitAt=0;    // leave diag: brief reset pulse on S8 (GPIO14)
-    Serial.println("[diag] exit -> reset pulse");
+  if(exitAt && (int32_t)(millis()-exitAt) > 0){ exitAt=0;
+    // CONTROL2 was dropped 1,2 s ago. If the FPGA already left diag, we are done and the game
+    // never noticed. Only an FPGA that ignored the frame needs the brutal way out.
+    if(!fpgalink::diagActive()){
+      Serial.println("[diag] exit via CONTROL2 — sortie propre, pas de reset");
+    } else {
+    Serial.println("[diag] exit -> reset pulse (bitstream sans CONTROL2)");
     busRelease();                                            // drop the shared bus first
     pinMode(PIN_FPGA_RESET, OUTPUT); digitalWrite(PIN_FPGA_RESET, LOW);
     delay(150);                                              // FPGA sees reset -> lisy_active<='0' + game reloads
-    pinMode(PIN_FPGA_RESET, INPUT); }
+    pinMode(PIN_FPGA_RESET, INPUT); } }
 
   // Time-attack: game start/stop, countdown decay, sound bonuses, the countdown on the machine
   // display and the FPGA control frames. Deliberately ahead of the bus arbitration below — it
