@@ -10,7 +10,7 @@
 //                    = STOP exact.
 //   one-shot      -> plafond dur a 1,25x sa duree MESUREE (le DAC mono partage rend le flux ambigu :
 //                    les percus d'une musique ne doivent pas maintenir un effet en vie).
-// (C) 2026 Valere Pilpil / Pstore.
+// (C) 2026 Valere Pillet / Pstore.
 #include "chefv2.h"
 #include <string.h>
 

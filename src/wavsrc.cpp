@@ -1,4 +1,4 @@
-// wavsrc.cpp — see wavsrc.h. (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// wavsrc.cpp — see wavsrc.h. (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "wavsrc.h"
 
 namespace wavsrc {

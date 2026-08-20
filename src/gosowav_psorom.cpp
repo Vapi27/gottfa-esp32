@@ -17,7 +17,7 @@
 // que l'AP est là, quoi que fasse l'émulateur. SD/manifeste montés dans une tâche dédiée (un SD qui
 // bloque ne gèle ni loop ni le web). L'émulateur (begin/run/command) n'est touché QUE par loop()
 // (core 1) ; le web ne fait que poser des intentions (volatile) que loop() applique -> mono-thread.
-// (C) 2026 Valere Pilpil / Pstore. Original (cœur CPU = Fake6502 PD).
+// (C) 2026 Valere Pillet / Pstore. Original (cœur CPU = Fake6502 PD).
 #ifdef GOSOWAV_BENCH
 #include <Arduino.h>
 #include <SPI.h>

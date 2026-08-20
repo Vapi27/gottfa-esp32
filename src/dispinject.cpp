@@ -1,5 +1,5 @@
 // dispinject.cpp — see dispinject.h. ESP->FPGA time-attack display + control UART.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "dispinject.h"
 #ifndef BOARD_C3
 #include "board_config.h"

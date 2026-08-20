@@ -12,7 +12,7 @@
 # firmware (see build_src_filter in platformio.ini), and most of them need real
 # Gottlieb sound ROMs that are not in this repo.
 #
-# (C) 2026 Valere Pilpil / Pstore.
+# (C) 2026 Valere Pillet / Pstore.
 set -uo pipefail
 cd "$(dirname "$0")/.."
 

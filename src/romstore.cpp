@@ -1,7 +1,7 @@
 // romstore.cpp — see romstore.h. Per-game ROM-image store on the ESP SD with stock + Free-Play
 // variants, transparent decrypt (plaintext 16384 B or encrypted PSRC 16412 B), and a persisted
 // Free-Play device setting selecting which variant is served to the FPGA.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "romstore.h"
 #include "romcrypt.h"
 #include <stdio.h>

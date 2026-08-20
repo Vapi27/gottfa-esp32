@@ -2,7 +2,7 @@
 //   GTS80S      : 1×6502 + cycle-accurate 6530 RIOT + DAC (per gts80s.c / 6530riot.c).
 //   GTS80B_GEN3 : 2×6502 (Y = YM2151, D = DAC) + cross-NMI; the global core is context-switched
 //                 between the two CPUs at quantum boundaries (save/restore pc/sp/a/x/y/status).
-// (C) 2026 Valere Pilpil / Pstore. Original implementation (CPU core = PD Fake6502).
+// (C) 2026 Valere Pillet / Pstore. Original implementation (CPU core = PD Fake6502).
 #include "psorom.h"
 #include "fake6502.h"
 #include "emu2149.h"      // AY-3-8910/8913 (MIT, M. Okazaki) pour Gen1/Gen2

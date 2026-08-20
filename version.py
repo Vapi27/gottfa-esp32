@@ -12,7 +12,7 @@
 # MANIFEST.txt could never be reproduced by anyone else. Deriving the stamp from
 # the commit keeps `build.sh` byte-for-byte repeatable from a clean checkout.
 #
-# (C) 2026 Valere Pilpil / Pstore.
+# (C) 2026 Valere Pillet / Pstore.
 import subprocess
 
 Import("env")  # noqa: F821  (injected by SCons)

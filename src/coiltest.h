@@ -50,7 +50,7 @@
 // on loopTask -- with an INCREMENTAL state machine: tick() does a few hundred
 // microseconds of SPI and returns. Progress is polled exactly like /jobstatus.
 //
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 #include <Arduino.h>
 

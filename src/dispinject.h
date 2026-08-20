@@ -18,7 +18,7 @@
 // frame, so a crashed/unplugged ESP can never leave the machine restarting games forever. That
 // is why tick() must be called from loop(): it repeats the latched flags at 4 Hz (<< 2 s).
 // S3 only (uses Serial2; no-op on C3).
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 #include <stdint.h>
 namespace dispinject {

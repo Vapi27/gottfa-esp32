@@ -6,7 +6,7 @@
 // theme folder, resolves a sound id (incl. random/sequential groups) to a file, applies
 // the PSOWAV attributes (loop / break / kill / soft-kill / quit / voice bus / per-sound
 // volume), streams the WAV into a mixer voice, mixes, down-mixes to mono 12-bit.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #ifndef BOARD_C3
 #include "wavplayer.h"
 #include "ownership.h"

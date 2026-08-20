@@ -2,7 +2,7 @@
 // Mirrors GOSOF80.vhd's per-game case (game_number -> SB_type + speech_ctrl). The 32-bit speech
 // value is exactly GOSOF80's `speech_ctrl`: bit c (=command c) is 0 for a SPEECH command (which the
 // ESP plays) and 1 otherwise (GOSOF80 synthesises it). cls: 0=G(gosof-synth) 1=H(hybride) 2=E(esp-full).
-// (C) 2026 Valere Pilpil / Pstore.
+// (C) 2026 Valere Pillet / Pstore.
 #include "sndroute.h"
 #include <stdint.h>
 

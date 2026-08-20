@@ -1,5 +1,5 @@
 // oled.cpp — see oled.h. SSD1306 128x32 status screen (S3 sound-tier board).
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "oled.h"
 #include "board_config.h"
 

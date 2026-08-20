@@ -1,5 +1,5 @@
 // romdb.cpp — see romdb.h. Streams /db/roms.csv to verify a dump's CRC against PinMAME known-good.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "romdb.h"
 #include <string.h>
 #include <stdio.h>

@@ -1,5 +1,5 @@
 // epromdump.cpp — see epromdump.h. Bit-banged 74HC595 (address+/CE+/OE) + 74HC165 (data) reader.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "epromdump.h"
 #include "board_config.h"
 

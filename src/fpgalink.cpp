@@ -1,5 +1,5 @@
 // fpgalink.cpp — see fpgalink.h. The FPGA->ESP link on the Debug pin.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "fpgalink.h"
 #include "board_config.h"
 #include <Arduino.h>

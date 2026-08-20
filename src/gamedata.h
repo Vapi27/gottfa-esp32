@@ -34,7 +34,7 @@
 //   `x` = why this coil can never be checked this way (mutually exclusive with s/p).
 //   {"alias":12} redirects a variant (speech vs sound-only) to the shared playfield table.
 //
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 #include <Arduino.h>
 #include <stdint.h>

@@ -1,5 +1,5 @@
 // coiltest.cpp — see coiltest.h for the idea. This file is the state machine.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "coiltest.h"
 #include "fpgalink.h"
 #include "gamedata.h"

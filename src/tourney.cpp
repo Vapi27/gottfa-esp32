@@ -1,5 +1,5 @@
 // tourney.cpp — see tourney.h. Score/tournament manager, persisted to LittleFS.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "tourney.h"
 #include <LittleFS.h>
 #include <ArduinoJson.h>

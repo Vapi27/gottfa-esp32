@@ -1,5 +1,5 @@
 // romcrypt.cpp — see romcrypt.h. Device-bound AES-256-CTR for the /roms ROM-image store.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "romcrypt.h"
 #include <string.h>
 

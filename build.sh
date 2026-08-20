@@ -25,7 +25,7 @@
 # Build from a CLEAN tree — a dirty tree is stamped "-dirty" and MANIFEST.txt
 # says so, loudly.
 #
-# (C) 2026 Valere Pilpil / Pstore.
+# (C) 2026 Valere Pillet / Pstore.
 set -euo pipefail
 
 cd "$(dirname "$0")"

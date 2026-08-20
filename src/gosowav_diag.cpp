@@ -4,7 +4,7 @@
 // Join SSID 'GOSOWAV-DIAG' then open http://192.168.4.1/  (or `curl -v http://192.168.4.1/`).
 //   page LOADS  -> WROVER web stack is fine; the real-firmware fault was the blocking SD/bench.
 //   page DEAD   -> lower-level (board/antenna/power/brownout or client captive-portal); not our code.
-// (C) 2026 Valere Pilpil / Pstore.
+// (C) 2026 Valere Pillet / Pstore.
 #ifdef GOSOWAV_DIAG
 #include <Arduino.h>
 #include <WiFi.h>

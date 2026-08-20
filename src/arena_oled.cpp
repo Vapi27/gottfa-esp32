@@ -1,5 +1,5 @@
 // arena_oled.cpp — SSD1306 control screen for the wall.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 //
 // Navigation a trois boutons : deux fleches et OK. C'est le montage de la carte
 // definitive, et il commande un vrai arbre de menus plutot qu'une liste a plat -

@@ -16,7 +16,7 @@
 //   read() handles both transparently; store() writes encrypted.
 // Encryption is device-bound anti-extraction, NOT a legal mechanism — the FPGA's own boot SD
 // stays plaintext (its reader can't decrypt); encryption applies to this ESP-owned store.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 #include <stdint.h>
 #include <stddef.h>

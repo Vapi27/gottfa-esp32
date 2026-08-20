@@ -1,4 +1,4 @@
-// wavmix.cpp — see wavmix.h. (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// wavmix.cpp — see wavmix.h. (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "wavmix.h"
 
 namespace wavmix {

@@ -4,7 +4,7 @@
 // Build+run:
 //   g++ -std=c++17 -Isrc tools/test_sndmap.cpp \
 //       src/sndmap.cpp -o /tmp/test_sndmap && /tmp/test_sndmap
-// (C) 2026 Valere Pilpil / Pstore.
+// (C) 2026 Valere Pillet / Pstore.
 #include "sndmap.h"
 #include <cstdio>
 using namespace sndmap;

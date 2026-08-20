@@ -17,7 +17,7 @@
 //
 // PURE C++: no Arduino, no SD, no globals. Parsing and decoding are host-unit-testable
 // (tools/test_sndmap.cpp), which is how the corner cases below are actually proven.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 #include <stdint.h>
 

@@ -5,7 +5,7 @@
 // driven from the web UI. v1 = MANUAL score entry (the TD reads the pinball display and types
 // the score); auto-read from the display is a later add-on (needs the multiplexed display
 // decode, which is hardware-gated). State persists to LittleFS (/tourney.json) across reboots.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 #include <Arduino.h>
 

@@ -1,5 +1,5 @@
 // gamedata.cpp — see gamedata.h for why this table exists and where it comes from.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "gamedata.h"
 #include <LittleFS.h>
 #include <ArduinoJson.h>

@@ -1,5 +1,5 @@
 // wavset.cpp — see wavset.h. Pure C++ (host-testable).
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "wavset.h"
 #include <string.h>
 #include <stdlib.h>

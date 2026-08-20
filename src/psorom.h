@@ -4,7 +4,7 @@
 //   GTS80S       : 1×6502 + 6530 RIOT + DAC (also the 80B D-CPU core).
 //   GTS80B_GEN3  : 2×6502 (Y = YM2151, D = DAC) + cross-NMI — the 80B target.
 // CPU core = vendored PUBLIC-DOMAIN Fake6502 (global state; the dual-CPU board context-switches it).
-// (C) 2026 Valere Pilpil / Pstore. Original implementation (CPU core = PD Fake6502).
+// (C) 2026 Valere Pillet / Pstore. Original implementation (CPU core = PD Fake6502).
 #pragma once
 #include <stdint.h>
 #include <stddef.h>

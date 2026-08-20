@@ -6,7 +6,7 @@
 // buffer logic is host-unit-testable (SD file on the ESP, memory on the host).
 // The caller parses the header (wavfile) + seeks to the data, then feeds data
 // bytes and the data-chunk length (so trailing chunks aren't read as audio).
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 #include "wavmix.h"
 #include <stdint.h>

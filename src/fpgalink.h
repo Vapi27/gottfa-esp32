@@ -33,7 +33,7 @@
 //   = 1 + 768 = 769 bytes. Every payload byte lands in 0xC0..0xDF, a range no token
 //   test can claim, so framing is unambiguous and a lost byte self-heals at the next
 //   0xBF. See fpgalink.cpp for the byte-by-byte collision proof.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 #include <stdint.h>
 namespace fpgalink {

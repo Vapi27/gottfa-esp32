@@ -1,5 +1,5 @@
 // wifiprov.cpp — see wifiprov.h. SoftAP + captive portal + NVS credentials.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "wifiprov.h"
 #include <WiFi.h>
 #include <DNSServer.h>

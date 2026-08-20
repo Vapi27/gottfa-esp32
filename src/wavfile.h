@@ -1,5 +1,5 @@
 // wavfile.h — minimal RIFF/WAVE PCM header parser (host-testable, no deps).
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 #include <stdint.h>
 #include <stddef.h>

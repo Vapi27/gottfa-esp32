@@ -9,7 +9,7 @@
 // break (stop same id), kill / soft-kill / quit groups, and a voice vs sound bus.
 // Looping is seamless: on source exhaustion the mixer calls the voice's rewind() and
 // keeps filling the same block.
-// (C) 2026 Valere Pilpil / Pstore.
+// (C) 2026 Valere Pillet / Pstore.
 #pragma once
 #include <stdint.h>
 #include <stddef.h>

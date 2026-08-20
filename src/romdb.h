@@ -2,7 +2,7 @@
 // DB = /db/roms.csv on the SD (crc,name,game,title), generated from PinMAME by tools/build_romdb.py
 // (every Gottlieb game / version / sound ROM, ~389 CRCs). A CRC match = correct + intact; no match
 // = corrupted chip OR an unlisted revision. Also the "proof of ownership" check: a verified dump
-// identifies which game the user owns. (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// identifies which game the user owns. (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 #include <stdint.h>
 #include <stddef.h>

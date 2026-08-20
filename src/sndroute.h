@@ -12,7 +12,7 @@
 //   E (esp-full)    : `is_special` / complex 80B -> GOSOF80 can't, ESP plays everything.
 // NOTE: only consulted in sndmode=hybrid. In sndmode=full (all-ESP build, no GOSOF80) the ESP
 // ignores this and plays everything (the safe default / current behaviour).
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 namespace sndroute {
   // Should the ESP play sound command `cmd` (0..31) for FPGA game `gameNo` (0..62), in hybrid mode?

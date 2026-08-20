@@ -3,7 +3,7 @@
 // 1x 74HC165 (data) over 5 GPIOs (board_config: PIN_EPR_*). Gated by EPROM_READER_ENABLE: the code
 // always compiles, but begin() only claims the pins (and available() turns true) when it's set to 1
 // and the daughterboard is fitted. No PC, no separate programmer — the legal "dump your own" path.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 #include <stdint.h>
 #include <stddef.h>

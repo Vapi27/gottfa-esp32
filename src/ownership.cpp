@@ -1,5 +1,5 @@
 // ownership.cpp — see ownership.h. SD-file owned set (/owned.txt) + NVS gate flag.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "ownership.h"
 #include <string.h>
 

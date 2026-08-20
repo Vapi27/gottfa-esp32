@@ -8,7 +8,7 @@
 //
 // Fully self-contained: no CDN, no web font, no external image — there is no internet in AP mode.
 // Palette matches data/index.html. UI text is French like the rest of the web UI.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 #include <Arduino.h>
 

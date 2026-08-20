@@ -20,7 +20,7 @@
 // wedged this firmware once (a 30 kHz bit-bang in a handler -> watchdog reboot -> silent OTA
 // rollback). begin() is the one exception and it is called from setup(), never from a handler.
 //
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 #include <Arduino.h>
 class AsyncWebServer;

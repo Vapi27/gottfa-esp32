@@ -1,5 +1,5 @@
 // sndmap.cpp — see sndmap.h. Pure C++ (host-testable, tools/test_sndmap.cpp).
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "sndmap.h"
 #include <string.h>
 #include <stdlib.h>

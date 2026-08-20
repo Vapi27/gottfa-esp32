@@ -5,7 +5,7 @@
 // UNE seule implementation : compilee sur Mac (simulateur/validation) ET dans le firmware.
 // Les signatures par son (canaux, usage dac/sp, pause interne max) viennent de l'analyse hors-ligne
 // (tools/host_sig2 -> sounds.sig), generees par jeu, sans intervention.
-// (C) 2026 Valere Pilpil / Pstore.
+// (C) 2026 Valere Pillet / Pstore.
 #pragma once
 #include <stdint.h>
 #include "psorom.h"

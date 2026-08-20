@@ -12,7 +12,7 @@
 //   config : /config.txt at SD root, key=value lines (mix, volv, vols, stheme)
 //   attrs  : l loop · b break(stop same id) · i init/background · v voice bus
 //            k kill(all) · c soft-kill(non-bg) · q quit(keep loops+voices) · x placeholder
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 #include <stdint.h>
 

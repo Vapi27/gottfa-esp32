@@ -1,5 +1,5 @@
 // statusled.cpp — see statusled.h. WS2812 status beacon via the core's neopixelWrite.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "statusled.h"
 #include "board_config.h"
 

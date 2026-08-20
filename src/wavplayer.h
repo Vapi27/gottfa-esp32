@@ -8,7 +8,7 @@
 // lock-free ring buffer. A dac task (core 0) drains the ring at the sample rate and
 // clocks each sample to the MCP4921 over a dedicated SPI bus. So the mixer/SD are
 // owned by one task and the ring is single-producer/single-consumer.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 #include <stdint.h>
 #ifndef BOARD_C3

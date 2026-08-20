@@ -4,7 +4,7 @@
 // Owned set = /owned.txt on the SD (one romset id per line). Gate flag persisted in NVS (default OFF
 // = current behaviour, all sound plays). NOTE: this is a good-faith / risk-reduction measure, NOT a
 // legal mechanism (the PSOWAV samples remain derivative — see project notes).
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 
 namespace ownership {

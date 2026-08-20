@@ -22,7 +22,7 @@
 //   [24]  crc32[4]                CRC-32 of the 16384-byte plaintext (wrong-key / corruption check)
 //   [28]  ciphertext[16384]
 //   total = 16412 bytes.  Cipher = AES-256-CTR (mbedtls, HW-accelerated on the S3).
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 #include <stdint.h>
 #include <stddef.h>

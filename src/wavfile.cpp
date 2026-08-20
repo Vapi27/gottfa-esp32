@@ -1,4 +1,4 @@
-// wavfile.cpp — see wavfile.h. (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// wavfile.cpp — see wavfile.h. (C) 2026 Valere Pillet / Pstore. Original implementation.
 #include "wavfile.h"
 
 static uint32_t rd32(const uint8_t* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | ((uint32_t)p[3] << 24); }

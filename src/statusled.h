@@ -7,7 +7,7 @@
 //   powered but no FPGA link            -> RED, faint slow blink
 // DevKitC-1 v1.0 has the LED on GPIO48 (= our OLED SCL) — begin() disables the
 // LED if an OLED answered on the bus. v1.1 boards use GPIO38: change PIN_RGB_LED.
-// (C) 2026 Valere Pilpil / Pstore. Original implementation.
+// (C) 2026 Valere Pillet / Pstore. Original implementation.
 #pragma once
 namespace statusled {
   void begin();   // call AFTER oled::begin() (pin-conflict detection)
