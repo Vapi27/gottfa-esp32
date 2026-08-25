@@ -1166,15 +1166,21 @@ function wifiScan() {
     .then(() => new Promise(r => setTimeout(r, 5000)))
     .then(() => fetch('/api/wifiscan?results=1')).then(r => r.json())
     .then(d => {
-      if ($('nw-rssi')) $('nw-rssi').textContent = d.rssi + ' dBm';
+      // 0 dBm serait un signal parfait : c'est en realite "pas d'association".
+      // L'afficher tel quel se lit comme une mesure, et c'est un mensonge.
+      if ($('nw-rssi')) $('nw-rssi').textContent = d.rssi ? (d.rssi + ' dBm') : 'not joined';
       if ($('nw-ssid') && d.ssid) $('nw-ssid').textContent = d.ssid;
       if (!d.nets || !d.nets.length) {
         // Une liste vide a deux causes tres differentes, et les confondre coute
         // une soiree : soit le balayage a ete refuse, soit il n'y a vraiment
         // rien. Le firmware sait laquelle - on le dit.
-        $('nw-list').textContent = d.fail
-          ? 'Scan returned nothing — last attempt: ' + d.fail
-          : 'Nothing found. The ESP32 is 2.4 GHz only: a 5 GHz-only network never appears here.';
+        // Trois causes distinctes, trois messages. Les confondre envoie
+        // chercher un problème de réseau quand le pilote a simplement refusé.
+        $('nw-list').textContent = d.scanErr
+          ? 'The radio refused the scan: ' + d.scanErr + ' — this is a firmware fault, not your network.'
+          : d.fail
+            ? 'Scan returned nothing — last join attempt: ' + d.fail
+            : 'Nothing found. The ESP32 is 2.4 GHz only: a 5 GHz-only network never appears here.';
         return;
       }
       d.nets.sort((a, b) => b.r - a.r);

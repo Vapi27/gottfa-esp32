@@ -160,6 +160,9 @@ static String        s_staReason  = "";
 
 static volatile bool s_scanWanted = false;
 static String        s_scanJson   = "[]";
+// Pourquoi un balayage n'a rien rendu. Une liste vide est ambigue - refus du
+// pilote, ou vraiment aucun reseau - et les deux se soignent differemment.
+static String        s_scanErr    = "";
 static uint32_t      s_scanAt     = 0;
 
 // Envoi par morceaux depuis le navigateur (/api/fw).
@@ -847,6 +850,7 @@ static void startServer() {
       wifi_ap_record_t apInfo = {};
       const bool apInfoOk = (esp_wifi_sta_get_ap_info(&apInfo) == ESP_OK);
       String j = "{\"fail\":\"" + s_staReason + "\"" +
+                 ",\"scanErr\":\"" + s_scanErr + "\"" +
                  ",\"age\":" + String(s_scanAt ? (millis() - s_scanAt) / 1000 : 9999) +
                  ",\"busy\":" + String(s_scanWanted ? "true" : "false") +
                  ",\"rssi\":" + String(apInfoOk ? (int)apInfo.rssi : 0) +
@@ -1090,17 +1094,31 @@ void loop() {
     wifi_mode_t wm = WIFI_MODE_NULL;
     esp_wifi_get_mode(&wm);
     if (wm == WIFI_MODE_AP) {
-      if (esp_wifi_set_mode(WIFI_MODE_APSTA) == ESP_OK) {
-        esp_wifi_start();
-        Serial.println("[net] balayage : AP -> AP+STA (l'interface station manquait)");
-      }
+#ifdef ARENA_MATTER
+      // Sous Matter, CHIP possede esp_wifi et le wrapper Arduino n'a aucun etat :
+      // il faut passer par l'IDF.
+      if (esp_wifi_set_mode(WIFI_MODE_APSTA) == ESP_OK) esp_wifi_start();
+#else
+      // Hors Matter, c'est WiFi.softAP() qui a monte la radio, donc c'est le
+      // wrapper Arduino qui tient les interfaces. Changer le mode par l'IDF
+      // seul ne cree PAS le netif station et le wrapper reimpose son propre
+      // mode a l'evenement suivant - le balayage repart alors sans station.
+      // Passer par WiFi.mode() fait les deux et ne coupe pas le point d'acces.
+      WiFi.mode(WIFI_AP_STA);
+#endif
+      delay(100);                       // laisser l'interface station demarrer
+      esp_wifi_get_mode(&wm);
+      Serial.printf("[net] balayage : AP -> mode %d (interface station requise)\n", (int)wm);
     }
     wifi_scan_config_t cfg = {};
     cfg.show_hidden = false;
     String j = "[";
     const esp_err_t scanErr = esp_wifi_scan_start(&cfg, true);
-    if (scanErr != ESP_OK)
-      Serial.printf("[net] balayage refuse : %s\n", esp_err_to_name(scanErr));
+    s_scanErr = "";
+    if (scanErr != ESP_OK) {
+      s_scanErr = String(esp_err_to_name(scanErr)) + " (mode " + String((int)wm) + ")";
+      Serial.printf("[net] balayage refuse : %s\n", s_scanErr.c_str());
+    }
     if (scanErr == ESP_OK) {
       uint16_t n = 0;
       esp_wifi_scan_get_ap_num(&n);
