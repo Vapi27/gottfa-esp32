@@ -271,7 +271,24 @@ header h1 img{filter:saturate(.9)}
       <button onclick="wifiScan()">Scan from the wall</button>
     </div>
     <div id="nw-list" class="hint" style="margin-top:8px"></div>
-    <p class="hint">
+
+    <!-- Le formulaire de jonction. saveWifi() lisait deja #ssid et #pass, mais
+         les deux champs avaient disparu de la page au profit du paragraphe
+         Matter ci-dessous : la fonction tombait sur null et rejoindre un reseau
+         depuis le mur etait tout simplement impossible. -->
+    <div id="nw-join" style="margin-top:10px">
+      <div style="display:flex;gap:8px;flex-wrap:wrap">
+        <input type="text" id="ssid" placeholder="network name (2.4 GHz)" style="flex:1;min-width:150px">
+        <input type="password" id="pass" placeholder="password" style="flex:1;min-width:130px">
+        <button onclick="saveWifi()">Join</button>
+      </div>
+      <p class="hint" style="margin-top:6px">
+        Pick a network above to fill this in. The wall reboots to join, then answers
+        at <b>http://playfield-&lt;id&gt;.local/</b> on that network.
+      </p>
+    </div>
+
+    <p class="hint" id="nw-matter" style="display:none">
       The wall gets its network from the Home app when you pair it &mdash; there is nothing
       to type here. To move it to another network, use <b>Forget all homes &amp; re-pair</b>
       in the Siri section and pair it again on the new one.
@@ -630,6 +647,13 @@ function render(s) {
   if ($('nw-fail')) {
     $('nw-fail').textContent = (s.net === 'SoftAP' && s.staFail)
       ? 'Last join attempt failed: ' + s.staFail : '';
+  }
+  // Qui possede le reseau : Matter apporte les identifiants a l'appairage, sans
+  // Matter la saisie est le seul chemin. On n'affiche jamais les deux.
+  if ($('nw-join') && $('nw-matter')) {
+    const m = !!s.matter;
+    $('nw-join').style.display   = m ? 'none' : '';
+    $('nw-matter').style.display = m ? '' : 'none';
   }
   $('g-atr').textContent = s.atr ? s.atr + ' s of ROM attract' : 'the generic attract (no capture loaded)';
   $('g-ins').textContent = s.ins;
@@ -1054,6 +1078,11 @@ function wzDraw() {
 }
 
 // --- wifi / OTA ---
+function pickNet(s) {
+  if (!s || !$('ssid')) return;
+  $('ssid').value = s;
+  if ($('pass')) $('pass').focus();
+}
 function saveWifi() {
   const s = $('ssid').value.trim();
   if (!s) return toast('enter an SSID');
@@ -1185,7 +1214,8 @@ function wifiScan() {
       }
       d.nets.sort((a, b) => b.r - a.r);
       $('nw-list').innerHTML = d.nets.map(n =>
-        '<div style="display:flex;gap:10px;padding:2px 0">' +
+        '<div onclick="pickNet(this.dataset.s)" data-s="' + (n.s || '') +
+        '" style="display:flex;gap:10px;padding:2px 0;cursor:pointer">' +
         '<span style="width:52px;letter-spacing:2px">' + bars(n.r) + '</span>' +
         '<b style="flex:1">' + (n.s || '(hidden)') + '</b>' +
         '<span>' + n.r + ' dBm</span>' +

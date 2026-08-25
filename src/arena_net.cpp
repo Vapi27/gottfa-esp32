@@ -504,6 +504,16 @@ static String stateJson() {
   j += ",\"flashBad\":" + String(s_flashBad ? 1 : 0);
   j += ",\"statusLed\":" + String(s_statOn ? 1 : 0);
   j += ",\"statusBright\":" + String(s_statBright);
+  // La page doit savoir QUI possede le reseau. Sous Matter, l'appairage apporte
+  // les identifiants et il n'y a rien a saisir ; sans Matter, la saisie est le
+  // SEUL moyen de rejoindre un reseau. Afficher le discours Matter dans une
+  // image qui n'en a pas, c'est dire au proprietaire qu'il n'a rien a faire
+  // pendant qu'on lui retire le seul geste qui marche.
+#ifdef ARENA_MATTER
+  j += ",\"matter\":1";
+#else
+  j += ",\"matter\":0";
+#endif
   j += ",\"up\":"     + String(millis() / 1000);
   j += ",\"heap\":"   + String(ESP.getFreeHeap());
   j += "}";
@@ -1487,6 +1497,14 @@ void loop() {
     j += "]";
     s_scanJson = j;
     s_scanAt = millis();
+    if (scanErr == ESP_OK) {
+      uint16_t seen = 0;
+      esp_wifi_scan_get_ap_num(&seen);
+      // "Nothing found" sur la page et rien du tout au journal, c'est une panne
+      // sans temoin : impossible de distinguer un balayage refuse d'un balayage
+      // qui a bien tourne dans un endroit vide.
+      Serial.printf("[net] balayage : %u reseau(x) vus\n", (unsigned)seen);
+    }
     if (scanErr != ESP_OK) s_scanJson = "[]";
   }
 
