@@ -7,7 +7,10 @@
 #      tools/arena_flash.sh /dev/ttyUSB0    # or name it
 #
 #  Env overrides:
-#      ARENA_ENV=arenaled        target another board (arenaled = S3, arenaled_c3)
+#      ARENA_ENV=arenaled        target another board. Auto-selected when the port
+#                                is an Espressif native-USB one (S3/C3): see below.
+#                                arenaled = S3 via a UART bridge, arenaled_s3usb =
+#                                S3 via its native USB, arenaled_c3, arenaled_d1mini32
 #      ARENA_NO_MONITOR=1        flash and exit instead of opening the serial monitor
 #      ARENA_SPEED=115200        slower upload if a CH340 keeps dropping the link
 #
@@ -59,6 +62,20 @@ for p in d:
     cand.append((0 if m.group(1).upper() in KNOWN else 1, n))
 cand.sort()
 if cand: print(cand[0][1])' 2>/dev/null || true)
+
+  # python3 is not guaranteed (a bare macOS without the Xcode command line tools
+  # has none), and the pipeline above hides that behind an empty result — which
+  # then reads as "no board found" while the board is sitting right there in the
+  # listing above. Fall back to parsing the plain text output with sed/awk, and
+  # say which path produced the answer.
+  if [ -z "$PORT" ]; then
+    if ! command -v python3 >/dev/null 2>&1; then
+      say "python3 not found — falling back to text parsing"
+    fi
+    PORT=$(pio device list 2>/dev/null | awk '
+      /^\/dev\// { port = $1 }
+      /VID:PID=/   { if (port != "" && port !~ /Bluetooth|debug-console|irda/) { print port; exit } }')
+  fi
 fi
 
 if [ -z "$PORT" ]; then
@@ -78,6 +95,24 @@ EOF
   exit 1
 fi
 ok "port: $PORT"
+
+# --- Which target? ----------------------------------------------------------
+# VID 303A is Espressif's own USB-serial-JTAG, i.e. an S3/C3 flashed through its
+# NATIVE USB rather than through a CH340/CP210x bridge. That distinction decides
+# more than the upload: with native USB, Serial goes to the USB CDC device only
+# if the firmware is built with ARDUINO_USB_CDC_ON_BOOT — otherwise it is routed
+# to UART0, the upload succeeds, and the monitor stays empty forever. Since every
+# diagnostic here is read off the serial log, pick the matching env by default.
+if [ -z "${ARENA_ENV:-}" ]; then
+  HWID=$(pio device list 2>/dev/null | grep -A2 -F "$PORT" | grep -o 'VID:PID=[0-9A-Fa-f]*' | head -1)
+  case "$HWID" in
+    *303A*)
+      ENV_NAME="arenaled_s3usb"
+      ok "Espressif native USB detected -> env $ENV_NAME (Serial over USB CDC)"
+      ;;
+  esac
+fi
+ok "target: $ENV_NAME"
 
 UPLOAD_ARGS=(--upload-port "$PORT")
 [ -n "${ARENA_SPEED:-}" ] && UPLOAD_ARGS+=(--project-option "upload_speed=${ARENA_SPEED}")
