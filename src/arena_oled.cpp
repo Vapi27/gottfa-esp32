@@ -30,6 +30,7 @@ static Adafruit_SSD1306 s_d(ARENA_OLED_W, ARENA_OLED_H, &Wire, -1);
 static bool     s_found = false;
 static bool     s_awake = false;
 static uint32_t s_lastIn = 0;
+static uint32_t s_nUp = 0, s_nOk = 0, s_nDown = 0;   // declenchements depuis le boot
 
 // ---------------------------------------------------------------------------
 //  Encodeur (optionnel)
@@ -432,6 +433,7 @@ static const uint32_t OK_LONG_MS = 1200;
 static void sleepNowImpl();
 
 static void sleepNow(const char* why) {
+  if (!s_awake) return;                 // deja endormi : ni action, ni ligne
   Serial.printf("[oled] veille : %s\n", why);
   sleepNowImpl();
 }
@@ -448,6 +450,14 @@ static void sleepNowImpl() {
   s_d.clearDisplay();
   s_d.display();
   s_d.ssd1306_command(SSD1306_DISPLAYOFF);   // coupe, pas seulement noirci
+}
+
+void btnRaw(bool& up, bool& okd, bool& down,
+            uint32_t& nUp, uint32_t& nOk, uint32_t& nDown) {
+  up   = digitalRead(PIN_ARENA_BTN_UP)   == LOW;
+  okd  = digitalRead(PIN_ARENA_BTN_OK)   == LOW;
+  down = digitalRead(PIN_ARENA_BTN_DOWN) == LOW;
+  nUp = s_nUp; nOk = s_nOk; nDown = s_nDown;
 }
 
 void poke() {
@@ -735,13 +745,13 @@ void tick() {
   // Trace de brochage : un appui dit quelle GPIO a repondu et quel role elle
   // porte. Sans elle, un poussoir mal nommee ne se diagnostique qu'a tatons,
   // parce que le seul retour est un menu qui bouge dans le mauvais sens.
-  if (upFire)   { Serial.printf("[btn] GPIO%d -> UP/gauche\n",  PIN_ARENA_BTN_UP);   onStep(-1); }
-  if (downFire) { Serial.printf("[btn] GPIO%d -> DOWN/droite\n", PIN_ARENA_BTN_DOWN); onStep(+1); }
+  if (upFire)   { s_nUp++;   Serial.printf("[btn] GPIO%d -> UP/gauche\n",  PIN_ARENA_BTN_UP);   onStep(-1); }
+  if (downFire) { s_nDown++; Serial.printf("[btn] GPIO%d -> DOWN/droite\n", PIN_ARENA_BTN_DOWN); onStep(+1); }
 
   // OK, anti-rebond, avec un appui long pour "revenir en arriere".
   static uint32_t okAt  = 0;
   static bool     okLong = false;
-  if (ok && !okAt) { okAt = now; okLong = false; Serial.printf("[btn] GPIO%d -> OK\n", PIN_ARENA_BTN_OK); }
+  if (ok && !okAt) { okAt = now; okLong = false; s_nOk++; Serial.printf("[btn] GPIO%d -> OK\n", PIN_ARENA_BTN_OK); }
   else if (ok && !okLong && now - okAt > OK_LONG_MS) { onOk(true); okLong = true; }
   else if (!ok && okAt) {
     if (!okLong && now - okAt > 25) onOk(false);
@@ -756,7 +766,15 @@ void tick() {
   static uint32_t lastDraw = 0;
   if (now - lastDraw > 400) { lastDraw = now; draw(); }
 
-  if (ARENA_OLED_SLEEP_MS && now - s_lastIn > ARENA_OLED_SLEEP_MS)
+  // ATTENTION a la soustraction. `now` est pris en HAUT de tick(), et poke() -
+  // appele plus bas des qu'une entree arrive - ecrit s_lastIn = millis(), donc
+  // une valeur POSTERIEURE a `now`. En arithmetique non signee, now - s_lastIn
+  // vaut alors ~4 milliards, ce qui depasse tout seuil : l'ecran s'eteignait a
+  // CHAQUE appui, et se rallumait au suivant pour s'eteindre aussitot. C'est le
+  // "je clique et je perds l'ecran" du banc, et le log le montrait en boucle.
+  // La difference signee rend un nombre NEGATIF dans ce cas, donc pas de veille.
+  if (ARENA_OLED_SLEEP_MS &&
+      (int32_t)(millis() - s_lastIn) > (int32_t)ARENA_OLED_SLEEP_MS)
     sleepNow("delai d inactivite ecoule");
 }
 

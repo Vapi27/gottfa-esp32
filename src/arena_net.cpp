@@ -899,6 +899,21 @@ static void startServer() {
     t += "courant      : " + String(arenaled::lastAmps(), 2) + " A\n";
     t += "ordre couleur: " + String(arenaled::order()) + "\n\n";
 
+    t += "-- Boutons (au repos, les trois doivent lire 'haut') --\n";
+    {
+      bool bu = false, bo = false, bd = false;
+      uint32_t nu = 0, no = 0, nd = 0;
+      arenaoled::btnRaw(bu, bo, bd, nu, no, nd);
+      t += "gauche GPIO" + String(PIN_ARENA_BTN_UP)   + " : " + (bu ? "BAS (enfonce !)" : "haut") + "   declenche " + String(nu) + "x\n";
+      t += "OK     GPIO" + String(PIN_ARENA_BTN_OK)   + " : " + (bo ? "BAS (enfonce !)" : "haut") + "   declenche " + String(no) + "x\n";
+      t += "droite GPIO" + String(PIN_ARENA_BTN_DOWN) + " : " + (bd ? "BAS (enfonce !)" : "haut") + "   declenche " + String(nd) + "x\n";
+      if (bu || bo || bd)
+        t += "  !! Une entree est BASSE sans que tu touches rien. Cette broche n est\n"
+             "     pas cablee a ce poussoir, ou il est colle. Un OK bloque bas part en\n"
+             "     appui long : ecran noir, reveil, rebelote - exactement le symptome.\n";
+      t += "\n";
+    }
+
     t += "-- Reseau --\n";
     t += "mode         : " + s_mode + "  ip " + s_ip + "\n";
     t += "dernier echec: " + (s_staReason.length() ? s_staReason : String("(aucun essai)")) + "\n";
