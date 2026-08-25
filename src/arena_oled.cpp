@@ -679,20 +679,39 @@ void tick() {
   }
 
   const int8_t d = encTake();
-  if (d) onStep(d > 0 ? 1 : -1);
 
   static Btn up   = { PIN_ARENA_BTN_UP,   0, 0, false };
   static Btn down = { PIN_ARENA_BTN_DOWN, 0, 0, false };
+  const bool upFire   = pollRepeat(up,   now);
+  const bool downFire = pollRepeat(down, now);
+  const bool ok       = digitalRead(PIN_ARENA_BTN_OK) == LOW;
+
+  // TOUTE entree repousse la veille, les fleches comprises.
+  //
+  // poke() est le seul endroit qui met s_lastIn a jour, et il n'etait appele
+  // que par OK et par le demarrage. Naviguer aux fleches laissait donc le
+  // compteur courir : au bout de ARENA_OLED_SLEEP_MS l'ecran s'eteignait EN
+  // PLEINE navigation, et ne revenait qu'au clic suivant. Vu au banc.
+  if (d || upFire || downFire || ok) {
+    const bool wasAsleep = !s_awake;
+    poke();
+    // Ecran eteint : le premier appui ne fait que rallumer. Sinon le menu se
+    // deplace dans le noir et on decouvre un autre element en le rallumant -
+    // ce qui se lit comme un bouton qui saute une ligne.
+    if (wasAsleep) return;
+  }
+
+  if (d) onStep(d > 0 ? 1 : -1);
+
   // Trace de brochage : un appui dit quelle GPIO a repondu et quel role elle
   // porte. Sans elle, un poussoir mal nommee ne se diagnostique qu'a tatons,
   // parce que le seul retour est un menu qui bouge dans le mauvais sens.
-  if (pollRepeat(up,   now)) { Serial.printf("[btn] GPIO%d -> UP/gauche\n",  PIN_ARENA_BTN_UP);   onStep(-1); }
-  if (pollRepeat(down, now)) { Serial.printf("[btn] GPIO%d -> DOWN/droite\n", PIN_ARENA_BTN_DOWN); onStep(+1); }
+  if (upFire)   { Serial.printf("[btn] GPIO%d -> UP/gauche\n",  PIN_ARENA_BTN_UP);   onStep(-1); }
+  if (downFire) { Serial.printf("[btn] GPIO%d -> DOWN/droite\n", PIN_ARENA_BTN_DOWN); onStep(+1); }
 
   // OK, anti-rebond, avec un appui long pour "revenir en arriere".
   static uint32_t okAt  = 0;
   static bool     okLong = false;
-  const bool ok = digitalRead(PIN_ARENA_BTN_OK) == LOW;
   if (ok && !okAt) { okAt = now; okLong = false; Serial.printf("[btn] GPIO%d -> OK\n", PIN_ARENA_BTN_OK); }
   else if (ok && !okLong && now - okAt > 700) { onOk(true); okLong = true; }
   else if (!ok && okAt) {
