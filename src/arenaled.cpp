@@ -56,6 +56,10 @@ static uint32_t s_bootMs    = 0;       // soft-start reference
 // the render task, where nothing else is touching the pixel buffer.
 static volatile bool s_pendLen = false;
 static uint8_t       s_pin     = PIN_LED_DATA;   // broche data, reglable a chaud
+// Broche a laquelle la chaine est REELLEMENT accrochee. s_pin est le souhait,
+// celle-ci est le fait ; tant qu'elles sont egales il n'y a rien a refaire, et
+// surtout rien a toucher (voir applyPending).
+static uint8_t       s_pinLive = PIN_LED_DATA;
 
 // The animation clock. It only ever accumulates, so it must be a double: a float
 // carries 24 mantissa bits, and at ~0.017 s per frame its ulp reaches the frame
@@ -883,7 +887,18 @@ void setCount(uint16_t n) {
 static void applyPending() {
   if (!s_pendLen) return;
   s_pendLen = false;
-  s_strip.setPin(s_pin);
+  // setPin() n'est PAS anodin ici : quand la chaine est deja demarree, il fait
+  // pinMode(nouvelle, OUTPUT) + digitalWrite(LOW) - exactement l'acte que le
+  // commentaire ci-dessous decrit comme arrachant la broche au canal RMT. Le
+  // banc a rendu le verdict : appele a chaque changement de longueur, meme pour
+  // la MEME broche, il noyait le port serie de "rmt_write_items : RMT DRIVER
+  // ERR" a chaque trame, et pas une LED ne s'allumait. On ne le touche donc que
+  // si la broche change vraiment, et on re-demarre la chaine derriere.
+  if (s_pin != s_pinLive) {
+    s_strip.setPin(s_pin);
+    s_strip.begin();
+    s_pinLive = s_pin;
+  }
   // Blank at the OLD length first. Shrinking the count otherwise stops addressing
   // the dropped pixels without ever telling them to go out, so the tail of the
   // chain stays latched on whatever it last showed — lit, and no longer counted
@@ -1099,7 +1114,7 @@ void begin() {
   s_budget = s_prefs.getUShort("budget", LED_POWER_BUDGET_MA);
   s_repeater = s_prefs.getBool("rep", LED_REPEATER_PIXEL != 0);
   s_pin      = s_prefs.getUChar("pin", PIN_LED_DATA);
-  s_strip.setPin(s_pin);
+  if (s_pin != s_pinLive) { s_strip.setPin(s_pin); s_pinLive = s_pin; }
   // Un mur deja en service porte l'ancienne valeur dans sa NVS : sans cette
   // borne, la mise a jour ne changerait rien la ou elle compte, c'est-a-dire
   // sur les cartes deja posees.
