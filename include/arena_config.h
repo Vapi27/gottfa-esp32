@@ -142,6 +142,10 @@
 #define PIN_ARENA_BTN_UP      18
 #define PIN_ARENA_BTN_DOWN    19
 #define PIN_ARENA_BTN_OK      PIN_ARENA_ENC_SW
+// Retour de defaut du limiteur (voir la branche S3 pour le detail electrique).
+// GPIO4 est libre sur le D1 Mini (D2), hors flash, hors strap, hors UART, et il
+// a un tirage interne - ce que la lecture a drain ouvert exige.
+#define PIN_ARENA_LED_FAULT    4
 #else
 // Memes broches d'ecran que le GottFA80+ : SDA 47 / SCL 21. GPIO48 est proscrit
 // (WS2812 embarquee cablee en dur - du trafic I2C dessus laissait la LED figee
@@ -157,8 +161,6 @@
 // en bord de carte font le meme travail sans piece traversante ni bouton qui
 // depasse au dos. A 0, GPIO4 et GPIO5 sont LIBRES et aucune interruption n'est
 // accrochee a des broches non connectees.
-#define ARENA_ENC_ENABLE       0
-
 // Navigation a trois boutons : deux fleches et OK. C'est le montage retenu pour
 // la carte definitive - trois poussoirs CMS coutent moins qu'un encodeur, se
 // posent a plat derriere la face avant, et se serigraphient sans ambiguite.
@@ -188,9 +190,24 @@
 // charger la capacite de la chaine : ~FAULT s'active sans qu'il y ait de
 // probleme. On l'ignore donc pendant le demarrage, puis on exige qu'il persiste
 // - un defaut fugitif est du bruit, un court-circuit dure.
+#endif
+
+// Reglages communs a toutes les cibles. Ils vivaient dans la branche #else
+// (S3) : arenaled.cpp et arena_oled.cpp les utilisent SANS condition, donc
+// env:arenaled_d1mini32 ne compilait plus du tout - et c'est la cible que
+// tools/arena_flash.sh choisit par defaut.
+//
+// Encodeur rotatif : ABANDONNE sur la carte de serie (trois poussoirs lateraux
+// font le meme travail). A 0, ses broches restent libres et aucune interruption
+// n'est accrochee a des entrees non connectees.
+#define ARENA_ENC_ENABLE       0
+
+// Le limiteur passe en limitation a CHAQUE mise sous tension, le temps de
+// charger la capacite de la chaine : ~FAULT s'active sans qu'il y ait de
+// probleme. On l'ignore donc pendant le demarrage, puis on exige qu'il persiste
+// - un defaut fugitif est du bruit, un court-circuit dure.
 #define ARENA_FAULT_IGNORE_MS 1500     // apres le boot (le soft-start dure 900 ms)
 #define ARENA_FAULT_HOLD_MS    200     // duree minimale pour declarer un defaut
-#endif
 
 
 // ---- Soft start -------------------------------------------------------------
