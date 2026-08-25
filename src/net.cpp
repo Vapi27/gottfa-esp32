@@ -1257,6 +1257,60 @@ void netBegin() {
     r->send(200, "application/json",
       "{\"holding\":\"CS+CLK+MOSI LOW\",\"measure\":\"NOR legs: p1 CS, p6 CLK, p5 DI - expect <0.4V; >=0.8V = divider problem\",\"then\":\"GET /norrelease\",\"warn\":\"the FPGA is held in RESET while this is engaged - the game is dead\",\"autoReleaseS\":300}");
   });
+  // --- /norarm?addr=0xNNNNNN — ARME une lecture NOR et laisse le FPGA la cadencer.
+  //     MESURE A L ORIGINE (2026-08-11) : sur ce banc, le FPGA transmet correctement
+  //     UN octet (JEDEC 0x9F -> EF 40 16 parfait, reproductible) mais PAS les octets
+  //     suivants : toute lecture 0x03/0x0B + 3 octets d adresse rend un motif faux,
+  //     a 2 MHz comme a 100 kHz, adresse 0 comprise. L ESP, lui, transmet sans erreur
+  //     (norbig : 16 Ko effacement+programmation+VERIFICATION en 450 ms).
+  //     PARADE : c est l ESP qui emet la commande + l adresse, puis il RELACHE horloge
+  //     et MOSI en MAINTENANT CS BAS, et libere le FPGA. Pendant la phase de donnees
+  //     d un 0x03 la puce IGNORE MOSI : le FPGA n a plus qu a cadencer et echantillonner
+  //     MISO -- exactement les deux choses qu il fait bien.
+  //     Le bitstream doit etre un build "stream" : CS_SDcard laisse en 'Z', pas de
+  //     commande ni d adresse emise, le chargeur cadence 16384 octets directement.
+  server.on("/norarm", HTTP_GET, [](AsyncWebServerRequest *r) {
+#ifndef BOARD_C3
+    uint32_t addr = 0;
+    if (r->hasParam("addr")) addr = strtoul(r->getParam("addr")->value().c_str(), nullptr, 0);
+    extern volatile bool g_norloop; g_norloop = false;
+
+    pinMode(PIN_FPGA_RESET, OUTPUT); digitalWrite(PIN_FPGA_RESET, LOW);  // FPGA tenu + bus a nous
+    delay(50);                                                            // 2-FF sync + etablissement
+
+    pinMode(PIN_SPI_CS_SD, OUTPUT); digitalWrite(PIN_SPI_CS_SD, HIGH);
+    pinMode(PIN_SPI_SCLK,  OUTPUT); digitalWrite(PIN_SPI_SCLK,  LOW);
+    pinMode(PIN_SPI_MOSI,  OUTPUT); digitalWrite(PIN_SPI_MOSI,  LOW);
+    delayMicroseconds(20);
+    digitalWrite(PIN_SPI_CS_SD, LOW);                                     // debut de trame
+    delayMicroseconds(10);
+
+    // 0x03 + 24 bits d adresse, bit-bang mode 0, ~200 kHz (large marge sur ce bus)
+    const uint8_t tx[4] = { 0x03, (uint8_t)(addr >> 16), (uint8_t)(addr >> 8), (uint8_t)addr };
+    for (int b = 0; b < 4; b++)
+      for (int i = 7; i >= 0; i--) {
+        digitalWrite(PIN_SPI_MOSI, (tx[b] >> i) & 1);
+        delayMicroseconds(2);
+        digitalWrite(PIN_SPI_SCLK, HIGH); delayMicroseconds(2);
+        digitalWrite(PIN_SPI_SCLK, LOW);
+      }
+
+    // CS RESTE BAS. On rend l horloge et MOSI au FPGA, puis on le libere.
+    pinMode(PIN_SPI_SCLK, INPUT); pinMode(PIN_SPI_MOSI, INPUT);
+    delayMicroseconds(50);
+    pinMode(PIN_FPGA_RESET, INPUT);                                       // le FPGA repart et cadence
+
+    char buf[160];
+    snprintf(buf, sizeof buf,
+             "{\"armed\":true,\"addr\":\"0x%06X\",\"cs\":\"held low\","
+             "\"note\":\"le FPGA doit tourner un bitstream stream (CS en Z, sans commande)\"}",
+             (unsigned)addr);
+    r->send(200, "application/json", buf);
+#else
+    r->send(501, "text/plain", "no NOR on C3");
+#endif
+  });
+
   server.on("/norrelease", HTTP_GET, [](AsyncWebServerRequest *r) {
     extern volatile bool g_norloop;
     g_norloop = false;

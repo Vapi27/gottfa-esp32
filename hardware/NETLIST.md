@@ -23,14 +23,22 @@ Sortie de L1 = **+3V3** · C18 22 µF vers GND.
 `VOUT = 0,6 × (1 + 68/15) = 3,32 V`.
 Boucle de retour courte : router FB au plus loin de LX.
 
-## U5 — AP2552W6-7, limiteur de la sortie LED
+## U5 — AP22652W6-7, limiteur de la sortie LED
+
+> Remplace l'**AP2552W6-7** (C441824), que Diodes marque **NRND** — le bandeau
+> figure en page 1 de sa propre fiche : *« NOT RECOMMENDED FOR NEW DESIGN / USE
+> AP22652/AP22653/AP22652A/AP22653A »*. Boîtier, brochage, polarité de l'enable,
+> nature du `FAULT` et courant continu (**2,1 A**) sont **identiques** : le
+> remplacement ne touche à aucune piste. **Seule R4 change** (voir plus bas), et
+> le repliement en court-circuit franc passe de 2 620 mA à **700 mA typ**, ce qui
+> est un gain net pour le chargeur comme pour le câblage du plateau.
 
 | Broche | Nom | Connexion |
 |---|---|---|
 | 1 | IN | **+5V** · **C5 100 nF** vers GND au plus près — *« connect a 0.1uF or greater ceramic capacitor from IN to GND as close to IC as possible »* |
-| 6 | OUT | **+5V_LED** · **C26 2,2 µF** vers GND → J2 broche 1 — *« bypassing the device output with a 0.1uF to 4.7uF ceramic capacitor improves the immunity to short-circuit transients »* |
+| 6 | OUT | **+5V_LED** · **C26 2,2 µF** vers GND → J2 broche 1 — *« bypassing the device output with a 0.1μF to 4.7μF ceramic capacitor improves the immunity of the device to short-circuit transients »* ⚠ **C26 manque encore au schéma KiCad**, à poser |
 | 3 | EN/~EN | **net `EN_LED`** : R10 10 kΩ vers +5V, tiré à la masse par **SW1** — actif bas, voir ci-dessous |
-| 5 | ILIM | **R4 10 k 1 %** vers GND |
+| 5 | ILIM | **R4 11 k 1 %** vers GND — ⚠ **plus 10 k** : à résistance égale l'AP22652 limite 12,7 % plus haut que l'AP2552 |
 | 4 | ~FAULT | **GPIO4** du module — drain ouvert, actif bas, tirage INTERNE de l'ESP |
 | 2 | GND | GND |
 
@@ -275,6 +283,28 @@ Câblage : le commun de SW1 va à la **masse**. Une position tire l'EN de U5 (av
 **R10 10 kΩ** de rappel vers +5V), l'autre tire l'EN du module. À l'arrêt il ne
 reste que le repos du convertisseur, de l'ordre de quelques dizaines de µA.
 
+**Brochage de SW1** — établi le 2026-08-09 sur le catalogue ALPS lui-même
+(*SSSS8 Series, Drawing No.7*, celui que la table du catalogue associe au
+SSSS811101), et non déduit : le repère **C du schéma de circuit est sur le
+terminal ②**, qui est donc le **commun**. ① et ③ sont les deux directions.
+
+| Terminal | Rôle | Va à |
+|---|---|---|
+| ② | **commun** | **GND** |
+| ① | direction A | `EN_LED` → U5 broche 3, avec R10 vers +5V |
+| ③ | direction B | `EN_MCU` → U1 broche 3 (EN du module) |
+| ④⑤⑥⑦ | *ground terminals* (pattes de maintien) | **GND** |
+
+⚠ Le pas des trois terminaux est **asymétrique — 3 mm puis 1,5 mm** : le commun
+n'est *pas* au milieu géométriquement. L'empreinte `SW-SMD_SSSS811101` respecte
+bien cet écartement (pastilles à −2,25 / +0,75 / +2,25 mm), c'est vérifié.
+Regarder l'empreinte pour deviner le commun mène donc à l'erreur.
+
+⚠ **U5 broche 3 ne doit PAS rester câblée à la masse.** Elle l'était dans le
+schéma jusqu'au 2026-08-09 — partagée avec la broche 2 — ce qui rendait
+l'interrupteur sans effet sur la sortie LED. Corrigé : la branche a été coupée et
+la broche porte maintenant `EN_LED`.
+
 Curseur **en bord de carte**, débordant du contour comme S1–S3 : la façade garde
 une seule arête utile. Prévoir le dégagement sur 4,1 mm de course.
 
@@ -301,6 +331,10 @@ chaînés se partagent 2 A au lieu d'en demander 8. À activer sur chaque mur d'
 chaîne, et à laisser sur 0 si chacun a son propre chargeur.
 
 **J2 plateau** : 1 = +5V_LED (sortie de U5) · 2 = GND · 3 = DATA (sortie de R3).
+Bornier à ressort **KF250NH-3.5-3P** (`C976557`) depuis le 2026-08-10, à la place
+du JST XH — **brochage inchangé**, seule l'empreinte change. Pas 3,50 mm au lieu
+de 2,50, et pose à **0°** au lieu de 180° pour que l'entrée du fil (le côté large
+du corps, 5,70 mm) regarde le bord bas, côté poussoirs.
 
 **J3 écran** : 1 = GND · 2 = +3V3 · 3 = SCL (GPIO21) · 4 = SDA (GPIO47).
 R6/R7 4,7 kΩ vers +3V3 **non montées** si le module écran porte déjà ses tirages.
@@ -325,7 +359,7 @@ Tout ce qui précède, vu depuis les nets plutôt que depuis les composants.
 | **CC2_OUT** | J4 B5 → R12 22 k → +3V3 |
 | **LED_DATA** | U1 br.9 (**IO16**) → U6 br.2 (A) |
 | **LED_DATA_5V** | U6 br.4 (Y) → R3 330 Ω → **J2 br.3** |
-| **ILIM** | U5 br.5 → R4 10 k → GND |
+| **ILIM** | U5 br.5 → **R4 11 k** → GND — piste la plus courte possible, la fiche l'exige : *« The traces routing the RLIM resistor should be as short as possible to reduce parasitic effects on the current-limit accuracy »* |
 | **LED_FAULT** | U5 br.4 → U1 br.4 (**IO4**) — drain ouvert, tirage interne |
 | **EN_LED** | U5 br.3 (EN, **actif bas**) · R10 10 k → +5V · **SW1** |
 | **EN_MCU** | U1 br.3 (EN) · R5 10 k → +3V3 · C7 1 µF → GND · **SW1** · S6 → GND |
