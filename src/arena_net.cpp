@@ -867,6 +867,45 @@ static void startServer() {
     r->send(200, "text/plain", "ecran reveille");
   });
 
+  // --- "Pourquoi ca ne fait pas ce que j'attends" ---------------------------
+  // Une page en texte brut, lisible sur un telephone, qui repond aux trois
+  // questions que le banc pose sans arret. Le port serie repond deja a tout
+  // cela - mais il faut un cable, un moniteur et un reflash pour le lire,
+  // alors que le navigateur est deja ouvert sur la page. Une preuve qu'on ne
+  // peut pas obtenir est une preuve qui n'existe pas.
+  s_server.on("/api/why", HTTP_GET, [](AsyncWebServerRequest* r) {
+    String t = "=== POURQUOI ===\n\n";
+    t += "-- La carte redemarre-t-elle ? --\n";
+    t += "demarrages   : " + String(s_boots) + "\n";
+    t += "dernier reset: " + s_reset + "\n";
+    t += "en marche    : " + String(millis() / 1000) + " s\n";
+    t += "  Note le compteur, provoque le probleme, recharge cette page.\n";
+    t += "  Le compteur a monte  -> la carte a redemarre (la cause est ci-dessus).\n";
+    t += "  Le compteur inchange -> elle n a PAS redemarre, c est autre chose.\n\n";
+
+    t += "-- Les LED --\n";
+    t += "broche data  : GPIO" + String(PIN_LED_DATA) + "\n";
+    t += "pixels pilotes: " + String(arenaled::count());
+    if (LED_REPEATER_PIXEL) {
+      t += " visibles + 1 repeteur = " + String(arenaled::count() + 1) + " a cabler\n";
+      t += "  ATTENTION : le 1er pixel physique est tenu ETEINT expres (repeteur).\n";
+      t += "  Avec une seule LED cablee, elle ne s allumera JAMAIS. Il en faut 2,\n";
+      t += "  ou passer LED_REPEATER_PIXEL a 0 dans include/arena_config.h.\n";
+    } else {
+      t += " (pas de repeteur)\n";
+    }
+    t += "mode         : " + String(arenaled::modeLabel(arenaled::mode())) + "\n";
+    t += "luminosite   : " + String(arenaled::brightness()) + "/255\n";
+    t += "courant      : " + String(arenaled::lastAmps(), 2) + " A\n";
+    t += "ordre couleur: " + String(arenaled::order()) + "\n\n";
+
+    t += "-- Reseau --\n";
+    t += "mode         : " + s_mode + "  ip " + s_ip + "\n";
+    t += "dernier echec: " + (s_staReason.length() ? s_staReason : String("(aucun essai)")) + "\n";
+    t += "erreur scan  : " + (s_scanErr.length() ? s_scanErr : String("(aucune)")) + "\n";
+    r->send(200, "text/plain; charset=utf-8", t);
+  });
+
   s_server.on("/api/wifiscan", HTTP_GET, [](AsyncWebServerRequest* r) {
     if (r->hasParam("results")) {
       wifi_ap_record_t apInfo = {};
