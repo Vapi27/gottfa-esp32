@@ -226,6 +226,8 @@ void espShow(uint8_t pin, uint8_t *pixels, uint32_t numBytes, boolean is800KHz) 
     }
     if (channel == ADAFRUIT_RMT_CHANNEL_MAX) {
         // Ran out of channels!
+        espShowRmtFail++;
+        if (espShowBusType < 0) espShowBusType = ARENA_PIN_BUS(pin);
         return;
     }
 
@@ -252,7 +254,16 @@ void espShow(uint8_t pin, uint8_t *pixels, uint32_t numBytes, boolean is800KHz) 
     };
 #endif
     rmt_config(&config);
-    rmt_driver_install(config.channel, 0, 0);
+    if (rmt_driver_install(config.channel, 0, 0) != ESP_OK) {
+        // Le pilote refuse le canal - typiquement parce qu'un autre code le
+        // tient deja. Sans ce compteur, l'echec ne laissait AUCUNE trace : les
+        // trois compteurs de /api/state restaient a zero, ce qui se lit comme
+        // "aucune trame envoyee" alors que la cause est ailleurs.
+        espShowRmtFail++;
+        if (espShowBusType < 0) espShowBusType = ARENA_PIN_BUS(pin);
+        rmt_reserved_channels[channel] = false;
+        return;
+    }
 
     // Convert NS timings to ticks
     uint32_t counter_clk_hz = 0;
@@ -293,6 +304,7 @@ void espShow(uint8_t pin, uint8_t *pixels, uint32_t numBytes, boolean is800KHz) 
     // Write and wait to finish
     rmt_write_sample(config.channel, pixels, (size_t)numBytes, true);
     rmt_wait_tx_done(config.channel, pdMS_TO_TICKS(100));
+    espShowFrames++;
 
     // Free channel again
     rmt_driver_uninstall(config.channel);

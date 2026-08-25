@@ -411,6 +411,11 @@ static String stateJson() {
   j += ",\"fps\":"    + String(arenaled::fps());
   // Diagnostic sortie LED : pin reellement compilee, trames emises, echecs.
   j += ",\"pin\":"      + String(PIN_LED_DATA);
+  // Le repeteur decide si le 1er pixel physique est tenu eteint. C'est le
+  // reglage qui explique "les LED ne s'allument pas" une fois sur deux, et il
+  // n'etait expose NULLE PART : ni la page ni /api/state ne disaient sa valeur,
+  // donc personne ne pouvait verifier ce qu'il venait de changer.
+  j += ",\"repeater\":" + String(arenaled::repeater() ? 1 : 0);
   j += ",\"rmtframes\":" + String((uint32_t)espShowFrames);
   j += ",\"rmtfail\":"  + String((uint32_t)espShowRmtFail);
   j += ",\"lockmiss\":" + String((uint32_t)espShowLockMiss);
