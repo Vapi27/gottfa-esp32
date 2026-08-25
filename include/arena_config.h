@@ -202,7 +202,7 @@
 #define PIN_ARENA_BTN_DOWN    17                  // S2, poussoir DROITE / bas
 #define PIN_ARENA_BTN_OK       PIN_ARENA_ENC_SW   // S3, GPIO7
 
-// Retour de defaut du limiteur de sortie U5 (AP2552, broche 4 ~FAULT).
+// Retour de defaut du limiteur de sortie U5 (AP22652, broche 4 ~FAULT).
 // Collecteur ouvert, actif BAS. Tire au haut par le tirage INTERNE de l'ESP :
 // pas de resistance externe, le signal est lent et le tirage interne suffit.
 // !! Ne JAMAIS le tirer vers le 5 V : U5 est alimente en 5 V, mais sa sortie
@@ -298,12 +298,36 @@
 // plutot que de le depasser - c'est donc lui, et non le cuivre, qui garantit que
 // la carte ne tire jamais plus que son alimentation n'accepte.
 //
-// 2000 mA n'est pas un chiffre rond choisi au hasard : c'est ce qui laisse une
-// marge franche sous le seuil de l'interrupteur a limitation (AP2552 regle au
-// maximum, 2,36 A a +/-6 %, donc 2,22 A au pire). Sans cette marge la protection
-// se declencherait en usage normal, et remonter le budget la rendrait inutile.
-// A 18,2 mA par pixel mesures, 2 A couvrent 110 pixels en blanc plein.
-#define LED_POWER_BUDGET_MA   2000
+// Ce plafond n'est pas un chiffre rond choisi au hasard : il est FIXE PAR LE
+// MATERIEL, par le seuil le plus bas que l'interrupteur a limitation puisse
+// prendre. U5 = AP22652 avec RLIM = 11 k : 2174 / 2416 / 2657 mA garantis sur
+// -40 a +85 degres. Le plafond doit rester franchement SOUS 2174 mA, sans quoi
+// la protection se declenche sur une trame blanche legitime et le mur affiche
+// "DEFAUT SORTIE" alors que rien n'est casse. 1900 mA laisse 14 %.
+//
+// CORRIGE le 2026-08-09 : c'etait 2000 mA, cale sur l'AP2552 (2200 mA au pire
+// bas). L'AP22652 qui le remplace limite plus haut a resistance egale, R4 est
+// donc passee de 10 a 11 k et la fenetre s'est deplacee. Les deux se suivent :
+// toucher a R4 sans toucher a ce plafond casse la marge.
+//
+// Autre borne, independante : l'AP22652 n'est donne que pour 2,1 A CONTINU
+// (-40..+85). 1900 mA, c'est 90 % de sa capacite, la ou 2000 en faisaient 95 %.
+//
+// A 25,9 mA par pixel MESURES (regression sur cinq points, 2026-08-07), 1,9 A
+// couvre 73 pixels a fond. Le mode attract n'en demande que 0,29 A : ce plafond
+// ne mord que sur du blanc plein synthetique.
+#define LED_POWER_BUDGET_MA   1900
+// Plafond DUR, impose par U5 : au-dela, c'est le limiteur qui decide et le mur
+// se declare en defaut. Aucun reglage, aucune requete HTTP ne doit passer outre.
+//
+// ABAISSE DE 2100 A 1900 LE 2026-08-10. 2100 etait une marge fictive : avec
+// R4 = 11 kOhm +/-1 %, les equations best-fit du datasheet AP22652 donnent un
+// ILIMIT *minimum* de 2,10 a 2,14 A. Un plafond a 2100 mA laissait donc 0,2 a
+// 2 % de marge sur le point de declenchement le plus defavorable du limiteur :
+// a pleine charge legitime, en bout de tolerance, U5 se declenchait. A 1900 la
+// marge remonte a ~244 mA. Correctif a cout materiel nul -- l'alternative etait
+// de rechanger R4, deja passee de 10 k a 11 k lors du remplacement AP2552.
+#define LED_POWER_BUDGET_MAX  1900
 // The budget covers the LEDs ONLY. The controller draws 100-250 mA (peaks higher
 // on WiFi transmit) from the same supply and the same fuse, and never appears in
 // the estimate. Size a fuse against budget + 300 mA, not against the budget.

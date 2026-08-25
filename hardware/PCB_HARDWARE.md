@@ -21,7 +21,7 @@ Mesuré le 2026-08-07 sur le build `95f4bf1` et sur le mur `Arena`
 | Mur de référence | 42 | `/api/state` |
 | Courant par canal | **R/G/B 9 mA · W 18 mA** | datasheet SK6812MINI §11 — le blanc consomme le double |
 | Courant théorique maximal | **6,9 A** | 150 × (9+9+9+18+1 mA) — tous canaux à fond |
-| Plafond appliqué | **2,0 A** | `LED_POWER_BUDGET_MA` — le firmware assombrit l'image entière plutôt que de dépasser |
+| Plafond appliqué | **1,9 A** | `LED_POWER_BUDGET_MA` — le firmware assombrit l'image entière plutôt que de dépasser. Ramené de 2,0 à 1,9 A le 2026-08-09 : il est fixé par le mini garanti du limiteur AP22652 avec R4 = 11 k (2 174 mA), et borné en dur à 2 100 mA dans `setBudgetMa()` |
 | Rafraîchissement | 60 Hz | `LED_FRAME_HZ` (4,8 ms sur le fil à 150 pixels) |
 
 Ces **6,9 A** sont le pire cas théorique — les quatre canaux de chaque pixel à
@@ -154,11 +154,11 @@ de pire cas.
 
 - **Entrée USB-C 5 V directe**, deux résistances de 5,1 kΩ sur CC1/CC2. Ni
   négociation PD, ni convertisseur pour le rail LED.
-- **`LED_POWER_BUDGET_MA` = 2000** : le garde-fou est logiciel. Le firmware
+- **`LED_POWER_BUDGET_MA` = 1900** : le garde-fou est logiciel. Le firmware
   assombrit la trame entière plutôt que de dépasser, donc la carte ne peut pas
   tirer plus que l'USB-C n'accepte, quoi que fasse le client. La valeur est
   calée sous le seuil de la protection de sortie (§E).
-- **Cuivre et fusible dimensionnés 5 A**, pas 3 : le surcoût est nul.
+- **Fusible dimensionné 5 A**, pas 3 : le surcoût est nul, et il protège le chaînage (voir la section routage). ⚠ **Le cuivre, lui, n'a PAS pu suivre** : les 2,80 mm calculés ne rentraient pas sur 100 × 25 mm en 2 couches. Le rail est routé en 0,40 mm et le courant passe par des zones de cuivre — détail et mesures dans la section routage.
 - **Pas de CH224K, pas d'abaisseur, pas d'empreinte réservée.** Abandonné : la
   consommation mesurée ne le justifie pas, et une empreinte non peuplée sur une
   carte de série est un coût de conception et une source d'erreur au montage
@@ -228,16 +228,38 @@ avec un bornier et des fils qu'on manipule en accrochant la pièce.
 
 | | |
 |---|---|
-| Composant | **AP2552W6-7** (Diodes) — LCSC **C441824**, SOT-26. Vérifié le 2026-08-07 : 1 171 en stock, 0,65 $/1 → 0,46 $/100 |
-| Point de calibration (fiche) | **1,632 A à RLIM = 15 kΩ**, ±6 % — c'est de là que sort tout le calcul |
-| R4 retenu | **10 kΩ 1 %** → typ 2,45 A, fenêtre **2,30 – 2,60 A** |
-| Marge | budget firmware **2,0 A** : 15 % sous le pire cas bas (2,30 A) |
-| Plafond | pire cas haut 2,60 A, **sous** les 3 A du chargeur |
-| ⚠ Enable | **ACTIF BAS** sur cette variante : `EN` se câble **à la masse**. Relié à IN — le réflexe habituel — le limiteur reste désactivé et la sortie LED est morte en permanence. L'erreur était sur le schéma v0.1, attrapée en vérifiant la fiche. |
-| Comportement | limitation à courant constant, drapeau `FLAG`, réarmement automatique |
+| Composant | **AP22652W6-7** (Diodes) — LCSC **C2158038**, SOT-26. Vérifié le 2026-08-09 : 2 514 en stock chez JLCPCB (2 510 chez LCSC — pools distincts), Extended, 0,31 $/1 → 0,24 $/100 |
+| Pourquoi pas l'AP2552 | l'AP2552W6-7 porte en **page 1 de sa propre fiche** le bandeau *« NOT RECOMMENDED FOR NEW DESIGN / USE AP22652/AP22653 »*, et la page produit Diodes le classe **NRND** dans l'*Inactive Datasheet Archive*. Il reste en stock et fonctionnel : c'est un choix de pérennité, pas une urgence. Aucun PCN d'obsolescence, donc pas de date de dernier achat publiée |
+| Ce qui change | **rien au câblage** : même SOT-26, même brochage, même enable actif bas, même `FAULT` à drain ouvert, même 2,1 A continu. **Seule R4 change** |
+| Ligne de la fiche | **2 398 / 2 665 / 2 931 mA à RLIM = 10 kΩ** sur −40 à +85 °C (DS41186 Rev. 5-2, mars 2026) — à résistance égale, **12,7 % plus haut** que l'AP2552 (2 200 / 2 365 / 2 542) |
+| R4 retenu | **11 kΩ 1 %** (C25950) → **2 174 / 2 416 / 2 657 mA** sur −40 à +85 °C |
+| Marge basse | plafond firmware ramené à **1,9 A** : le pire cas bas (2,174 A) est **14 % au-dessus** |
+| Plafond | pire cas haut 2,657 A + **95 mA** de carte (socle mesuré 0,65 W) = **2,75 A**, soit 8 % **sous** les 3 A du chargeur |
+| Court-circuit franc | **700 mA typ** (contre 2 620 mA sur l'AP2552) — le repliement est 3,7 fois plus dur, le chargeur ne le voit presque pas |
+| ⚠ Enable | **ACTIF BAS** : `EN` se câble **à la masse**. Relié à IN — le réflexe habituel — le limiteur reste désactivé et la sortie LED est morte en permanence. L'erreur était sur le schéma v0.1, attrapée en vérifiant la fiche. |
+| Comportement | limitation à courant constant, `FAULT` après **6 ms typ**, réarmement automatique |
 
 Il se déclenche donc **sous** les 3 A du chargeur, ce qu'aucun fusible ni PTC ne
 sait faire dans cette fenêtre.
+
+⚠ **11 kΩ n'est pas une ligne tabulée.** La fiche ne garantit que 10, 15, 20,
+49,9 et 210 kΩ. Le typ vient de son équation *best-fit*
+`ILIMIT_Typ[mA] = 30321 / R[kΩ]^1,055`, et la fenêtre des **±10 %** qui
+reproduisent **exactement** les quatre lignes tabulées sur −40 à +85 °C. Entre
+10 et 20 kΩ l'équation colle à **0,4 %** près (vérifié : 2 671 contre 2 665 à
+10 k, 1 742 contre 1 735 à 15 k) — elle dérive en revanche de 14 % à 210 kΩ, donc
+elle ne vaut que dans cette plage.
+
+**Pourquoi ne pas simplement garder 10 kΩ.** Parce que le pire cas y monterait à
+2 931 mA, soit **3,03 A** avec la carte : au-dessus du chargeur. Le bloc perdrait
+précisément ce qui justifie son existence — se déclencher **avant** la source.
+L'inverse, 12 kΩ, ferait tomber le pire cas bas à 1 983 mA, sous la charge :
+le mur afficherait « DÉFAUT SORTIE » sur une trame blanche légitime. La fenêtre
+utile est étroite, 11 kΩ est le seul point qui tienne des deux côtés.
+
+⚠ **Coût.** Le 10 kΩ était *Basic* chez JLCPCB, le 11 kΩ est *Extended* : une
+redevance de chargeur en plus. C25804 reste malgré tout au BOM pour R5 et R10 —
+**qui ne suivent pas R4** et restent à 10 kΩ.
 
 ## 4. Blocs de la carte
 
@@ -327,8 +349,15 @@ en moins que sur le devkit.
 |---|---|---|
 | Adaptateur de niveau | **SN74AHCT1G125DCKR**, **SC-70-5** (le suffixe DCKR = SC-70 ; DBV = SOT-23), alimenté en 5 V | voir ci-dessous |
 | Résistance série | 330 Ω, en sortie de l'adaptateur | amortit le front, réduit le rayonnement |
-| Connecteur données | JST-XH 3 broches (données + masse de référence) | le courant ne passe pas par là |
-| Connecteur puissance | bornier à vis, séparé | 9 A ne passent pas dans un JST-XH |
+| Connecteur de sortie | **bornier à ressort KF250NH-3.5-3P**, 3 pôles : `+5V_LED`, `GND`, `DATA` | un seul organe suffit — voir ci-dessous |
+
+⚠ **Correction du 2026-08-10.** Ces deux lignes annonçaient auparavant un JST-XH
+pour les données **et** un bornier à vis séparé pour la puissance, au motif que
+« 9 A ne passent pas dans un JST-XH ». Les 9 A ne concernent pas cette carte :
+son plafond est **2,1 A**, imposé matériellement par le limiteur U5, et le budget
+logiciel est à 1,9 A. Un seul bornier 3 pôles porte donc l'ensemble, avec une
+marge confortable même sur la plus pessimiste des deux valeurs contradictoires
+annoncées pour ce bornier (8 A chez le fabricant, 15 A chez le distributeur).
 
 **Pourquoi un adaptateur de niveau alors que `ARENA_LED.md` dit qu'on peut s'en
 passer.** La note a raison sur son terrain : un SK6812 veut `VIH ≥ 0,7 × VDD`,
@@ -439,7 +468,16 @@ il faudra fournir la pièce ou la souder à part.
   recoupé sur deux plans constructeur. Ce n'est pas une empreinte propriétaire :
   n'importe quel EC11 traversant à poussoir s'y soude, aujourd'hui et dans dix ans.
 - **L1** : NR4030 standard, 4,0 × 4,0 × 3,0 mm.
-- **J2** : pas réel **2,50 mm**, pas 2,54 — l'empreinte juste est la XH officielle.
+- **J2** : **bornier à ressort KF250NH-3.5-3P** (LCSC `C976557`) depuis le
+  2026-08-10, à la place du JST XH. Pas **3,50 mm**, perçage **1,50 mm**,
+  pastille Ø 2,30. Corps **11,10 × 10,00 mm** et **12,32 mm de haut** — cotes
+  relevées sur le modèle 3D, pas estimées. Le corps est asymétrique autour de la
+  rangée de broches (4,30 mm d'un côté, **5,70 mm** de l'autre) : c'est le côté
+  5,70 qui porte l'entrée du fil et il doit regarder le **bord bas**, côté
+  poussoirs — donc pose à **0°**, alors que le JST était à 180°.
+  ✅ **Les 12,32 mm passent** — vérifié visuellement sur la machine par le
+  propriétaire le 2026-08-10. Niveau de preuve : contrôle à l'œil, pas une cote
+  relevée. À refaire au pied à coulisse si un boîtier ou un capot s'ajoute.
 
 Abandonné en cours de route : **CH224K (C970725)**, contrôleur PD. La référence
 est bonne, le besoin ne l'est pas — voir §3bis.
@@ -466,3 +504,386 @@ est bonne, le besoin ne l'est pas — voir §3bis.
    figer le schéma, pour que le code et la carte partent alignés.
 4. Router, en traitant le rail 9 A et la zone d'antenne comme les deux
    contraintes qui ne pardonnent pas.
+
+## Routage — décisions et mesures du 2026-08-10
+
+Carte **100 × 25 mm**, 2 couches, 63 empreintes. Routée par Freerouting 2.3.0
+après huit tours, dont voici ce qui a compté.
+
+**Les largeurs de piste du dossier ne rentraient pas.** Les 2,80 mm calculés pour
+5 A rendaient le routage impossible : à 1,5 mm par net de puissance, il restait
+43 liaisons non routées sur 85. Le rail a été routé en **0,40 mm** et le courant
+est porté par des **zones de cuivre** :
+
+| zone | couche | étendue |
+|---|---|---|
+| +5V entrée | F.Cu | X 120,6 → 167,5 |
+| +5V consommateurs | F.Cu | X 187,5 → 219,4 |
+| GND | B.Cu | toute la carte |
+
+**17 des 18 pastilles +5V sont dans une zone.** Sans elles, 100 mm de piste de
+0,24 mm à 2,1 A donnent **0,43 V de chute et 0,9 W dissipés** — mesuré, pas estimé.
+Seule `U2.5` reste hors zone : c'est une référence de tension, elle ne consomme rien.
+
+**Ce qui a débloqué le routage**, dans l'ordre de gain :
+
+| changement | non routés |
+|---|---|
+| départ, POWER à 1,5 mm | 43 |
+| R1, R2 et U2 recollés à J1 (ils en étaient à 19, 24 et 14 mm) | 39 |
+| POWER à 0,40 mm | 13 |
+| signaux à 0,15 mm — c'est ce qui fait sortir le TDFN de U3 | 6 |
+| trous de montage posés, routage repris de zéro | **2** |
+
+⚠ **Freerouting descend sous le minimum si on le laisse faire** : 22 segments
+étaient à **0,112 mm**, sous les 0,15 mm de la contrainte et sous le minimum
+JLCPCB. Repris à 0,150 mm. À revérifier après chaque tour d'autoroutage.
+
+**Trous de montage** : H1 en (130,5 ; −90,0), H2 en (200,5 ; −84,0), **Ø3,2 mm
+non métallisés**, pour vis à bois de 3 mm. Dégagement de tête vérifié : 3,55 et
+4,08 mm au composant le plus proche, pour 3,20 requis. S6 a été déplacé pour H2.
+
+**Le fusible F1 reste justifié**, contrairement à ce qu'un calcul rapide laisse
+croire. Pour un seul mur sur un chargeur de 3 A il ne peut effectivement jamais
+fondre — la source replie avant. Mais **J4 est alimenté APRÈS F1** : avec une
+alimentation de 5 V / 6 A et quatre murs chaînés, jusqu'à 8 A traversent J1, qui
+n'est donné que pour 5 A. C'est là que F1 sert, et c'est le seul cas.
+
+---
+
+## Antenne vers le bas — ÉTUDIÉ ET REJETÉ le 2026-08-10
+
+Question posée : tourner le module U1 de 180° pour que son antenne pointe vers le
+bord bas au lieu du bord haut. **Réponse : non**, et la raison n'est pas un
+principe mais une série de mesures prises dans le `.kicad_pcb`.
+
+**Le problème supposé n'existe pas.** H1 (130,50 ; −90,00) et H2 (200,50 ; −84,00)
+sont deux M3 **non métallisés intérieurs**, à mi-hauteur de carte. La carte est
+donc boulonnée **à plat, dos contre le bois** : les deux bords, haut et bas,
+débordent dans le vide. L'antenne n'est pas plaquée contre le plateau — le bois
+est **derrière** elle, pas devant. Et le placement actuel (antenne débordant de
+6,04 mm hors carte, première pastille à 1,007 mm du bord) est déjà exactement la
+recommandation principale d'Espressif.
+
+**La rotation rapprocherait du bois au lieu d'en éloigner.** H1/H2 sont décalés de
+0,50 mm sous la mi-hauteur : à 12,7 mm d'épaisseur de tranche, l'écart
+antenne↔bois passe de 5,643 à 5,351 mm, soit **−0,292 mm**.
+
+**Le gain RF est nul.** Le chiffre de « 7 à 9,6 dB » qui circule vient de
+l'option 6 du guide ESP-WROOM-02 (cuivre sous l'antenne + placement central), qui
+ne décrit pas ce cas. L'analogue correct pour du diélectrique sans conducteur est
+l'option 4 : **−1,03 / −1,01 / +0,06 dB** selon le canal. Rien.
+
+**Le bord bas est le pire endroit de la carte pour une antenne** : `/+5V_LED`
+court sur B.Cu à Y = −77,12, soit 2,12 mm du bord, en travers de toute la largeur
+du module, à 2,1 A commutés. S'y ajoutent la sortie du câble d'un mètre, les
+poussoirs à 2,65 mm, et **la main de l'utilisateur à chaque appui** — un désaccord
+intermittent est un mode de panne pire que la perte statique qu'on cherchait.
+
+**Et le coût est massif** : U1 concentre 39 nets sur 49 pastilles ; la rotation
+invalide 250 à 510 segments (31 à 65 % du cuivre) et détruit la seule paire
+différentielle propre de la carte (USB, 6 segments par piste, aucun via).
+
+⚠ Enfin, la descente de 5,11 mm qui rendait la géométrie possible est **interdite
+par les règles du projet lui-même** : `min_copper_edge_clearance = 0,30 mm` en
+sévérité *error*. Le plafond dur est 5,01 mm.
+
+**Si la question revient**, la voie n'est pas la rotation mais la mécanique :
+entretoises plus hautes sur H1/H2, décalage de la carte dans son perçage, ou
+dégagement local du bois derrière X 168..187 / Y −100..−94 (≈115 mm², aucun
+composant). Et le seul chemin vers les 15 mm de dégagement recommandés serait le
+**WROOM-1U** (19,2 × 18 × 3,2 mm, qui tient entièrement dans les 25 mm) — autre
+projet, à n'ouvrir que si une mesure RSSI/débit prouve un vrai problème.
+
+## Bornier déplacé à l'extrémité droite — FAIT le 2026-08-10
+
+J2 était le seul organe du bloc LED resté à gauche (X 157,77) alors que U5 (207),
+U6 (218) et R3 sont dans la colonne droite. Conséquence mesurée : `+5V_LED`
+faisait **66,16 mm en 0,40 mm de large**, soit ~70 mΩ, **147 mV et 0,33 W perdus
+à 2,1 A**.
+
+| | avant | après |
+|---|---|---|
+| J2 | (157,77 ; −77,53) à 180° | **(214,30 ; −80,70) à 0°** |
+| S1 / S2 / S3 | 192,04 / 200,04 / 208,04 | **−2,30 mm**, entraxe 8,00 conservé |
+| C26 | (170,31 ; −78,03) | **(214,26 ; −86,00)** — il découple le **connecteur** |
+
+Jeux obtenus : U1↔S1 **0,35** · S3↔bornier **0,44** · bornier↔bord **0,40 mm**.
+⚠ La note d'analyse proposait −2,80 mm : **ça fait entrer S1 dans le module de
+0,135 mm**. Le décalage juste est −2,30 mm, il ne reste que 1,19 mm de jeu total à
+répartir sur trois intervalles.
+
+Perçages du bornier vérifiés côté fabricant : anneau annulaire 0,40 mm (mini
+0,20), trou-à-trou 2,00 mm (mini 0,45), pastille au bord 1,05 mm (mini 0,30).
+
+**Netlist strictement inchangée** — 234 pastilles, aucune n'a changé de net.
+
+## Dette de routage découverte le 2026-08-10
+
+Le dossier annonçait « 2 liaisons non routées ». **C'est faux** : il y avait
+**53 éléments non connectés sur 13 nets**, et surtout **12 courts-circuits réels**,
+dont plusieurs antérieurs au déplacement du bornier :
+
+- deux segments de 40,10 et 36,80 mm (`Net-(U1-IO19)`, `Net-(U1-IO20)`) traversant
+  la pastille 1 de R15 — rebuts de la réorganisation de la section micro ;
+- le moignon `/STATUS_PX` pointant vers l'est, qui traversait la poche où le
+  bornier devait aller ;
+- une piste GND sur la pastille 1 de S6 (`/EN_MCU`).
+
+Supprimés le 2026-08-10 : **12 objets, 96 mm de cuivre**. Résultat DRC :
+courts-circuits **12 → 0**, trou-à-trou **2 → 0**, ponts de masque **45 → 2**,
+total **207 → 153**. Les 89 restants sont de la sérigraphie et n'empêchent rien.
+
+⚠ **Six violations subsistent autour de J2 uniquement parce que les zones n'ont
+pas été re-remplies** depuis le déplacement : le polygone stocké garde son trou à
+l'ancienne position. `kicad-cli` **ne sait pas remplir les zones** — c'est
+`Édition → Remplir toutes les zones` (touche `B`) dans pcbnew.
+
+## Routage terminé — 2026-08-10, 15:16
+
+Freerouting 2.3.0 sur le DSN patché (plans retirés, câblage remis à zéro,
+`POWER` ramenée de 1500 à **400 µm**, `USB` 300 → 200, signaux 200 → **150**) :
+**170 liaisons non routées → 1** en 53,8 s. La dernière, `/+3V3` entre les
+pastilles 2 et 5 de U3, a été faite au **routeur interactif** — aucun autorouteur
+ne sort un fanout TDFN au pas de 0,40 mm.
+
+⚠ Piège confirmé une seconde fois : Freerouting **descend sous la largeur
+minimale** — 28 segments à 0,1124 mm pour une contrainte à 0,150. Remontés à la
+main. Vérifier après **chaque** tour.
+
+⚠ Piège de la classe de nets : `/+3V3` appartient à `POWER`, dont la largeur est
+**1,50 mm**. Le routeur interactif la propose par défaut, sur une pastille de
+0,22 mm. Il faut saisir **0,15 mm** à la main.
+
+⚠ Ordre des opérations : remplir les zones **APRÈS** le routage, jamais avant. Une
+via créée après le remplissage n'a pas son dégagement dans le polygone déjà
+calculé — ça a produit ici une via `/AGC_TH` **à 0,0000 mm de la zone GND**, donc
+un court-circuit franc du seuil de la CAG. Un second `B` l'a effacé.
+
+**État final vérifié :**
+
+| | |
+|---|---|
+| Liaisons non connectées | **0** |
+| Netlist PCB ↔ schéma | **identiques, 234 pastilles** |
+| Cuivre | 877 segments, **1 897 mm**, 93 vias, 9 zones remplies |
+| Largeur minimale | **0,150 mm** |
+| DRC | 104, dont **89 de sérigraphie** → 15 de fond |
+
+Les 15 restantes n'ont **aucun effet électrique** : 6 anneaux annulaires + 6
+padstacks sur les pastilles **mécaniques sans net** de J1, J4 et SW1 (les ancrages
+des connecteurs, déjà arbitrés) ; 2 sur H1/H2 dont l'empreinte `MountingHole_3.2mm`
+n'est pas dans la table de bibliothèques (elle est embarquée dans la carte) ; 1 sur
+J2 dont le bloc a été reconstruit à la main — `Mettre à jour les empreintes depuis
+la bibliothèque` la lève.
+
+**`+5V_LED`, le rail qui porte 2,1 A**, mesuré de bout en bout :
+
+| étape | longueur | résistance | chute à 2,1 A |
+|---|---|---|---|
+| avant | 66,16 mm en 0,40 | 82,7 mΩ | 174 mV · 0,36 W |
+| bornier déplacé à droite | 18,34 mm en 0,40 | 22,9 mΩ | 48 mV · 0,10 W |
+| **élargissement progressif** | **15,9 mm** | **16,3 mΩ** | **34 mV · 0,07 W** |
+
+L'élargissement est **variable et non uniforme** : 1,50 mm sur les portions
+dégagées, 0,40 au ras des broches de U5 où `+5V`, `ILIM` et `LED_FAULT` ne laissent
+que 0,10 à 0,43 mm de voisinage. Un premier essai à 1,50 mm partout avait créé
+**8 courts-circuits** ; la largeur est désormais calculée segment par segment
+contre les 934 objets de cuivre voisins.
+
+## Reprise de l'alimentation — FAIT le 2026-08-10
+
+Option 1 appliquée, mais **deux spécifications de la note d'analyse se sont
+révélées inapplicables à la mesure**, et ont été remplacées par mieux.
+
+**C1 → non monté** (`dnp yes`, hors BOM) plutôt que supprimé : l'emplacement
+reste sur la carte, ce qui garde l'option ouverte sans coûter un re-routage.
+**C2 : 470 µF 10 V → 100 µF 25 V** — `VZH101M1ETR-0607L`, LCSC `C473422`.
+Remplacement **à l'identique vérifié** : pastilles à −2,67 et +2,67, taille
+3,50 × 1,20, même empreinte `-FD` que le sortant. Aucune modification du PCB.
+
+⚠ **Piège évité de justesse.** Le premier candidat, `VZT101M1VTR-0607`
+(`C249983`), est en boîtier **`-RD`** et non `-FD` : sa broche 1 est de l'autre
+côté (+2,55 au lieu de −2,67). Le condensateur aurait été monté **à l'envers**.
+Le suffixe de boîtier LCSC encode la polarité — toujours comparer les
+coordonnées de pastilles avant de déclarer un remplacement compatible.
+
+Le rail VBUS passe de ~984 µF à ~144 µF nominal. **À assumer par écrit : on reste
+à ~13× la limite USB 2.0 §7.2.4.1.** La conformité est hors d'atteinte sur cette
+topologie — seul un limiteur unique en amont de U4 **et** U5 **et** J4 la
+donnerait. Le gain réel est sur le pic d'enfichage : de 14-36 A pendant ~300 µs à
+~2,4 A pendant ~1 ms.
+
+**C27 = 1 µF 0603** (`C15849`, déjà au BOM) contre la broche 6 (OUT) de U5. Il
+**manquait** : le datasheet AP22652 exige 0,1 à 4,7 µF céramique au plus près de
+OUT, et la céramique la plus proche était C26 à **38,8 mm mesurés**.
+
+**C28 à C31 = 4 × 22 µF 0805** (`C45783`) répartis le long du rail `+5V_LED`.
+Ceci **remplace** la spécification « 100 µF polymère 7343 », impossible pour deux
+raisons mesurées : aucun emplacement 7343 libre sur la carte routée (zéro
+position), et **il n'existe pas de 100 µF polymère en 7343** — les seules options
+dans ce boîtier sont des tantales dont l'ESR de l'ordre de l'ohm ferait 2 V de
+chute à 2,1 A. Quatre MLCC donnent quelques milliohms, ~55 µF réels après
+derating, et **aucune ligne d'achat en plus**.
+
+**État vérifié après pose :** 244 pastilles, netlist PCB ↔ schéma **identiques**,
+885 segments, 98 vias, **0 liaison non connectée, 0 défaut électrique**.
+L'augmentation du DRC (104 → 179) est **entièrement de la sérigraphie** :
+les cinq nouvelles empreintes portent leur texte dans une zone dense.
+
+⚠ Trois pièges de placement automatique rencontrés et corrigés — ils valent pour
+toute pose calculée :
+1. **minimiser la distance au rail place le composant DESSUS** : sa pastille GND
+   se retrouve sous la piste `+5V_LED` ;
+2. **un solveur qui place un composant à la fois ne voit pas le cuivre qu'il
+   vient d'ajouter** — le suivant tombe sur la via du précédent ;
+3. **approximer une pastille rectangulaire par son plus grand demi-côté
+   sous-estime les coins de 0,27 mm** : prendre le rayon circonscrit.
+
+## Nettoyage des empreintes — 2026-08-10
+
+**179 → 50 violations DRC**, et un vrai défaut trouvé au passage.
+
+⚠ **Le défaut réel : les cinq condensateurs ajoutés portaient un `path` inventé**
+au lieu de l'UUID de leur symbole. Le champ `(path ...)` d'une empreinte est le
+lien vers son symbole au schéma. Avec un mauvais UUID, un « Mettre à jour le PCB
+depuis le schéma » ne les reconnaît pas : il les recrée ailleurs et **perd leur
+placement**. Corrigé, les 5 liens pointent maintenant sur leur symbole.
+
+**H1/H2** : l'empreinte s'appelle **`MountingHole_3.2mm_M3`** dans KiCad 10 — le
+nom sans suffixe n'existe plus. Référence corrigée et bibliothèque
+`MountingHole` ajoutée à la table du projet. `lib_footprint_issues` 2 → **0**.
+
+**Sérigraphie, 159 → 24.** Cause racine : **toutes** les empreintes de ce projet
+portent leur désignateur à **4 mm** du composant, héritage de la conversion
+easyeda2kicad. Sur une carte de 25 mm de haut, ça le projette systématiquement
+sur le voisin. Traitement en trois temps :
+
+| | |
+|---|---|
+| 46 désignateurs de passifs (C, R, L) | F.SilkS → **F.Fab** — présents dans les données, pas imprimés |
+| 100 primitives de contour sur 11 empreintes serrées | retirées : sous un 0805 posé à 0,35 mm du voisin, le contour est invisible |
+| J1 et J2 | désignateur ramené **dans** leur propre contour |
+| H1 H2 S1 S5 U2 U5 | désignateur en F.Fab, trop petits pour le porter |
+
+`silk_overlap` **103 → 0**, `silk_over_copper` **29 → 0**.
+
+⚠ **Aucune information de polarité n'a été perdue** : les seules empreintes
+polarisées touchées sont C1, qui est **non monté**. C2 conserve son contour.
+
+### Ce qui reste, et pourquoi c'est normal
+
+| | |
+|---|---|
+| **24** `silk_edge_clearance` | contours de J1, J4, S3, SW1 et de l'antenne de U1 qui **débordent volontairement** du bord. Voulu, pas un défaut. |
+| **6 + 6** `annular_width` / `padstack` | pastilles **mécaniques sans net** des USB-C et de l'interrupteur. Préexistantes, arbitrées. |
+| **14** `lib_footprint_mismatch` | **conséquence assumée du nettoyage** : ces empreintes diffèrent désormais de la bibliothèque, exprès. |
+
+☠️ **NE PAS lancer « Mettre à jour les empreintes depuis la bibliothèque ».**
+Cela restaurerait la sérigraphie d'origine et **annulerait tout le nettoyage**.
+Les 14 avertissements de non-correspondance sont le prix à payer, et ils disent
+la vérité. Si le rapport doit être vierge, régler la sévérité de
+`lib_footprint_mismatch` sur « ignorer » dans les règles du projet — pas en
+réalignant les empreintes.
+
+**Vérifié après nettoyage : 244 pastilles, netlist PCB ↔ schéma identiques,
+0 liaison non connectée, 0 défaut électrique.**
+
+## Revue de mise en fabrication — NO-GO en l'état, 2026-08-10
+
+### Le défaut qui aurait coûté la série
+
+**Les modifications d'alimentation n'avaient jamais été propagées au PCB.** Le
+schéma portait bien C1 en `dnp` et C2 en `VZH101M1ETR-0607L / C473422`, mais le
+`.kicad_pcb` gardait C1 **monté** et C2 en `VZT471M1ATR-0607 / C384654`. Les
+fichiers de production auraient donc commandé et posé **940 µF** — exactement ce
+que la reprise visait à supprimer.
+
+⚠ **Et la vérification-phare du dossier ne pouvait pas l'attraper.** « Netlist
+PCB ↔ schéma identiques sur 244 pastilles » était vrai : le remplaçant avait été
+choisi **exprès** pour avoir la même empreinte et les mêmes pastilles. Une
+comparaison de netlist lit les connexions, jamais les champs `Value`, `LCSC Part`
+ni `dnp`. **Après toute modification de schéma, contrôler les champs du PCB
+séparément.**
+
+Corrigé le 2026-08-10 : C1 → `(attr smd exclude_from_pos_files exclude_from_bom
+dnp)`, C2 → `VZH101M1ETR-0607L / C473422`, U2 → champ `LCSC Part = C7519` qui
+était **totalement absent** (colonne LCSC vide au BOM exporté), H1/H2 exclus du BOM.
+
+### Défaut électrique réel : U6 valide en permanence, LED_DATA flottant
+
+Mesuré : `/LED_DATA` n'a que **deux nœuds** (U1.9 = IO16 et U6.2), donc **aucun
+tirage**, et `#OE` de U6 est câblé à la masse. U6 est alimenté en +5 V dès que
+l'USB est branché, **indépendamment de SW1**.
+
+Cas destructeur — SW1 sur arrêt, USB branché, c'est-à-dire l'état normal la nuit :
+l'ESP est en reset, IO16 en haute impédance, l'entrée du tampon flotte, sa sortie
+part au hasard et pousse 5 V à travers R3 dans la DIN d'une guirlande **non
+alimentée**. Environ **13 mA en permanence** dans sa diode de protection.
+
+⚠ Recâbler `#OE` sur `EN_LED` **ne suffit pas** : dans la fenêtre de démarrage,
+`EN_LED` est bas, le tampon est validé, et l'entrée flotte quand même. Seul un
+**tirage bas sur `/LED_DATA`** couvre les deux cas.
+
+**Correctif retenu : strap sur les prototypes, R16 en rev. B.** Un placement de
+0603 satisfaisant toutes les contraintes de cuivre a été cherché dans toute la
+colonne X 210..219,3 / Y −97..−84 : **aucun emplacement ne passe**, la zone est
+trop dense. Rerouter ce coin pour une résistance n'en vaut pas le prix.
+La géométrie rend le strap trivial : **U6 pad 2 (`/LED_DATA`) et pad 3 (`GND`)
+sont adjacents, à 0,65 mm**. Une 0402 de 10 kΩ posée à cheval sur ces deux
+pastilles EST le tirage bas. Deux minutes par carte.
+
+### ⚠ Nettoyage de sérigraphie PERDU — cause identifiée
+
+Le nettoyage du 2026-08-10 (179 → 50 violations) a été **écrasé** : KiCad était
+resté ouvert, et un enregistrement ultérieur a réécrit le fichier depuis sa copie
+en mémoire, antérieure. Signe caractéristique : le fichier est passé de **588 Ko
+à 1 085 Ko** — KiCad l'a re-sérialisé à sa façon. Les corrections de champs
+postérieures, elles, ont survécu.
+
+**Règle : tant que les verrous `~<projet>.kicad_*.lck` existent, toute écriture de
+fichier est en sursis.** Le nettoyage est à refaire, KiCad fermé.
+
+### État vérifié à cet instant
+
+244 pastilles, netlist PCB ↔ schéma **identiques**, **0 défaut électrique**,
+**0 liaison non connectée**. 182 violations DRC dont **159 de sérigraphie**
+(le nettoyage étant à refaire).
+
+## D2, le pixel de statut — écart assumé, 2026-08-10
+
+**Le problème.** D2 (WS2812B-2020) est alimenté en **3,3 V** alors que la fiche
+constructeur et la page JLCPCB donnent **5 V nominal, plage 3,5–5,3 V**. On est
+0,2 V sous le minimum. La justification au dossier ne portait que sur le **niveau
+logique** de la donnée, jamais sur la tension d'**alimentation**.
+
+**Ce qui a été tenté, et pourquoi ça a échoué.** Alimenter D2 depuis +5V à travers
+une diode 1N4148WS (`C2128`, Basic) donnerait VDD ≈ 4,3 V — dans la plage — et
+abaisserait VIH à 3,0 V, satisfait par les 3,3 V d'IO48. Le schéma a été câblé,
+la diode et un 100 nF posés. **Tout a été défait** : un routeur A\* sur grille de
+0,1 mm a établi qu'**aucun chemin n'existe**. La pastille 4 de D2 est dans une
+poche fermée, et le couloir entre la zone +5V et le bord bas est saturé sur toute
+sa largeur — rail 3,3 V, `MICBIAS`, `AGC_BIAS`, `MICIN`, les trois anti-rebond des
+poussoirs et la donnée LED le traversent tous. **Déplacer D2 ne change rien** :
+178 positions libres ont été testées près du bord bas, il faut franchir la même
+bande dans tous les cas.
+
+**Décision : on garde 3,3 V sur cette série.** Contorsionner une carte qui
+fonctionne pour un témoin de statut n'est pas un arbitrage raisonnable.
+
+**Ce qu'il faut savoir à la réception :**
+
+| | |
+|---|---|
+| Le test | D2 doit s'allumer aux bons moments et aux bonnes couleurs — orange au flash, cyan en diagnostic, vert au lien |
+| Si un exemplaire refuse | un fil de quelques millimètres entre **+5V** et sa **broche 4**, avec une diode en l'air. Dix minutes, et seulement sur les cartes concernées |
+| Rev. B | la vraie correction n'est **pas** la diode : c'est de placer D2 **contre la zone +5V dès le départ**, avant que le routage ne remplisse le couloir |
+
+⚠ **La leçon de fond** : le problème vient de **l'ordre des opérations**, pas du
+composant. Un composant qui a besoin d'un rail particulier doit être placé
+**avant** le routage, pas après.
+
+⚠ **Stock** : `C965555` a été signalé indisponible. N'importe quel WS2812B-2020 de
+même empreinte le remplace — mais **vérifier son brochage** : le
+XL-2020RGBC-2812B (`C5349955`), candidat évident, est en empreinte `-BR` au lieu
+de `-TL`, brochage inversé, et mettrait `+3V3` sur la sortie de données.

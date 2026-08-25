@@ -182,15 +182,15 @@
   <circle cx="1070" cy="115" r="3" fill="#c62828"/>
   <polyline points="1070,115 1070,170 1100,170" fill="none" stroke="#c62828" stroke-width="2.5"/>
   <rect x="1100" y="135" width="150" height="100" fill="#eceff1" stroke="#37474f" stroke-width="1.5"/>
-  <text x="1175" y="157" font-size="12" font-weight="bold" text-anchor="middle" fill="#111">U5 — AP2552</text>
-  <text x="1175" y="174" font-size="10" text-anchor="middle" fill="#111">limiteur — fenêtre 2,30–2,60 A</text>
+  <text x="1175" y="157" font-size="12" font-weight="bold" text-anchor="middle" fill="#111">U5 — AP22652</text>
+  <text x="1175" y="174" font-size="10" text-anchor="middle" fill="#111">limiteur — fenêtre 2,17–2,66 A</text>
   <text x="1175" y="190" font-size="10" text-anchor="middle" fill="#111">coupe SOUS les 3 A du chargeur</text>
   <text x="1175" y="206" font-size="10" text-anchor="middle" fill="#b71c1c" font-weight="bold">EN actif BAS → masse !</text>
-  <text x="1175" y="222" font-size="10" text-anchor="middle" fill="#2e7d32">AP2552W6-7 · C441824 ✓</text>
+  <text x="1175" y="222" font-size="10" text-anchor="middle" fill="#2e7d32">AP22652W6-7 · C2158038 ✓</text>
   <line x1="1250" y1="170" x2="1290" y2="170" stroke="#c62828" stroke-width="2.5"/>
   <line x1="1150" y1="235" x2="1150" y2="255" stroke="#212121" stroke-width="1.5"/>
   <rect x="1142" y="255" width="16" height="30" fill="#fff" stroke="#37474f"/>
-  <text x="1165" y="273" font-size="9" fill="#111">R4 10 k 1 % → typ 2,45 A</text>
+  <text x="1165" y="273" font-size="9" fill="#111">R4 11 k 1 % → typ 2,42 A</text>
   <use href="#gnd" x="1150" y="291"/>
   <line x1="1250" y1="205" x2="1274" y2="205" stroke="#888" stroke-width="1.5" stroke-dasharray="5 4"/>
   <text x="1252" y="199" font-size="9" fill="#666">FLAG (TP)</text>
