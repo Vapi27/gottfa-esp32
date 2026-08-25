@@ -171,6 +171,25 @@ static uint8_t       s_statPin    = ARENA_STATUS_PIN;
 static String        s_reset      = "?";
 static uint32_t      s_boots      = 0;
 
+// Un brownout ne laisse aucune trace apres le redemarrage suivant : la cause du
+// reset ne parle que du DERNIER. Ce compteur-la, lui, tient le total, et c est
+// lui qui distingue "une fois, en debranchant" de "a chaque rafale WiFi".
+static uint32_t      s_brownouts  = 0;
+static uint8_t       s_txq        = ARENA_WIFI_TXPWR_QDBM;   // quarts de dBm
+static bool          s_txDerated  = false;   // baissee d office apres un brownout
+
+// A appeler seulement quand la radio tourne (esp_wifi_start est passe) : sinon
+// l IDF repond ESP_ERR_WIFI_NOT_STARTED et la valeur est perdue en silence.
+static void applyTxPower() {
+  const esp_err_t e = esp_wifi_set_max_tx_power((int8_t)s_txq);
+  if (e != ESP_OK) {
+    Serial.printf("[net] puissance TX refusee (%d)\n", (int)e);
+    return;
+  }
+  Serial.printf("[net] puissance TX = %.2f dBm%s\n", s_txq / 4.0f,
+                s_txDerated ? "  (baissee apres un brownout)" : "");
+}
+
 static const char* resetReasonName(esp_reset_reason_t r) {
   switch (r) {
     case ESP_RST_POWERON:   return "mise sous tension";
@@ -420,6 +439,9 @@ static String stateJson() {
   j += ",\"ip\":\""   + s_ip + "\",\"net\":\"" + s_mode + "\"";
   j += ",\"staFail\":\"" + s_staReason + "\"";
   j += ",\"reset\":\"" + s_reset + "\",\"boots\":" + String(s_boots);
+  j += ",\"brownouts\":" + String(s_brownouts);
+  j += ",\"txpwr\":" + String(s_txq / 4.0f, 2);
+  j += ",\"txDerated\":" + String(s_txDerated ? 1 : 0);
   j += ",\"up\":"     + String(millis() / 1000);
   j += ",\"heap\":"   + String(ESP.getFreeHeap());
   j += "}";
@@ -481,6 +503,18 @@ static void startServer() {
     if (r->hasParam("statuspin")) {
       const uint8_t p = (uint8_t)r->getParam("statuspin")->value().toInt();
       if (p <= 48) { s_statPin = p; s_prefs.putUChar("statpin", p); }
+    }
+    // /api/set?txpwr=13   puissance d emission en dBm (2..20). Baisser echange
+    // de la portee contre des rafales de courant plus petites : c est le seul
+    // levier logiciel sur un brownout, et il ne repare pas une alimentation.
+    if (r->hasParam("txpwr")) {
+      float d = r->getParam("txpwr")->value().toFloat();
+      if (d < 2)  d = 2;
+      if (d > 20) d = 20;
+      s_txq = (uint8_t)lroundf(d * 4.0f);
+      s_txDerated = false;              // choix explicite du proprietaire
+      s_prefs.putUChar("txq", s_txq);
+      applyTxPower();
     }
     r->send(200, "application/json", stateJson());
   });
@@ -890,6 +924,38 @@ static void startServer() {
     t += "  Le compteur a monte  -> la carte a redemarre (la cause est ci-dessus).\n";
     t += "  Le compteur inchange -> elle n a PAS redemarre, c est autre chose.\n\n";
 
+    // Un ecran qui s eteint et une carte qui redemarre se ressemblent trop pour
+    // qu on devine. Quand le compteur ci-dessous n est pas a zero, la question
+    // n est plus logicielle : le 3,3 V est descendu sous le seuil du detecteur,
+    // et aucune correction de firmware ne remonte une tension.
+    t += "-- L alimentation --\n";
+    t += "brownouts    : " + String(s_brownouts) + "\n";
+    t += "puissance TX : " + String(s_txq / 4.0f, 2) + " dBm";
+    t += s_txDerated ? "  (baissee d office apres le brownout)\n" : "\n";
+    if (s_brownouts) {
+      t += "  La carte s est deja ETEINTE faute de tension, puis rerentree.\n";
+      t += "  De l exterieur : ecran noir, reglages qui reviennent au depart.\n";
+      t += "  Ce n est ni l ecran, ni les boutons, ni la veille.\n";
+      t += "  Dans l ordre, du plus frequent au plus rare :\n";
+      t += "   1. Le cable USB. Un cable de charge fin chute d un demi-volt sous\n";
+      t += "      charge. Un cable court et epais, marque DATA, regle le cas le\n";
+      t += "      plus courant a lui seul.\n";
+      t += "   2. Le port. Un hub non alimente ou un port clavier ne tient pas\n";
+      t += "      les pointes. Essayer un port arriere du PC, ou un chargeur\n";
+      t += "      mural de 2 A et plus.\n";
+      t += "   3. Les rafales WiFi. ~350 mA pendant quelques centaines de us.\n";
+      t += "      Pour tester sans rien debrancher : /api/set?txpwr=8\n";
+      t += "      Plus de brownouts a 8 dBm mais toujours a 20 -> c est la marge\n";
+      t += "      d alimentation, pas le firmware.\n";
+      t += "   4. Un condensateur de 470 a 1000 uF aux bornes du 5 V absorbe les\n";
+      t += "      pointes que le cable ne sait pas fournir.\n";
+      t += "  Si les LED sont cablees, les alimenter par leur propre 5 V, jamais\n";
+      t += "  a travers l USB de la carte.\n\n";
+    } else {
+      t += "  Aucun effondrement d alimentation enregistre.\n";
+      t += "  Un ecran noir ou des reglages perdus viennent d ailleurs.\n\n";
+    }
+
     t += "-- Les LED --\n";
     t += "broche data  : GPIO" + String(arenaled::pin()) +
          "   (essayer une autre sans reflasher : /api/set?pin=N)\n";
@@ -1079,8 +1145,27 @@ void begin() {
   s_reset = resetReasonName(esp_reset_reason());
   s_boots = s_prefs.getUInt("boots", 0) + 1;
   s_prefs.putUInt("boots", s_boots);
+  s_brownouts = s_prefs.getUInt("brown", 0);
+  s_txq = s_prefs.getUChar("txq", ARENA_WIFI_TXPWR_QDBM);
+  if (esp_reset_reason() == ESP_RST_BROWNOUT) {
+    s_brownouts++;
+    s_prefs.putUInt("brown", s_brownouts);
+    // Revenir a pleine puissance dans une alimentation qui vient de ceder, c est
+    // rejouer la meme scene. On baisse pour CETTE session seulement : un blip
+    // isole ne doit pas amputer la portee du mur pour toujours, et un reflash
+    // ou une coupure propre rend la valeur enregistree.
+    if (s_txq > ARENA_WIFI_TXPWR_SAFE_QDBM) {
+      s_txq = ARENA_WIFI_TXPWR_SAFE_QDBM;
+      s_txDerated = true;
+    }
+  }
   Serial.printf("[dev] demarrage #%lu - cause du dernier reset : %s\n",
                 (unsigned long)s_boots, s_reset.c_str());
+  if (s_brownouts) {
+    Serial.printf("[dev] %lu brownout(s) au total : le 3,3 V s effondre. Ce n est\n"
+                  "      PAS un bug logiciel - cable USB, port ou regulateur.\n",
+                  (unsigned long)s_brownouts);
+  }
   {
     uint8_t m[6] = {0};
     esp_read_mac(m, ESP_MAC_WIFI_STA);
@@ -1144,6 +1229,7 @@ void begin() {
     s_ip = WiFi.softAPIP().toString();
     Serial.printf("[net] SoftAP '%s' ip=%s\n", s_name.c_str(), s_ip.c_str());
   }
+  applyTxPower();
   // Nom d'hote propre a la carte : sans ca, quatre murs se disputent arena.local
   // et mDNS en renomme trois en arena-2, arena-3... au petit bonheur.
   {
