@@ -5,6 +5,7 @@
 #include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
 #include <Preferences.h>
+#include <Adafruit_NeoPixel.h>   // le pixel de statut, meme bibliotheque que la chaine
 #include <esp_ota_ops.h>   // validation de l'image apres une OTA
 
 // esp_read_mac : dans esp_mac.h depuis IDF 5, dans esp_system.h avant.
@@ -170,17 +171,23 @@ static String        s_scanErr    = "";
 // dernier reset dit si c'etait une coupure, un plantage ou un chien de garde.
 static uint8_t       s_statPin    = ARENA_STATUS_PIN;
 
-// Le pixel de statut et la chaine du mur se PARTAGENT le peripherique RMT, et
-// ils ne cohabitent pas. neopixelWrite() du coeur Arduino re-reclame un canal a
-// chaque appel ; a 25 Hz il finit par rendre caduque la poignee que
-// Adafruit_NeoPixel garde en cache, et la chaine ne repart jamais : le port
-// serie se remplit de "rmt_write_items : RMT DRIVER ERR" a 25 Hz - la frequence
-// de ce temoin, precisement - et pas un pixel du mur ne s'allume. Vu au banc.
+// Le pixel de statut et la chaine du mur se partagent le peripherique RMT.
+// neopixelWrite() - l'aide du coeur Arduino - re-reclame un canal a chaque
+// appel ; a 25 Hz il rendait caduque la poignee que Adafruit_NeoPixel garde en
+// cache pour la chaine, qui ne repartait jamais : "rmt_write_items : RMT DRIVER
+// ERR" a 25 Hz, la cadence de ce temoin et d'aucun autre code d'ici.
 //
-// Entre un mur qui marche et une LED de courtoisie sur la carte, le choix ne se
-// discute pas : le temoin est ETEINT par defaut. Qui le veut l'allume avec
-// /api/set?statusled=1, en sachant ce qu'il risque.
-static bool          s_statOn     = false;
+// La premiere reaction a ete de l'eteindre par defaut. C'etait resoudre le
+// conflit en supprimant l'un des deux, et sur une carte sans chaine cablee ce
+// temoin est la SEULE lumiere : l'eteindre, c'est rendre le mur aveugle pour
+// proteger des LED qui ne sont pas la.
+//
+// Il passe donc par la meme bibliotheque que la chaine, comme le fait deja la
+// deuxieme chaine du mur. Une instance, un canal RMT tenu du debut a la fin,
+// plus de reclamation a chaque trame - et les deux vivent ensemble.
+static Adafruit_NeoPixel s_stat(1, ARENA_STATUS_PIN, NEO_GRB + NEO_KHZ800);
+static bool          s_statOn     = true;
+static bool          s_statBegun  = false;
 static String        s_reset      = "?";
 static uint32_t      s_boots      = 0;
 
@@ -552,7 +559,11 @@ static void startServer() {
     if (r->hasParam("pin"))      arenaled::setPin((uint8_t)r->getParam("pin")->value().toInt());
     if (r->hasParam("statuspin")) {
       const uint8_t p = (uint8_t)r->getParam("statuspin")->value().toInt();
-      if (p <= 48) { s_statPin = p; s_prefs.putUChar("statpin", p); }
+      if (p <= 48) {
+        s_statPin = p;
+        s_prefs.putUChar("statpin", p);
+        s_statBegun = false;            // re-accrocher le canal sur la nouvelle broche
+      }
     }
     // /api/set?btnup=7&btndown=15&btnok=17
     // Les trois ensemble : un remappage partiel laisserait deux roles sur la
@@ -562,6 +573,8 @@ static void startServer() {
                             (uint8_t)r->getParam("btndown")->value().toInt(),
                             (uint8_t)r->getParam("btnok")->value().toInt());
     }
+    // /api/set?btnrot=1 : faire tourner les roles d'un cran, a l'aveugle.
+    if (r->hasParam("btnrot")) arenaoled::rotateButtons();
     if (r->hasParam("statusled")) {
       s_statOn = r->getParam("statusled")->value().toInt() != 0;
       s_prefs.putUChar("staten", s_statOn ? 1 : 0);
@@ -1071,6 +1084,8 @@ static void startServer() {
       t += "  Un poussoir qui repond mais dans le mauvais sens n'est pas un bug :\n";
       t += "  la netlist nomme des nets, pas des positions. Remapper sans\n";
       t += "  reflasher : /api/set?btnup=<gauche>&btndown=<droite>&btnok=<ok>\n";
+      t += "  Sans lire un seul numero de broche : /api/set?btnrot=1 decale les\n";
+      t += "  trois roles d'un cran. Au pire deux fois, et c'est dans le bon sens.\n";
       if (bu || bo || bd)
         t += "  !! Une entree est BASSE sans que tu touches rien. Cette broche n est\n"
              "     pas cablee a ce poussoir, ou il est colle. Un OK bloque bas part en\n"
@@ -1226,7 +1241,7 @@ void begin() {
   // --- WiFi: NVS credentials (set from the UI) override the compile-time ones ---
   s_prefs.begin("arenanet", false);
   s_statPin = s_prefs.getUChar("statpin", ARENA_STATUS_PIN);
-  s_statOn  = s_prefs.getUChar("staten", 0) != 0;
+  s_statOn  = s_prefs.getUChar("staten", 1) != 0;
   s_reset = resetReasonName(esp_reset_reason());
   s_boots = s_prefs.getUInt("boots", 0) + 1;
   s_prefs.putUInt("boots", s_boots);
@@ -1352,7 +1367,7 @@ void begin() {
 //   vert   = associe a un reseau         rouge = defaut signale par le limiteur
 static void statusTick() {
 #if ARENA_STATUS_LED_ENABLE
-  if (!s_statOn) return;                       // voir s_statOn : il vole le RMT
+  if (!s_statOn) return;
   static uint32_t last = 0;
   const uint32_t now = millis();
   if (now - last < 40) return;                 // 25 Hz suffit pour une respiration
@@ -1366,7 +1381,15 @@ static void statusTick() {
   // Respiration : ~2 s par cycle, jamais eteint completement - un temoin qui
   // s'eteint par moments se lit comme un temoin en panne.
   const float k = 0.25f + 0.75f * (0.5f + 0.5f * sinf((float)now / 320.0f));
-  neopixelWrite(s_statPin, (uint8_t)(r * k), (uint8_t)(g * k), (uint8_t)(b * k));
+  // Demarrage paresseux : la broche est reglable a chaud, donc on n'accroche le
+  // canal RMT qu'une fois, et seulement quand le temoin sert vraiment.
+  if (!s_statBegun) {
+    s_stat.setPin(s_statPin);
+    s_stat.begin();
+    s_statBegun = true;
+  }
+  s_stat.setPixelColor(0, s_stat.Color((uint8_t)(r * k), (uint8_t)(g * k), (uint8_t)(b * k)));
+  s_stat.show();
 #endif
 }
 

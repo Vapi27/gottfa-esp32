@@ -60,6 +60,14 @@ void setButtons(uint8_t up, uint8_t down, uint8_t ok) {
                 up, down, ok);
 }
 
+// Faire tourner les trois roles d'un cran. Trois poussoirs mal ranges, c'est au
+// pire deux clics - et surtout, cela ne demande de connaitre AUCUN numero de
+// broche. Demander a quelqu'un de lire une netlist pour que sa fleche droite
+// aille a droite, c'est lui demander de faire notre travail.
+void rotateButtons() {
+  setButtons(s_pinOk, s_pinUp, s_pinDown);
+}
+
 void buttons(uint8_t& up, uint8_t& down, uint8_t& ok) {
   up = s_pinUp; down = s_pinDown; ok = s_pinOk;
 }

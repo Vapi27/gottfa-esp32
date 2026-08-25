@@ -32,6 +32,7 @@ void poke();
 // montage, regle a chaud et garde en NVS, pas une constante de compilation qui
 // obligerait a reflasher pour que la fleche droite aille a droite.
 void setButtons(uint8_t up, uint8_t down, uint8_t ok);
+void rotateButtons();   // decale les trois roles d'un cran, sans numeros de broche
 void buttons(uint8_t& up, uint8_t& down, uint8_t& ok);
 
 // Affiche le code d'appairage en plein ecran, sans passer par l'encodeur.
