@@ -1154,10 +1154,11 @@ void begin() {
   // seule LED pour essayer voit donc une LED qui ne s'allume jamais, et rien
   // nulle part ne le lui dit. Le dire fort, au demarrage.
   if (OFFS)
-    Serial.printf("[led] REPETEUR ACTIF (LED_REPEATER_PIXEL=1) : le 1er pixel physique "
-                  "reste ETEINT expres. Il faut donc %u+1 = %u LED cablees, et la "
-                  "premiere visible est la DEUXIEME de la chaine. Sur un banc a une "
-                  "seule LED, mettre LED_REPEATER_PIXEL a 0.\n",
+    Serial.printf("[led] REPETEUR ACTIF : le 1er pixel physique reste ETEINT expres. "
+                  "Il faut donc %u+1 = %u LED cablees, et la premiere visible est la "
+                  "DEUXIEME de la chaine. Une carte controleur du commerce n'a PAS de "
+                  "repeteur : dans ce cas -> /api/set?repeater=0 (garde en NVS, aucun "
+                  "reflashage).\n",
                   s_count, s_count + 1);
   Serial.printf("[led] %u px on GPIO%d, order=%s mode=%s bright=%u budget=%u mA\n",
                 s_count, s_pin, s_order, modeName(s_mode), s_bright, s_budget);
