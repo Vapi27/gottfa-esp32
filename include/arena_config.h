@@ -173,9 +173,17 @@
 // en pull-up interne s'y opposerait a une sortie RMT.
 // 15 et 17 sont libres sur le WROOM-1 : hors flash (26-32), hors PSRAM octale
 // (33-37), hors USB (19/20) et hors broches de strap.
-#define PIN_ARENA_BTN_UP      15
-#define PIN_ARENA_BTN_DOWN    17
-#define PIN_ARENA_BTN_OK       PIN_ARENA_ENC_SW
+// Corrige au banc : les trois poussoirs etaient decales d'un cran. Appuyer a
+// GAUCHE declenchait OK, le bouton du MILIEU declenchait droite, et celui de
+// DROITE declenchait gauche - autrement dit la broche nommee OK est cablee au
+// poussoir de gauche, celle nommee DOWN au poussoir du milieu, celle nommee UP
+// a celui de droite. Le cablage est fige : ce sont les NOMS qui tournent.
+//   gauche  = GPIO7  (ex-OK)     -> haut / precedent
+//   milieu  = GPIO17 (ex-DOWN)   -> OK
+//   droite  = GPIO15 (ex-UP)     -> bas / suivant
+#define PIN_ARENA_BTN_UP       PIN_ARENA_ENC_SW   // GPIO7, poussoir GAUCHE
+#define PIN_ARENA_BTN_OK      17                  // poussoir MILIEU
+#define PIN_ARENA_BTN_DOWN    15                  // poussoir DROITE
 
 // Retour de defaut du limiteur de sortie U5 (AP2552, broche 4 ~FAULT).
 // Collecteur ouvert, actif BAS. Tire au haut par le tirage INTERNE de l'ESP :
