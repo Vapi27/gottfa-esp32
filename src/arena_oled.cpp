@@ -471,7 +471,21 @@ void showQr() {
 // Le geste est alle au bout : on execute, on l'ecrit a l'ecran, et on redemarre
 // quand il le faut. Le message reste une seconde - un mur qui repart sans un mot
 // laisse croire que rien ne s'est passe.
+// Un redemarrage VOLONTAIRE et un PLANTAGE se ressemblent parfaitement de
+// l'exterieur : ecran noir, puis le menu revient a 1/8 parce que l'etat est
+// perdu dans les deux cas. La seule facon de les separer est que le chemin
+// volontaire le dise avant de partir. Sans cette ligne, on cherche un bug de
+// firmware la ou quelqu'un a simplement valide une entree de menu.
+static const char* resetActionName(uint8_t n) {
+  if (n == N_R_REBOOT) return "REDEMARRAGE demande par le menu";
+  if (n == N_R_LOOK)   return "remise a zero de l APPARENCE (menu)";
+  if (n == N_R_HOMES)  return "oubli des maisons Matter (menu)";
+  return "remise a zero (menu)";
+}
+
 static void runReset(uint8_t n) {
+  Serial.printf("[oled] %s\n", resetActionName(n));
+  Serial.flush();
   s_d.clearDisplay();
   s_d.setTextColor(SSD1306_WHITE);
   s_d.setTextSize(2);
