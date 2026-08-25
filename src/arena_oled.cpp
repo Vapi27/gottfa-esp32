@@ -460,8 +460,25 @@ void btnRaw(bool& up, bool& okd, bool& down,
   nUp = s_nUp; nOk = s_nOk; nDown = s_nDown;
 }
 
+// poke() est appele depuis DEUX taches : la boucle Arduino (boutons) et la
+// tache du serveur web (/api/wake, et chaque reglage recu). Or il parlait en
+// I2C - DISPLAYON puis draw() - donc deux taches pouvaient piloter le meme bus
+// en meme temps que le draw() periodique de tick(). Un bus I2C partage sans
+// verrou rend un ecran qui se brouille ou se fige, pas une erreur.
+//
+// Desormais poke() ne fait que poser deux mots en memoire ; tout l'I2C est
+// execute par tick(), c est-a-dire toujours dans la meme tache.
+static volatile bool s_wakeReq = false;
+
 void poke() {
-  s_lastIn = millis();
+  s_lastIn  = millis();
+  s_wakeReq = true;
+}
+
+// A n'appeler que depuis tick() (tache de la boucle Arduino).
+static void serviceWake() {
+  if (!s_wakeReq) return;
+  s_wakeReq = false;
   if (s_awake || !s_found) return;
   s_awake = true;
   s_d.ssd1306_command(SSD1306_DISPLAYON);
@@ -692,6 +709,7 @@ static bool pollRepeat(Btn& b, uint32_t now) {
 
 void tick() {
   if (!s_found) return;
+  serviceWake();
   const uint32_t now = millis();
 
   // Pendant une confirmation, les boutons ne veulent plus dire la meme chose :
@@ -734,6 +752,7 @@ void tick() {
   if (d || upFire || downFire || ok) {
     const bool wasAsleep = !s_awake;
     poke();
+    serviceWake();                     // l'allumage doit se voir dans CE tick
     // Ecran eteint : le premier appui ne fait que rallumer. Sinon le menu se
     // deplace dans le noir et on decouvre un autre element en le rallumant -
     // ce qui se lit comme un bouton qui saute une ligne.
@@ -773,9 +792,20 @@ void tick() {
   // CHAQUE appui, et se rallumait au suivant pour s'eteindre aussitot. C'est le
   // "je clique et je perds l'ecran" du banc, et le log le montrait en boucle.
   // La difference signee rend un nombre NEGATIF dans ce cas, donc pas de veille.
-  if (ARENA_OLED_SLEEP_MS &&
-      (int32_t)(millis() - s_lastIn) > (int32_t)ARENA_OLED_SLEEP_MS)
-    sleepNow("delai d inactivite ecoule");
+  //
+  // Et la ligne porte ses propres chiffres. Dire "delai ecoule" sans dire de
+  // combien, c est demander de me croire sur parole - or cette veille a deja
+  // survecu a une correction qui devait la regler. Avec le calcul affiche, le
+  // log tranche tout seul : un delta de 30000 est un vrai delai, un delta de
+  // 15 est un bug, et on n a plus a le deviner.
+  const int32_t idle = (int32_t)(millis() - s_lastIn);
+  if (ARENA_OLED_SLEEP_MS && idle > (int32_t)ARENA_OLED_SLEEP_MS) {
+    char why[72];
+    snprintf(why, sizeof(why), "inactif %ld ms (seuil %lu, lastIn=%lu, now=%lu)",
+             (long)idle, (unsigned long)ARENA_OLED_SLEEP_MS,
+             (unsigned long)s_lastIn, (unsigned long)millis());
+    sleepNow(why);
+  }
 }
 
 }  // namespace arenaoled
