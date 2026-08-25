@@ -163,6 +163,27 @@ static String        s_scanJson   = "[]";
 // Pourquoi un balayage n'a rien rendu. Une liste vide est ambigue - refus du
 // pilote, ou vraiment aucun reseau - et les deux se soignent differemment.
 static String        s_scanErr    = "";
+
+// Un ecran noir et une carte qui redemarre se ressemblent de l'exterieur. La
+// difference se lit ici : le compteur monte a chaque demarrage, et la cause du
+// dernier reset dit si c'etait une coupure, un plantage ou un chien de garde.
+static String        s_reset      = "?";
+static uint32_t      s_boots      = 0;
+
+static const char* resetReasonName(esp_reset_reason_t r) {
+  switch (r) {
+    case ESP_RST_POWERON:   return "mise sous tension";
+    case ESP_RST_EXT:       return "reset externe (bouton)";
+    case ESP_RST_SW:        return "redemarrage logiciel";
+    case ESP_RST_PANIC:     return "PLANTAGE (panic)";
+    case ESP_RST_INT_WDT:   return "chien de garde d interruption";
+    case ESP_RST_TASK_WDT:  return "chien de garde de tache";
+    case ESP_RST_WDT:       return "chien de garde";
+    case ESP_RST_BROWNOUT:  return "BROWNOUT (alimentation)";
+    case ESP_RST_DEEPSLEEP: return "reveil de sommeil profond";
+    default:                return "inconnue";
+  }
+}
 static uint32_t      s_scanAt     = 0;
 
 // Envoi par morceaux depuis le navigateur (/api/fw).
@@ -397,6 +418,7 @@ static String stateJson() {
   }
   j += ",\"ip\":\""   + s_ip + "\",\"net\":\"" + s_mode + "\"";
   j += ",\"staFail\":\"" + s_staReason + "\"";
+  j += ",\"reset\":\"" + s_reset + "\",\"boots\":" + String(s_boots);
   j += ",\"up\":"     + String(millis() / 1000);
   j += ",\"heap\":"   + String(ESP.getFreeHeap());
   j += "}";
@@ -985,6 +1007,11 @@ static const char* staReasonName(uint8_t r) {
 void begin() {
   // --- WiFi: NVS credentials (set from the UI) override the compile-time ones ---
   s_prefs.begin("arenanet", false);
+  s_reset = resetReasonName(esp_reset_reason());
+  s_boots = s_prefs.getUInt("boots", 0) + 1;
+  s_prefs.putUInt("boots", s_boots);
+  Serial.printf("[dev] demarrage #%lu - cause du dernier reset : %s\n",
+                (unsigned long)s_boots, s_reset.c_str());
   {
     uint8_t m[6] = {0};
     esp_read_mac(m, ESP_MAC_WIFI_STA);
