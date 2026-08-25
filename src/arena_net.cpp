@@ -171,27 +171,29 @@ static String        s_scanErr    = "";
 // dernier reset dit si c'etait une coupure, un plantage ou un chien de garde.
 static uint8_t       s_statPin    = ARENA_STATUS_PIN;
 
-// Le pixel de statut et la chaine du mur se partagent le peripherique RMT.
-// neopixelWrite() - l'aide du coeur Arduino - re-reclame un canal a chaque
-// appel ; a 25 Hz il rendait caduque la poignee que Adafruit_NeoPixel garde en
-// cache pour la chaine, qui ne repartait jamais : "rmt_write_items : RMT DRIVER
-// ERR" a 25 Hz, la cadence de ce temoin et d'aucun autre code d'ici.
+// Le pixel de statut et la chaine du mur se partagent le peripherique RMT, et
+// le conflit vient de la CADENCE, pas de la bibliotheque.
 //
-// La premiere reaction a ete de l'eteindre par defaut. C'etait resoudre le
-// conflit en supprimant l'un des deux, et sur une carte sans chaine cablee ce
-// temoin est la SEULE lumiere : l'eteindre, c'est rendre le mur aveugle pour
-// proteger des LED qui ne sont pas la.
+// L'histoire, parce qu'elle a coute trois tours : neopixelWrite() re-reclame un
+// canal RMT a chaque appel, et a 25 Hz - la respiration de ce temoin - il
+// rendait la chaine muette ("RMT DRIVER ERR" a 25 Hz, exactement). J'ai d'abord
+// eteint le temoin, ce qui reglait le conflit en supprimant l'un des deux ; puis
+// je l'ai passe a Adafruit_NeoPixel, et il est sorti BLANC A FOND.
 //
-// Il passe donc par la meme bibliotheque que la chaine, comme le fait deja la
-// deuxieme chaine du mur. Une instance, un canal RMT tenu du debut a la fin,
-// plus de reclamation a chaque trame - et les deux vivent ensemble.
-static Adafruit_NeoPixel s_stat(1, ARENA_STATUS_PIN, NEO_GRB + NEO_KHZ800);
+// Les timings de la branche heritee d'Adafruit sont ceux du WS2812 (T1H 800 ns);
+// un SK6812 attend 600 ns et lit alors des uns partout - du blanc plein, a
+// pleine echelle, insensible a la luminosite qu'on lui demande. neopixelWrite()
+// rendait les bonnes couleurs sur CETTE carte : c'est un fait mesure, et il
+// repasse devant mon raisonnement.
+//
+// On revient donc a neopixelWrite(), et on retire ce qui obligeait au 25 Hz : la
+// respiration. Le temoin est fixe, et n'est reecrit que lorsque sa couleur
+// change - plus un rafraichissement lent de securite.
 static bool          s_statOn     = true;
 // Luminosite du temoin, 0..255. Elle etait ecrite en dur, et un temoin en dur
 // est un temoin qui eblouit quelqu'un : la meme LED sert de veilleuse a cote
 // d'un lit et de repere en plein jour. 60 par defaut - visible sans agresser.
 static uint8_t       s_statBright = 60;
-static bool          s_statBegun  = false;
 static String        s_reset      = "?";
 static uint32_t      s_boots      = 0;
 
@@ -582,7 +584,6 @@ static void startServer() {
       if (p <= 48) {
         s_statPin = p;
         s_prefs.putUChar("statpin", p);
-        s_statBegun = false;            // re-accrocher le canal sur la nouvelle broche
       }
     }
     // /api/set?btnup=7&btndown=15&btnok=17
@@ -1399,7 +1400,7 @@ static void statusTick() {
   if (!s_statOn) return;
   static uint32_t last = 0;
   const uint32_t now = millis();
-  if (now - last < 40) return;                 // 25 Hz suffit pour une respiration
+  if (now - last < 200) return;                // 5 Hz : on ne fait que comparer
   last = now;
 
   uint8_t r = 255, g = 128, b = 0;             // ambre par defaut, pleine echelle
@@ -1407,22 +1408,19 @@ static void statusTick() {
   else if (s_mode == "STA")      { r = 0;   g = 255; b = 0;   }
   else if (s_mode == "SoftAP")   { r = 0;   g = 70;  b = 255; }
 
-  // Respiration : ~2 s par cycle, jamais eteint completement - un temoin qui
-  // s'eteint par moments se lit comme un temoin en panne.
-  // La couleur porte l'etat, la luminosite est un reglage : on garde les teintes
-  // a pleine echelle et on met l'echelle A LA FIN, sinon baisser le temoin
-  // deraperait aussi sa couleur vers le canal le plus fort.
-  float k = 0.25f + 0.75f * (0.5f + 0.5f * sinf((float)now / 320.0f));
-  k *= s_statBright / 255.0f;
-  // Demarrage paresseux : la broche est reglable a chaud, donc on n'accroche le
-  // canal RMT qu'une fois, et seulement quand le temoin sert vraiment.
-  if (!s_statBegun) {
-    s_stat.setPin(s_statPin);
-    s_stat.begin();
-    s_statBegun = true;
-  }
-  s_stat.setPixelColor(0, s_stat.Color((uint8_t)(r * k), (uint8_t)(g * k), (uint8_t)(b * k)));
-  s_stat.show();
+  // La couleur porte l'etat, la luminosite est un reglage : les teintes restent
+  // a pleine echelle et l'echelle s'applique A LA FIN, sinon baisser le temoin
+  // le ferait deraper vers son canal le plus fort au lieu de l'assombrir.
+  const float k = s_statBright / 255.0f;
+  const uint8_t rr = (uint8_t)(r * k), gg = (uint8_t)(g * k), bb = (uint8_t)(b * k);
+
+  // Ecrire seulement quand ca change : quelques trames par minute au lieu de
+  // vingt-cinq par seconde, et le partage du RMT redevient sans consequence.
+  static uint8_t  lr = 1, lg = 1, lb = 1;
+  static uint32_t lastPush = 0;
+  if (rr == lr && gg == lg && bb == lb && now - lastPush < 5000) return;
+  lr = rr; lg = gg; lb = bb; lastPush = now;
+  neopixelWrite(s_statPin, rr, gg, bb);
 #endif
 }
 
