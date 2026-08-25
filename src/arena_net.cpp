@@ -153,6 +153,11 @@ static bool          s_pullFs = false;   // application ou systeme de fichiers
 // Balayage WiFi. Lance depuis la boucle principale, jamais depuis un handler :
 // WiFi.scanNetworks() bloque 2 a 5 s, et bloquer la tache AsyncTCP est
 // exactement ce qui tuait la carte pendant les mises a jour.
+// Pourquoi la derniere tentative d'association a echoue. Sans ca, un mot de
+// passe faux, un reseau absent et un reseau en 5 GHz donnent tous le meme
+// resultat visible : la carte repart en point d'acces, sans un mot.
+static String        s_staReason  = "";
+
 static volatile bool s_scanWanted = false;
 static String        s_scanJson   = "[]";
 static uint32_t      s_scanAt     = 0;
@@ -388,6 +393,7 @@ static String stateJson() {
     j += ",\"build\":\"" + String(sha) + "\"";
   }
   j += ",\"ip\":\""   + s_ip + "\",\"net\":\"" + s_mode + "\"";
+  j += ",\"staFail\":\"" + s_staReason + "\"";
   j += ",\"up\":"     + String(millis() / 1000);
   j += ",\"heap\":"   + String(ESP.getFreeHeap());
   j += "}";
@@ -840,7 +846,8 @@ static void startServer() {
     if (r->hasParam("results")) {
       wifi_ap_record_t apInfo = {};
       const bool apInfoOk = (esp_wifi_sta_get_ap_info(&apInfo) == ESP_OK);
-      String j = "{\"age\":" + String(s_scanAt ? (millis() - s_scanAt) / 1000 : 9999) +
+      String j = "{\"fail\":\"" + s_staReason + "\"" +
+                 ",\"age\":" + String(s_scanAt ? (millis() - s_scanAt) / 1000 : 9999) +
                  ",\"busy\":" + String(s_scanWanted ? "true" : "false") +
                  ",\"rssi\":" + String(apInfoOk ? (int)apInfo.rssi : 0) +
                  ",\"ssid\":\"" + String(apInfoOk ? (const char*)apInfo.ssid : "") + "\"" +
@@ -956,6 +963,21 @@ static void startServer() {
   s_server.begin();
 }
 
+// Codes de deconnexion de l'IDF, traduits. Les trois premiers couvrent
+// l'immense majorite des cas sur une installation domestique.
+static const char* staReasonName(uint8_t r) {
+  switch (r) {
+    case WIFI_REASON_NO_AP_FOUND:        return "reseau introuvable (SSID exact ? 2,4 GHz ?)";
+    case WIFI_REASON_AUTH_FAIL:          return "authentification refusee (mot de passe)";
+    case WIFI_REASON_HANDSHAKE_TIMEOUT:  return "handshake expire (mot de passe, ou signal trop faible)";
+    case WIFI_REASON_ASSOC_FAIL:         return "association refusee par le routeur";
+    case WIFI_REASON_AUTH_EXPIRE:        return "authentification expiree";
+    case WIFI_REASON_BEACON_TIMEOUT:     return "balise perdue (hors de portee)";
+    case WIFI_REASON_CONNECTION_FAIL:    return "connexion refusee";
+    default:                             return "echec";
+  }
+}
+
 void begin() {
   // --- WiFi: NVS credentials (set from the UI) override the compile-time ones ---
   s_prefs.begin("arenanet", false);
@@ -988,6 +1010,12 @@ void begin() {
   return;
 #else
   WiFi.persistent(false);
+  WiFi.onEvent([](arduino_event_id_t, arduino_event_info_t info) {
+    const uint8_t r = info.wifi_sta_disconnected.reason;
+    s_staReason = String(staReasonName(r)) + " [" + String((int)r) + "]";
+    Serial.printf("[net] STA echec : %s\n", s_staReason.c_str());
+  }, ARDUINO_EVENT_WIFI_STA_DISCONNECTED);
+
   bool connected = false;
   if (ssid.length()) {
     WiFi.mode(WIFI_STA);
@@ -1002,6 +1030,8 @@ void begin() {
     }
     Serial.println();
     connected = (WiFi.status() == WL_CONNECTED);
+    if (connected) s_staReason = "";
+    else if (!s_staReason.length()) s_staReason = "delai depasse (aucune reponse)";
   }
   if (connected) {
     s_mode = "STA";
@@ -1050,10 +1080,28 @@ void loop() {
     // esp_wifi et arenanet::begin() sort avant tout WiFi.mode(), donc le
     // wrapper Arduino n'a aucun etat - il rend 0 reseau, RSSI 0, SSID vide.
     // Meme lecon que netHasIp(), qui lit deja au niveau esp_netif.
+    // Un balayage exige que l'interface STA EXISTE. Une carte non provisionnee
+    // tourne en WIFI_AP seul - exactement l'instant ou l'on a besoin de la liste
+    // des reseaux - et esp_wifi_scan_start() y rend ESP_ERR_WIFI_MODE. Le code
+    // ne testait que ESP_OK, donc l'echec sortait une liste VIDE, sans un mot :
+    // "le scan ne marche pas". On passe en AP+STA, ce qui ajoute la station
+    // SANS couper le point d'acces - couper l'AP deconnecterait le telephone
+    // qui est en train de regarder la page.
+    wifi_mode_t wm = WIFI_MODE_NULL;
+    esp_wifi_get_mode(&wm);
+    if (wm == WIFI_MODE_AP) {
+      if (esp_wifi_set_mode(WIFI_MODE_APSTA) == ESP_OK) {
+        esp_wifi_start();
+        Serial.println("[net] balayage : AP -> AP+STA (l'interface station manquait)");
+      }
+    }
     wifi_scan_config_t cfg = {};
     cfg.show_hidden = false;
     String j = "[";
-    if (esp_wifi_scan_start(&cfg, true) == ESP_OK) {
+    const esp_err_t scanErr = esp_wifi_scan_start(&cfg, true);
+    if (scanErr != ESP_OK)
+      Serial.printf("[net] balayage refuse : %s\n", esp_err_to_name(scanErr));
+    if (scanErr == ESP_OK) {
       uint16_t n = 0;
       esp_wifi_scan_get_ap_num(&n);
       if (n > 20) n = 20;
@@ -1074,6 +1122,7 @@ void loop() {
     j += "]";
     s_scanJson = j;
     s_scanAt = millis();
+    if (scanErr != ESP_OK) s_scanJson = "[]";
   }
 
   // Redemarrage differe apres un envoi par morceaux : couper dans le handler
