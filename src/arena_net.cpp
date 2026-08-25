@@ -1063,6 +1063,26 @@ static void startServer() {
 
     // Une OTA qui echoue a moitie laisse une carte muette, et le proprietaire
     // n a alors plus de page pour lire pourquoi. Donc on le dit AVANT.
+    // Un defaut materiel CONNU, ecrit dans le BOM depuis la conception. Sans
+    // cette section, chaque proprietaire le redecouvre a ses frais - et le
+    // cherche dans le firmware, ou il n'est pas.
+    t += "-- Le temoin de statut (D2) --\n";
+    t += "allume       : " + String(s_statOn ? "oui" : "non") +
+         "   luminosite " + String(s_statBright) + "/255\n";
+    t += "  D2 est un WS2812B-2020. La carte l alimente en 3,3 V alors que sa\n";
+    t += "  fiche demande 3,5 a 5,3 V : il tourne SOUS son minimum. C est ecrit\n";
+    t += "  dans hardware/BOM_PCB.csv depuis la conception, avec la raison - le\n";
+    t += "  couloir vers la zone +5 V etait sature au routage, et rouvrir une\n";
+    t += "  region qui marche pour un temoin ne valait pas le risque.\n";
+    t += "  Un exemplaire hors spec ne s eteint pas : il lit mal sa donnee et\n";
+    t += "  sort du BLANC PLEIN, insensible a la couleur ET a la luminosite\n";
+    t += "  qu on lui envoie. Aucun reglage ici n y changera quoi que ce soit.\n";
+    t += "  Le rattrapage est prevu, dix minutes au fer : un fil de quelques mm\n";
+    t += "  entre +5 V et la broche 4 de D2, avec une 1N4148 en l air (cathode\n";
+    t += "  vers D2). VDD passe a ~4,3 V, dans la plage.\n";
+    t += "  En attendant : /api/set?statusled=0 l eteint plutot que de laisser\n";
+    t += "  un temoin qui ment.\n\n";
+
     t += "-- La flash --\n";
     t += "puce         : " + String(s_flashPhys >> 20) + " Mo (identifiant JEDEC)\n";
     t += "table        : jusqu a " + String(s_partEnd >> 20) + " Mo\n";
