@@ -55,6 +55,7 @@ static uint32_t s_bootMs    = 0;       // soft-start reference
 // a request — it is flagged here and applied at the top of the next tick(), on
 // the render task, where nothing else is touching the pixel buffer.
 static volatile bool s_pendLen = false;
+static uint8_t       s_pin     = PIN_LED_DATA;   // broche data, reglable a chaud
 
 // The animation clock. It only ever accumulates, so it must be a double: a float
 // carries 24 mantissa bits, and at ~0.017 s per frame its ulp reaches the frame
@@ -623,7 +624,15 @@ static void fxTest(Rgbw* buf) {
 // a hidden SK6812 fed at ~4.4 V that accepts 3.3 V data and regenerates it for
 // the 5 V chain behind it (see arena_config.h). It is always kept dark, and all
 // indices the user ever sees stay 0-based on the first *visible* LED.
-static const uint16_t OFFS = LED_REPEATER_PIXEL ? 1 : 0;
+// ...mais AVOIR un repeteur est un fait de CABLAGE, pas de firmware. Le banc
+// Arena en porte un ; une carte controleur toute faite n'en a pas. En constante
+// de compilation, une installation sur deux est fausse - et quand elle l'est
+// dans ce sens, le firmware tient la premiere VRAIE LED eteinte et decale tout
+// le mapping d'un cran. Cela se presente comme "les LED ne s'allument pas", et
+// il faut reflasher pour en sortir. Reglable a chaud, garde en NVS.
+static bool s_repeater = (LED_REPEATER_PIXEL != 0);
+static inline uint16_t offs() { return s_repeater ? 1 : 0; }
+#define OFFS (offs())
 
 // Night — lucioles. Quelques points s'allument doucement, brillent, s'eteignent,
 // ailleurs, sans jamais tout allumer. C'est le mode qu'on laisse vivre a 23 h.
@@ -874,6 +883,7 @@ void setCount(uint16_t n) {
 static void applyPending() {
   if (!s_pendLen) return;
   s_pendLen = false;
+  s_strip.setPin(s_pin);
   // Blank at the OLD length first. Shrinking the count otherwise stops addressing
   // the dropped pixels without ever telling them to go out, so the tail of the
   // chain stays latched on whatever it last showed — lit, and no longer counted
@@ -908,6 +918,24 @@ static void applyPending() {
   s_strip2.clear();                     // idem : surtout pas de begin()
   s_strip2.show();
 #endif
+}
+
+bool repeater() { return s_repeater; }
+
+void setRepeater(bool on) {
+  if (on == s_repeater) return;
+  s_repeater = on;
+  s_pendLen  = true;        // la longueur physique de la chaine change
+  markDirty();
+}
+
+uint8_t pin() { return s_pin; }
+
+void setPin(uint8_t p) {
+  if (p == s_pin || p > 48) return;
+  s_pin = p;
+  s_pendLen = true;         // la sortie est re-instanciee sur la nouvelle broche
+  markDirty();
 }
 
 void setBudgetMa(uint16_t ma) {
@@ -1024,6 +1052,8 @@ void save() {
   s_prefs.putUChar("inc", s_inc ? 1 : 0);
   s_prefs.putUShort("count", s_count);
   s_prefs.putUShort("budget", s_budget);
+  s_prefs.putBool("rep", s_repeater);
+  s_prefs.putUChar("pin", s_pin);
   s_prefs.putBytes("color", &s_color, sizeof(s_color));
   s_prefs.putString("order", s_order);
   if (s_dirtyAt == dirtyAtEntry) s_dirtyAt = 0;
@@ -1062,6 +1092,9 @@ void begin() {
   s_inc = s_prefs.getUChar("inc", 1) != 0;
   s_count  = s_prefs.getUShort("count", LED_COUNT_DEFAULT);
   s_budget = s_prefs.getUShort("budget", LED_POWER_BUDGET_MA);
+  s_repeater = s_prefs.getBool("rep", LED_REPEATER_PIXEL != 0);
+  s_pin      = s_prefs.getUChar("pin", PIN_LED_DATA);
+  s_strip.setPin(s_pin);
   if (s_count < 1 || s_count > LED_MAX) s_count = LED_COUNT_DEFAULT;
   if (s_prefs.getBytesLength("color") == sizeof(s_color))
     s_prefs.getBytes("color", &s_color, sizeof(s_color));
@@ -1103,7 +1136,7 @@ void begin() {
                   "seule LED, mettre LED_REPEATER_PIXEL a 0.\n",
                   s_count, s_count + 1);
   Serial.printf("[led] %u px on GPIO%d, order=%s mode=%s bright=%u budget=%u mA\n",
-                s_count, PIN_LED_DATA, s_order, modeName(s_mode), s_bright, s_budget);
+                s_count, s_pin, s_order, modeName(s_mode), s_bright, s_budget);
 }
 
 void tick() {
