@@ -421,7 +421,22 @@ static void draw() {
 // ---------------------------------------------------------------------------
 //  Veille
 // ---------------------------------------------------------------------------
-static void sleepNow() {
+// Un ecran noir a trois causes possibles - appui long, entree de menu, delai
+// d'inactivite - et une quatrieme qui n'en est pas une : la carte qui redemarre.
+// Vues du banc, les quatre se ressemblent. Chacune s'annonce donc.
+// 700 ms suffisaient, et a la racine l'appui long ETEINT l'ecran : un doigt qui
+// traine sur un poussoir raide fait donc le noir sans prevenir, ce qui se lit
+// comme une carte qui plante. Un geste qui eteint doit etre franc.
+static const uint32_t OK_LONG_MS = 1200;
+
+static void sleepNowImpl();
+
+static void sleepNow(const char* why) {
+  Serial.printf("[oled] veille : %s\n", why);
+  sleepNowImpl();
+}
+
+static void sleepNowImpl() {
   if (!s_awake) return;
   s_awake    = false;
   s_edit     = false;
@@ -559,7 +574,7 @@ static void onOk(bool longPress) {
   if (longPress) {
     if (s_edit)        { s_edit = false; arenaled::save(); }
     else if (s_depth)  { s_depth--; }
-    else               { sleepNow(); return; }
+    else               { sleepNow("appui long OK a la racine"); return; }
     draw();
     return;
   }
@@ -583,7 +598,7 @@ static void onOk(bool longPress) {
     draw();
     return;
   }
-  if (NODES[n].kind == K_SLEEP) { sleepNow(); return; }
+  if (NODES[n].kind == K_SLEEP) { sleepNow("entree de menu Veille"); return; }
   if (NODES[n].kind == K_INFO)  { draw(); return; }   // rien a regler
 
   // Un basculement se fait d'un seul appui : entrer en reglage pour appuyer une
@@ -713,7 +728,7 @@ void tick() {
   static uint32_t okAt  = 0;
   static bool     okLong = false;
   if (ok && !okAt) { okAt = now; okLong = false; Serial.printf("[btn] GPIO%d -> OK\n", PIN_ARENA_BTN_OK); }
-  else if (ok && !okLong && now - okAt > 700) { onOk(true); okLong = true; }
+  else if (ok && !okLong && now - okAt > OK_LONG_MS) { onOk(true); okLong = true; }
   else if (!ok && okAt) {
     if (!okLong && now - okAt > 25) onOk(false);
     okAt = 0;
@@ -727,7 +742,8 @@ void tick() {
   static uint32_t lastDraw = 0;
   if (now - lastDraw > 400) { lastDraw = now; draw(); }
 
-  if (ARENA_OLED_SLEEP_MS && now - s_lastIn > ARENA_OLED_SLEEP_MS) sleepNow();
+  if (ARENA_OLED_SLEEP_MS && now - s_lastIn > ARENA_OLED_SLEEP_MS)
+    sleepNow("delai d inactivite ecoule");
 }
 
 }  // namespace arenaoled
