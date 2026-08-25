@@ -187,6 +187,10 @@ static uint8_t       s_statPin    = ARENA_STATUS_PIN;
 // plus de reclamation a chaque trame - et les deux vivent ensemble.
 static Adafruit_NeoPixel s_stat(1, ARENA_STATUS_PIN, NEO_GRB + NEO_KHZ800);
 static bool          s_statOn     = true;
+// Luminosite du temoin, 0..255. Elle etait ecrite en dur, et un temoin en dur
+// est un temoin qui eblouit quelqu'un : la meme LED sert de veilleuse a cote
+// d'un lit et de repere en plein jour. 60 par defaut - visible sans agresser.
+static uint8_t       s_statBright = 60;
 static bool          s_statBegun  = false;
 static String        s_reset      = "?";
 static uint32_t      s_boots      = 0;
@@ -499,6 +503,7 @@ static String stateJson() {
   j += ",\"partMb\":"  + String(s_partEnd >> 20);
   j += ",\"flashBad\":" + String(s_flashBad ? 1 : 0);
   j += ",\"statusLed\":" + String(s_statOn ? 1 : 0);
+  j += ",\"statusBright\":" + String(s_statBright);
   j += ",\"up\":"     + String(millis() / 1000);
   j += ",\"heap\":"   + String(ESP.getFreeHeap());
   j += "}";
@@ -575,6 +580,14 @@ static void startServer() {
     }
     // /api/set?btnrot=1 : faire tourner les roles d'un cran, a l'aveugle.
     if (r->hasParam("btnrot")) arenaoled::rotateButtons();
+    // /api/set?statusbright=0..255 - le temoin de la carte, pas le mur.
+    if (r->hasParam("statusbright")) {
+      long v = r->getParam("statusbright")->value().toInt();
+      if (v < 0)   v = 0;
+      if (v > 255) v = 255;
+      s_statBright = (uint8_t)v;
+      s_prefs.putUChar("statbr", s_statBright);
+    }
     if (r->hasParam("statusled")) {
       s_statOn = r->getParam("statusled")->value().toInt() != 0;
       s_prefs.putUChar("staten", s_statOn ? 1 : 0);
@@ -1242,6 +1255,7 @@ void begin() {
   s_prefs.begin("arenanet", false);
   s_statPin = s_prefs.getUChar("statpin", ARENA_STATUS_PIN);
   s_statOn  = s_prefs.getUChar("staten", 1) != 0;
+  s_statBright = s_prefs.getUChar("statbr", 60);
   s_reset = resetReasonName(esp_reset_reason());
   s_boots = s_prefs.getUInt("boots", 0) + 1;
   s_prefs.putUInt("boots", s_boots);
@@ -1373,14 +1387,18 @@ static void statusTick() {
   if (now - last < 40) return;                 // 25 Hz suffit pour une respiration
   last = now;
 
-  uint8_t r = 40, g = 20, b = 0;               // ambre par defaut
-  if (arenaled::ledFault())      { r = 60; g = 0;  b = 0;  }
-  else if (s_mode == "STA")      { r = 0;  g = 45; b = 0;  }
-  else if (s_mode == "SoftAP")   { r = 0;  g = 15; b = 50; }
+  uint8_t r = 255, g = 128, b = 0;             // ambre par defaut, pleine echelle
+  if (arenaled::ledFault())      { r = 255; g = 0;   b = 0;   }
+  else if (s_mode == "STA")      { r = 0;   g = 255; b = 0;   }
+  else if (s_mode == "SoftAP")   { r = 0;   g = 70;  b = 255; }
 
   // Respiration : ~2 s par cycle, jamais eteint completement - un temoin qui
   // s'eteint par moments se lit comme un temoin en panne.
-  const float k = 0.25f + 0.75f * (0.5f + 0.5f * sinf((float)now / 320.0f));
+  // La couleur porte l'etat, la luminosite est un reglage : on garde les teintes
+  // a pleine echelle et on met l'echelle A LA FIN, sinon baisser le temoin
+  // deraperait aussi sa couleur vers le canal le plus fort.
+  float k = 0.25f + 0.75f * (0.5f + 0.5f * sinf((float)now / 320.0f));
+  k *= s_statBright / 255.0f;
   // Demarrage paresseux : la broche est reglable a chaud, donc on n'accroche le
   // canal RMT qu'une fois, et seulement quand le temoin sert vraiment.
   if (!s_statBegun) {
