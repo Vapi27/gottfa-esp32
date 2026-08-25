@@ -167,6 +167,7 @@ static String        s_scanErr    = "";
 // Un ecran noir et une carte qui redemarre se ressemblent de l'exterieur. La
 // difference se lit ici : le compteur monte a chaque demarrage, et la cause du
 // dernier reset dit si c'etait une coupure, un plantage ou un chien de garde.
+static uint8_t       s_statPin    = ARENA_STATUS_PIN;
 static String        s_reset      = "?";
 static uint32_t      s_boots      = 0;
 
@@ -477,6 +478,10 @@ static void startServer() {
     if (r->hasParam("budget")) arenaled::setBudgetMa((uint16_t)r->getParam("budget")->value().toInt());
     if (r->hasParam("repeater")) arenaled::setRepeater(r->getParam("repeater")->value().toInt() != 0);
     if (r->hasParam("pin"))      arenaled::setPin((uint8_t)r->getParam("pin")->value().toInt());
+    if (r->hasParam("statuspin")) {
+      const uint8_t p = (uint8_t)r->getParam("statuspin")->value().toInt();
+      if (p <= 48) { s_statPin = p; s_prefs.putUChar("statpin", p); }
+    }
     r->send(200, "application/json", stateJson());
   });
 
@@ -902,6 +907,12 @@ static void startServer() {
     t += "courant      : " + String(arenaled::lastAmps(), 2) + " A\n";
     t += "ordre couleur: " + String(arenaled::order()) + "\n\n";
 
+    t += "-- Temoin de la carte --\n";
+    t += "pixel statut : GPIO" + String(s_statPin) +
+         "   (autre broche : /api/set?statuspin=N)\n";
+    t += "  ambre=demarrage  bleu=point d acces  vert=reseau  rouge=defaut\n";
+    t += "  Toujours eteint ? La broche n est pas la bonne : essaie 48, 38, 8, 2.\n\n";
+
     t += "-- Boutons (au repos, les trois doivent lire 'haut') --\n";
     {
       bool bu = false, bo = false, bd = false;
@@ -1064,6 +1075,7 @@ static const char* staReasonName(uint8_t r) {
 void begin() {
   // --- WiFi: NVS credentials (set from the UI) override the compile-time ones ---
   s_prefs.begin("arenanet", false);
+  s_statPin = s_prefs.getUChar("statpin", ARENA_STATUS_PIN);
   s_reset = resetReasonName(esp_reset_reason());
   s_boots = s_prefs.getUInt("boots", 0) + 1;
   s_prefs.putUInt("boots", s_boots);
@@ -1149,7 +1161,33 @@ void begin() {
   Serial.println("[net] http server up");
 }
 
+// Pixel de temoin : une pulsation lente dont la COULEUR porte l'etat. Le but
+// n'est pas la decoration, c'est de repondre a "est-ce que la carte tourne ?"
+// sans cable, sans page web et sans ruban - la question qu'on se pose en
+// premier et a laquelle rien ne repondait.
+//   ambre  = en cours de demarrage       bleu = point d'acces, personne connecte
+//   vert   = associe a un reseau         rouge = defaut signale par le limiteur
+static void statusTick() {
+#if ARENA_STATUS_LED_ENABLE
+  static uint32_t last = 0;
+  const uint32_t now = millis();
+  if (now - last < 40) return;                 // 25 Hz suffit pour une respiration
+  last = now;
+
+  uint8_t r = 40, g = 20, b = 0;               // ambre par defaut
+  if (arenaled::ledFault())      { r = 60; g = 0;  b = 0;  }
+  else if (s_mode == "STA")      { r = 0;  g = 45; b = 0;  }
+  else if (s_mode == "SoftAP")   { r = 0;  g = 15; b = 50; }
+
+  // Respiration : ~2 s par cycle, jamais eteint completement - un temoin qui
+  // s'eteint par moments se lit comme un temoin en panne.
+  const float k = 0.25f + 0.75f * (0.5f + 0.5f * sinf((float)now / 320.0f));
+  neopixelWrite(s_statPin, (uint8_t)(r * k), (uint8_t)(g * k), (uint8_t)(b * k));
+#endif
+}
+
 void loop() {
+  statusTick();
   validateImageWhenHealthy();
 
   // Redemarrage differe demande par /api/reset : la reponse a eu le temps de
