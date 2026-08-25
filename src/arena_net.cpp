@@ -16,6 +16,7 @@
 #include <Update.h>
 #include <esp_ota_ops.h>
 #include <esp_partition.h>   // ecriture directe de la partition fichiers
+#include <esp_flash.h>       // taille physique de la puce, via son identifiant JEDEC
 // Empreinte de build exposee dans /api/state. L'en-tete a demenage entre les
 // versions de l'IDF : esp_app_desc.h n'existe qu'a partir de la 5, alors que le
 // build Arduino/PlatformIO tourne encore sur la 4.4. Meme structure, deux noms.
@@ -189,6 +190,39 @@ static void applyTxPower() {
   Serial.printf("[net] puissance TX = %.2f dBm%s\n", s_txq / 4.0f,
                 s_txDerated ? "  (baissee apres un brownout)" : "");
 }
+
+// La taille de flash annoncee par ESP.getFlashChipSize() vient de l en-tete que
+// l outil de flashage a ecrit : elle repete ce que le build a SUPPOSE, pas ce que
+// la puce porte. L identifiant JEDEC, lui, vient du silicium - octet 3 = capacite
+// en puissance de deux. C est la seule source qui puisse contredire le build.
+static uint32_t physicalFlashBytes() {
+  uint32_t id = 0;
+  if (esp_flash_read_id(esp_flash_default_chip, &id) != ESP_OK) return 0;
+  const uint8_t cap = (uint8_t)(id & 0xFF);
+  if (cap < 0x14 || cap > 0x1A) return 0;      // hors 1 Mo..64 Mo : code inconnu
+  return 1UL << cap;
+}
+
+// Fin de la derniere partition de la table. Si elle depasse la flash reelle, les
+// partitions du haut - OTA et fichiers, justement - pointent dans le vide : une
+// OTA s ecrit par-dessus elle-meme et LittleFS se corrompt au premier montage.
+// Rien de tout cela ne se voit au demarrage, ce qui est exactement le probleme.
+static uint32_t partitionEndBytes() {
+  uint32_t end = 0;
+  esp_partition_iterator_t it =
+      esp_partition_find(ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, nullptr);
+  while (it) {
+    const esp_partition_t* p = esp_partition_get(it);
+    if (p && p->address + p->size > end) end = p->address + p->size;
+    it = esp_partition_next(it);
+  }
+  esp_partition_iterator_release(it);
+  return end;
+}
+
+static uint32_t s_flashPhys = 0;
+static uint32_t s_partEnd   = 0;
+static bool     s_flashBad  = false;
 
 static const char* resetReasonName(esp_reset_reason_t r) {
   switch (r) {
@@ -442,6 +476,9 @@ static String stateJson() {
   j += ",\"brownouts\":" + String(s_brownouts);
   j += ",\"txpwr\":" + String(s_txq / 4.0f, 2);
   j += ",\"txDerated\":" + String(s_txDerated ? 1 : 0);
+  j += ",\"flashMb\":" + String(s_flashPhys >> 20);
+  j += ",\"partMb\":"  + String(s_partEnd >> 20);
+  j += ",\"flashBad\":" + String(s_flashBad ? 1 : 0);
   j += ",\"up\":"     + String(millis() / 1000);
   j += ",\"heap\":"   + String(ESP.getFreeHeap());
   j += "}";
@@ -956,6 +993,22 @@ static void startServer() {
       t += "  Un ecran noir ou des reglages perdus viennent d ailleurs.\n\n";
     }
 
+    // Une OTA qui echoue a moitie laisse une carte muette, et le proprietaire
+    // n a alors plus de page pour lire pourquoi. Donc on le dit AVANT.
+    t += "-- La flash --\n";
+    t += "puce         : " + String(s_flashPhys >> 20) + " Mo (identifiant JEDEC)\n";
+    t += "table        : jusqu a " + String(s_partEnd >> 20) + " Mo\n";
+    if (s_flashBad) {
+      t += "  ATTENTION : la table depasse la puce. Les partitions du haut -\n";
+      t += "  OTA et fichiers - pointent dans le vide. Une OTA s ecrirait\n";
+      t += "  par-dessus elle-meme. Corriger board_build.partitions dans\n";
+      t += "  platformio.ini et reflasher par cable AVANT toute OTA.\n\n";
+    } else if (!s_flashPhys) {
+      t += "  Taille physique illisible : verifier a la main avant une OTA.\n\n";
+    } else {
+      t += "  La table tient dans la puce.\n\n";
+    }
+
     t += "-- Les LED --\n";
     t += "broche data  : GPIO" + String(arenaled::pin()) +
          "   (essayer une autre sans reflasher : /api/set?pin=N)\n";
@@ -1165,6 +1218,18 @@ void begin() {
     Serial.printf("[dev] %lu brownout(s) au total : le 3,3 V s effondre. Ce n est\n"
                   "      PAS un bug logiciel - cable USB, port ou regulateur.\n",
                   (unsigned long)s_brownouts);
+  }
+  s_flashPhys = physicalFlashBytes();
+  s_partEnd   = partitionEndBytes();
+  s_flashBad  = (s_flashPhys && s_partEnd > s_flashPhys);
+  Serial.printf("[dev] flash %lu Mo (puce) / table de partitions jusqu a %lu Mo\n",
+                (unsigned long)(s_flashPhys >> 20), (unsigned long)(s_partEnd >> 20));
+  if (s_flashBad) {
+    Serial.printf("[dev] ATTENTION : la table depasse la flash de %lu Ko. Les\n"
+                  "      partitions du haut - OTA et fichiers - pointent dans le\n"
+                  "      vide. Corriger board_build.partitions dans platformio.ini\n"
+                  "      AVANT toute OTA.\n",
+                  (unsigned long)((s_partEnd - s_flashPhys) >> 10));
   }
   {
     uint8_t m[6] = {0};
