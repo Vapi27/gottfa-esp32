@@ -264,15 +264,31 @@ static void drawQr() {
   if (ARENA_OLED_H < 64) {
     s_d.ssd1306_command(SSD1306_SETCONTRAST);
     s_d.ssd1306_command(0xCF);
-    s_d.setTextSize(1);
-    s_d.setCursor(0, 0);
-    // Le nom du mur en tete, pas un titre : quand on appaire le troisieme d'une
-    // serie, il faut voir sans ambiguite devant lequel on se trouve - les
-    // murs partagent tous le meme code d'appairage.
-    s_d.print(arenanet::wallName());
+    // Trente-deux pixels, et il faut y tenir onze chiffres LISIBLES.
+    //
+    // L'ancienne disposition n'y tenait pas : le nom en corps 1 sur la rangee 0,
+    // puis deux lignes de corps 2 posees a y=10 et y=26. Or un caractere de
+    // corps 2 fait SEIZE pixels de haut : la seconde ligne courait de 26 a 42
+    // sur un panneau qui s'arrete a 32. Les dix derniers pixels de "2332"
+    // n'existaient pas - et un code d'appairage ampute est un code inutilisable.
+    //
+    // Ici les deux lignes occupent exactement les deux moities : 0..15 et 16..31,
+    // rien ne deborde. Le nom du mur reste - quand on appaire le troisieme d'une
+    // serie, il faut voir devant lequel on se trouve, les murs partageant tous
+    // le meme code - mais reduit a son suffixe, glisse dans la place libre a
+    // droite de la seconde ligne. C'est le suffixe qui distingue, pas le
+    // "Playfield-" que les quatre murs ont en commun.
     s_d.setTextSize(2);
-    s_d.setCursor(4, 10);  s_d.print(F("3497-011"));
-    s_d.setCursor(28, 26); s_d.print(F("2332"));
+    s_d.setCursor(4,  0);  s_d.print(F("3497-011"));
+    s_d.setCursor(4, 16);  s_d.print(F("2332"));
+
+    String tag = arenanet::wallName();
+    const int dash = tag.lastIndexOf('-');
+    if (dash >= 0) tag = tag.substring(dash + 1);
+    if (tag.length() > 8) tag = tag.substring(tag.length() - 8);
+    s_d.setTextSize(1);
+    s_d.setCursor(ARENA_OLED_W - 6 * (int16_t)tag.length(), 22);
+    s_d.print(tag);
     s_d.display();
     return;
   }
