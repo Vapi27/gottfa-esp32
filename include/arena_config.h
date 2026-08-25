@@ -173,17 +173,23 @@
 // en pull-up interne s'y opposerait a une sortie RMT.
 // 15 et 17 sont libres sur le WROOM-1 : hors flash (26-32), hors PSRAM octale
 // (33-37), hors USB (19/20) et hors broches de strap.
-// Corrige au banc : les trois poussoirs etaient decales d'un cran. Appuyer a
-// GAUCHE declenchait OK, le bouton du MILIEU declenchait droite, et celui de
-// DROITE declenchait gauche - autrement dit la broche nommee OK est cablee au
-// poussoir de gauche, celle nommee DOWN au poussoir du milieu, celle nommee UP
-// a celui de droite. Le cablage est fige : ce sont les NOMS qui tournent.
-//   gauche  = GPIO7  (ex-OK)     -> haut / precedent
-//   milieu  = GPIO17 (ex-DOWN)   -> OK
-//   droite  = GPIO15 (ex-UP)     -> bas / suivant
-#define PIN_ARENA_BTN_UP       PIN_ARENA_ENC_SW   // GPIO7, poussoir GAUCHE
-#define PIN_ARENA_BTN_OK      17                  // poussoir MILIEU
-#define PIN_ARENA_BTN_DOWN    15                  // poussoir DROITE
+// Brochage des trois poussoirs : la source de verite est le CUIVRE, pas un
+// symptome. hardware/NETLIST.md, table des liaisons :
+//   BTN_LEFT  U1 br.8  (IO15) -> S1 -> GND
+//   BTN_RIGHT U1 br.10 (IO17) -> S2 -> GND
+//   BTN_OK    U1 br.7  (IO7)  -> S3 -> GND
+// et hardware/PCB_HARDWARE.md : "3 poussoirs tactiles CMS : haut GPIO15, bas
+// GPIO17, OK GPIO7".
+//
+// Ces trois lignes ont ete tournees d'un cran le 2026-08-25 sur la foi d'une
+// description de symptomes ("droite fait gauche, OK fait droite"). C'etait une
+// erreur : le vrai defaut etait une soustraction non signee dans le test de
+// veille de l'ecran, qui endormait le panneau a chaque appui et faisait passer
+// des boutons parfaitement cables pour des boutons decales. Le netlist existait
+// et repondait a la question ; il n'a pas ete lu. Remis conforme au cuivre.
+#define PIN_ARENA_BTN_UP      15                  // S1, poussoir GAUCHE / haut
+#define PIN_ARENA_BTN_DOWN    17                  // S2, poussoir DROITE / bas
+#define PIN_ARENA_BTN_OK       PIN_ARENA_ENC_SW   // S3, GPIO7
 
 // Retour de defaut du limiteur de sortie U5 (AP2552, broche 4 ~FAULT).
 // Collecteur ouvert, actif BAS. Tire au haut par le tirage INTERNE de l'ESP :
@@ -217,6 +223,19 @@
 #define ARENA_FAULT_IGNORE_MS 1500     // apres le boot (le soft-start dure 900 ms)
 #define ARENA_FAULT_HOLD_MS    200     // duree minimale pour declarer un defaut
 
+
+// ---- Pixel de temoin sur la carte -------------------------------------------
+// Beaucoup de cartes controleur portent un pixel adressable de statut. C'est le
+// SEUL signe de vie quand aucun ruban n'est branche : sans lui, une carte qui
+// tourne parfaitement et une carte morte se ressemblent trait pour trait. La
+// broche varie d'une carte a l'autre - 48 sur un DevKitC-1, autre chose sur une
+// carte du commerce - donc elle est reglable a chaud (/api/set?statuspin=N).
+#define ARENA_STATUS_LED_ENABLE  1
+#if defined(ARENA_BOARD_D1MINI32)
+#define ARENA_STATUS_PIN         2    // LED simple sur le D1 Mini, pas un pixel
+#else
+#define ARENA_STATUS_PIN        48    // STATUS_PX : U1 br.25 (IO48) -> D2 (NETLIST.md)
+#endif
 
 // ---- Soft start -------------------------------------------------------------
 // Ramp global brightness 0 -> target over this many ms at boot instead of
