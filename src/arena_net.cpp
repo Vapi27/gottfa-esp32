@@ -169,6 +169,18 @@ static String        s_scanErr    = "";
 // difference se lit ici : le compteur monte a chaque demarrage, et la cause du
 // dernier reset dit si c'etait une coupure, un plantage ou un chien de garde.
 static uint8_t       s_statPin    = ARENA_STATUS_PIN;
+
+// Le pixel de statut et la chaine du mur se PARTAGENT le peripherique RMT, et
+// ils ne cohabitent pas. neopixelWrite() du coeur Arduino re-reclame un canal a
+// chaque appel ; a 25 Hz il finit par rendre caduque la poignee que
+// Adafruit_NeoPixel garde en cache, et la chaine ne repart jamais : le port
+// serie se remplit de "rmt_write_items : RMT DRIVER ERR" a 25 Hz - la frequence
+// de ce temoin, precisement - et pas un pixel du mur ne s'allume. Vu au banc.
+//
+// Entre un mur qui marche et une LED de courtoisie sur la carte, le choix ne se
+// discute pas : le temoin est ETEINT par defaut. Qui le veut l'allume avec
+// /api/set?statusled=1, en sachant ce qu'il risque.
+static bool          s_statOn     = false;
 static String        s_reset      = "?";
 static uint32_t      s_boots      = 0;
 
@@ -479,6 +491,7 @@ static String stateJson() {
   j += ",\"flashMb\":" + String(s_flashPhys >> 20);
   j += ",\"partMb\":"  + String(s_partEnd >> 20);
   j += ",\"flashBad\":" + String(s_flashBad ? 1 : 0);
+  j += ",\"statusLed\":" + String(s_statOn ? 1 : 0);
   j += ",\"up\":"     + String(millis() / 1000);
   j += ",\"heap\":"   + String(ESP.getFreeHeap());
   j += "}";
@@ -540,6 +553,19 @@ static void startServer() {
     if (r->hasParam("statuspin")) {
       const uint8_t p = (uint8_t)r->getParam("statuspin")->value().toInt();
       if (p <= 48) { s_statPin = p; s_prefs.putUChar("statpin", p); }
+    }
+    // /api/set?btnup=7&btndown=15&btnok=17
+    // Les trois ensemble : un remappage partiel laisserait deux roles sur la
+    // meme broche, donc un poussoir muet et un autre qui fait deux choses.
+    if (r->hasParam("btnup") && r->hasParam("btndown") && r->hasParam("btnok")) {
+      arenaoled::setButtons((uint8_t)r->getParam("btnup")->value().toInt(),
+                            (uint8_t)r->getParam("btndown")->value().toInt(),
+                            (uint8_t)r->getParam("btnok")->value().toInt());
+    }
+    if (r->hasParam("statusled")) {
+      s_statOn = r->getParam("statusled")->value().toInt() != 0;
+      s_prefs.putUChar("staten", s_statOn ? 1 : 0);
+      Serial.printf("[net] pixel de statut : %s\n", s_statOn ? "allume (il peut couper la chaine)" : "eteint");
     }
     // /api/set?txpwr=13   puissance d emission en dBm (2..20). Baisser echange
     // de la portee contre des rafales de courant plus petites : c est le seul
@@ -1037,9 +1063,14 @@ static void startServer() {
       bool bu = false, bo = false, bd = false;
       uint32_t nu = 0, no = 0, nd = 0;
       arenaoled::btnRaw(bu, bo, bd, nu, no, nd);
-      t += "gauche GPIO" + String(PIN_ARENA_BTN_UP)   + " : " + (bu ? "BAS (enfonce !)" : "haut") + "   declenche " + String(nu) + "x\n";
-      t += "OK     GPIO" + String(PIN_ARENA_BTN_OK)   + " : " + (bo ? "BAS (enfonce !)" : "haut") + "   declenche " + String(no) + "x\n";
-      t += "droite GPIO" + String(PIN_ARENA_BTN_DOWN) + " : " + (bd ? "BAS (enfonce !)" : "haut") + "   declenche " + String(nd) + "x\n";
+      uint8_t pu, pd, po;
+      arenaoled::buttons(pu, pd, po);
+      t += "gauche GPIO" + String(pu) + " : " + (bu ? "BAS (enfonce !)" : "haut") + "   declenche " + String(nu) + "x\n";
+      t += "OK     GPIO" + String(po) + " : " + (bo ? "BAS (enfonce !)" : "haut") + "   declenche " + String(no) + "x\n";
+      t += "droite GPIO" + String(pd) + " : " + (bd ? "BAS (enfonce !)" : "haut") + "   declenche " + String(nd) + "x\n";
+      t += "  Un poussoir qui repond mais dans le mauvais sens n'est pas un bug :\n";
+      t += "  la netlist nomme des nets, pas des positions. Remapper sans\n";
+      t += "  reflasher : /api/set?btnup=<gauche>&btndown=<droite>&btnok=<ok>\n";
       if (bu || bo || bd)
         t += "  !! Une entree est BASSE sans que tu touches rien. Cette broche n est\n"
              "     pas cablee a ce poussoir, ou il est colle. Un OK bloque bas part en\n"
@@ -1195,6 +1226,7 @@ void begin() {
   // --- WiFi: NVS credentials (set from the UI) override the compile-time ones ---
   s_prefs.begin("arenanet", false);
   s_statPin = s_prefs.getUChar("statpin", ARENA_STATUS_PIN);
+  s_statOn  = s_prefs.getUChar("staten", 0) != 0;
   s_reset = resetReasonName(esp_reset_reason());
   s_boots = s_prefs.getUInt("boots", 0) + 1;
   s_prefs.putUInt("boots", s_boots);
@@ -1320,6 +1352,7 @@ void begin() {
 //   vert   = associe a un reseau         rouge = defaut signale par le limiteur
 static void statusTick() {
 #if ARENA_STATUS_LED_ENABLE
+  if (!s_statOn) return;                       // voir s_statOn : il vole le RMT
   static uint32_t last = 0;
   const uint32_t now = millis();
   if (now - last < 40) return;                 // 25 Hz suffit pour une respiration

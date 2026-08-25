@@ -26,6 +26,14 @@ bool found();          // true if a panel answered — lets the caller skip its 
 // screen and restarts the sleep countdown. Calling it while awake is harmless.
 void poke();
 
+// Quel poussoir porte quel role. NETLIST.md decrit des NETS, pas des positions :
+// rien n'y garantit que S1 soit le poussoir physiquement a gauche, et sur une
+// carte du commerce la question ne se pose meme pas. C'est donc un fait de
+// montage, regle a chaud et garde en NVS, pas une constante de compilation qui
+// obligerait a reflasher pour que la fleche droite aille a droite.
+void setButtons(uint8_t up, uint8_t down, uint8_t ok);
+void buttons(uint8_t& up, uint8_t& down, uint8_t& ok);
+
 // Affiche le code d'appairage en plein ecran, sans passer par l'encodeur.
 // C'est LA chose qu'un proprietaire doit pouvoir obtenir quand le mur n'est pas
 // encore sur le reseau - et pendant les essais, quand le bouton n'est pas cable.
