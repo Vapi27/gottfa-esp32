@@ -475,6 +475,8 @@ static void startServer() {
     }
     if (r->hasParam("count"))  arenaled::setCount((uint16_t)r->getParam("count")->value().toInt());
     if (r->hasParam("budget")) arenaled::setBudgetMa((uint16_t)r->getParam("budget")->value().toInt());
+    if (r->hasParam("repeater")) arenaled::setRepeater(r->getParam("repeater")->value().toInt() != 0);
+    if (r->hasParam("pin"))      arenaled::setPin((uint8_t)r->getParam("pin")->value().toInt());
     r->send(200, "application/json", stateJson());
   });
 
@@ -884,13 +886,14 @@ static void startServer() {
     t += "  Le compteur inchange -> elle n a PAS redemarre, c est autre chose.\n\n";
 
     t += "-- Les LED --\n";
-    t += "broche data  : GPIO" + String(PIN_LED_DATA) + "\n";
+    t += "broche data  : GPIO" + String(arenaled::pin()) +
+         "   (essayer une autre sans reflasher : /api/set?pin=N)\n";
     t += "pixels pilotes: " + String(arenaled::count());
-    if (LED_REPEATER_PIXEL) {
+    if (arenaled::repeater()) {
       t += " visibles + 1 repeteur = " + String(arenaled::count() + 1) + " a cabler\n";
       t += "  ATTENTION : le 1er pixel physique est tenu ETEINT expres (repeteur).\n";
       t += "  Avec une seule LED cablee, elle ne s allumera JAMAIS. Il en faut 2,\n";
-      t += "  ou passer LED_REPEATER_PIXEL a 0 dans include/arena_config.h.\n";
+      t += "  Pas de repeteur sur ta chaine ? -> /api/set?repeater=0\n";
     } else {
       t += " (pas de repeteur)\n";
     }
@@ -898,6 +901,21 @@ static void startServer() {
     t += "luminosite   : " + String(arenaled::brightness()) + "/255\n";
     t += "courant      : " + String(arenaled::lastAmps(), 2) + " A\n";
     t += "ordre couleur: " + String(arenaled::order()) + "\n\n";
+
+    t += "-- Boutons (au repos, les trois doivent lire 'haut') --\n";
+    {
+      bool bu = false, bo = false, bd = false;
+      uint32_t nu = 0, no = 0, nd = 0;
+      arenaoled::btnRaw(bu, bo, bd, nu, no, nd);
+      t += "gauche GPIO" + String(PIN_ARENA_BTN_UP)   + " : " + (bu ? "BAS (enfonce !)" : "haut") + "   declenche " + String(nu) + "x\n";
+      t += "OK     GPIO" + String(PIN_ARENA_BTN_OK)   + " : " + (bo ? "BAS (enfonce !)" : "haut") + "   declenche " + String(no) + "x\n";
+      t += "droite GPIO" + String(PIN_ARENA_BTN_DOWN) + " : " + (bd ? "BAS (enfonce !)" : "haut") + "   declenche " + String(nd) + "x\n";
+      if (bu || bo || bd)
+        t += "  !! Une entree est BASSE sans que tu touches rien. Cette broche n est\n"
+             "     pas cablee a ce poussoir, ou il est colle. Un OK bloque bas part en\n"
+             "     appui long : ecran noir, reveil, rebelote - exactement le symptome.\n";
+      t += "\n";
+    }
 
     t += "-- Reseau --\n";
     t += "mode         : " + s_mode + "  ip " + s_ip + "\n";

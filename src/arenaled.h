@@ -100,6 +100,14 @@ uint16_t count();
 void    setBudgetMa(uint16_t ma);          // power ceiling for the whole chain
 uint16_t budgetMa();
 
+// Deux faits de CABLAGE, donc reglables sans reflasher : la chaine porte-t-elle
+// un pixel repeteur en tete (tenu eteint), et sur quelle broche sort la data.
+// Une carte controleur du commerce n'a ni l'un ni l'autre des valeurs du banc.
+bool     repeater();
+void     setRepeater(bool on);
+uint8_t  pin();
+void     setPin(uint8_t p);
+
 // Nombre de murs qui se PARTAGENT la meme alimentation (1 = seul). Le plafond
 // effectif devient budgetMa() / share : quatre murs chaines sur un chargeur de
 // 3 A ne peuvent pas en reclamer 8 chacun de leur cote. Pose par arena_peers

@@ -31,4 +31,11 @@ void poke();
 // encore sur le reseau - et pendant les essais, quand le bouton n'est pas cable.
 void showQr();
 
+// Etat BRUT des trois entrees, sans anti-rebond ni interpretation, plus le
+// nombre de declenchements depuis le demarrage. Un poussoir colle ou une broche
+// qui n'est pas un poussoir se voit ici et nulle part ailleurs : au repos les
+// trois doivent lire "haut".
+void btnRaw(bool& up, bool& okd, bool& down,
+            uint32_t& nUp, uint32_t& nOk, uint32_t& nDown);
+
 }  // namespace arenaoled
