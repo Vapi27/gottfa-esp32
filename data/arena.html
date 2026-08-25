@@ -264,6 +264,7 @@ header h1 img{filter:saturate(.9)}
     <h2>Network</h2>
     <p class="hint">
       Connected to <b id="nw-ssid">&ndash;</b> &middot; signal <b id="nw-rssi">&ndash;</b>
+      <span id="nw-fail" class="warn" style="display:block;margin-top:4px"></span>
       at the wall. Below &minus;75 dBm, expect the page to feel slow and updates to fail.
     </p>
     <div class="modes">
@@ -626,6 +627,10 @@ function render(s) {
   if (s.density !== undefined) set('density', s.density);
   showRelevant(s);
   if ($('nw-ssid')) $('nw-ssid').textContent = s.net === 'Matter' ? (s.ip || '–') : (s.net || '–');
+  if ($('nw-fail')) {
+    $('nw-fail').textContent = (s.net === 'SoftAP' && s.staFail)
+      ? 'Last join attempt failed: ' + s.staFail : '';
+  }
   $('g-atr').textContent = s.atr ? s.atr + ' s of ROM attract' : 'the generic attract (no capture loaded)';
   $('g-ins').textContent = s.ins;
   const bb = $('bootbtn');
@@ -1163,7 +1168,15 @@ function wifiScan() {
     .then(d => {
       if ($('nw-rssi')) $('nw-rssi').textContent = d.rssi + ' dBm';
       if ($('nw-ssid') && d.ssid) $('nw-ssid').textContent = d.ssid;
-      if (!d.nets || !d.nets.length) { $('nw-list').textContent = 'nothing found'; return; }
+      if (!d.nets || !d.nets.length) {
+        // Une liste vide a deux causes tres differentes, et les confondre coute
+        // une soiree : soit le balayage a ete refuse, soit il n'y a vraiment
+        // rien. Le firmware sait laquelle - on le dit.
+        $('nw-list').textContent = d.fail
+          ? 'Scan returned nothing — last attempt: ' + d.fail
+          : 'Nothing found. The ESP32 is 2.4 GHz only: a 5 GHz-only network never appears here.';
+        return;
+      }
       d.nets.sort((a, b) => b.r - a.r);
       $('nw-list').innerHTML = d.nets.map(n =>
         '<div style="display:flex;gap:10px;padding:2px 0">' +
