@@ -453,6 +453,16 @@ One command, on the machine the board is plugged into — it finds the port,
 builds, uploads the UI then the firmware, and opens the monitor, printing what to
 try next on any failure:
 
+
+**ESP32-S3 on its native USB port?** `pio device list` shows it as VID `303A`
+(`/dev/cu.usbmodem*` on macOS, "USB JTAG/serial debug unit"), not as a CH340 or
+CP210x bridge. The flash script detects that and selects **`env:arenaled_s3usb`**,
+which adds `ARDUINO_USB_CDC_ON_BOOT=1` / `ARDUINO_USB_MODE=1`. Those two flags
+are not decoration: without them the Arduino core sends `Serial` to UART0, so the
+board uploads perfectly and then prints **nothing** on the port you are watching —
+and every diagnostic in §9 is read off that log. Override with `ARENA_ENV=...` if
+you are on a board whose UART bridge you prefer.
+
 ```sh
 tools/arena_flash.sh                 # or: tools/arena_flash.sh /dev/ttyUSB0
 ```
