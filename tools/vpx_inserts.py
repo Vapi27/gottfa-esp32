@@ -110,11 +110,23 @@ def main(path, cfg):
     # lamps on the real playfield. GI is house light, never commanded. What is
     # left: L* (the lamp matrix) and F* (flashers, driven by the solenoid board
     # rather than the matrix — commanded all the same, kept and marked 'f').
+    # Comment un NOM d'objet VP se traduit en type d'insert. C'etait ecrit en
+    # dur, et c'etait la convention Gottlieb : "GI"/"LS" ignores, "L<n>" insert
+    # de matrice, "F" flasher. Sur une table Williams - Alien Poker, System 7 -
+    # les auteurs ne nomment pas pareil, et un motif faux ne rend pas une erreur :
+    # il rend un plateau a zero insert, ou pire un plateau plausible ou les
+    # flashers sont comptes comme des lampes. Le reste de l'outil se disait
+    # "game-agnostic" pendant que cette fonction ne l'etait pas.
+    #
+    # Les motifs vivent donc dans le fichier de jeu, et le defaut reste Gottlieb.
+    KINDS  = cfg.get("kinds",  [["^L\\d", "i"], ["^F", "f"]])
+    IGNORE = cfg.get("ignore", ["^GI", "^LS"])
+
     def kind(name):
-        if name.startswith("GI"): return None            # general illumination
-        if name.startswith("LS"): return None            # ramp chaser, not lamps
-        if re.match(r"^L\d", name): return "i"           # lamp matrix insert
-        if name.startswith("F"):  return "f"             # flasher
+        for pat in IGNORE:
+            if re.match(pat, name): return None
+        for pat, k in KINDS:
+            if re.match(pat, name): return k
         return None
 
     # The VP table's light names FOLLOW the machine's own lamp chart (checked on

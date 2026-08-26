@@ -14,6 +14,16 @@
 #  (author fixes + the manual's lamp chart). Without it you still get a
 #  working plan — labels from the VP table, no function tooltips.
 #
+#  ATTENTION sur une table qui n'est pas Gottlieb. La traduction nom d'objet VP
+#  -> type d'insert etait ecrite en dur dans vpx_inserts.py avec la convention
+#  Gottlieb (L<n> insert, F flasher, GI/LS ignores) pendant que le reste de
+#  l'outil se disait game-agnostic. Elle est passee dans le fichier de jeu
+#  ("kinds" / "ignore"). Un motif qui ne correspond pas ne rend PAS d'erreur :
+#  il rend un plateau a zero insert, ou un plateau plausible ou les flashers
+#  sont comptes comme des lampes. Ouvrir la table dans Visual Pinball et
+#  regarder comment les lumieres s'appellent vraiment AVANT de lancer ceci.
+#  tools/games/alpok_l6.json (Alien Poker, Williams System 7) sert de modele.
+#
 #  Prerequisites for the capture step:
 #    - libpinmame built once:  see ARENA_LED.md "Porting to another table"
 #    - the game's ROM zip in ~/.pinmame/roms/
