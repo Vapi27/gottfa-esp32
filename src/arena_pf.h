@@ -80,6 +80,19 @@ bool  hidden(uint8_t ins);
 bool  setHidden(uint8_t ins, bool h);
 bool  saveHidden();
 
+// Correction de luminosite par PIXEL, 255 = neutre.
+//
+// La teinte appartient a l'insert - c'est le plastique moule, et elle doit
+// survivre a un rerouteage de la chaine. La luminosite appartient au PIXEL :
+// deux SK6812 d'un meme lot ne rendent pas la meme chose, un insert large avale
+// plus qu'un petit, un plastique epais assombrit ce qu'il porte. Aucune de ces
+// causes ne suit le fil quand on le deplace ; toutes suivent la LED.
+uint8_t trimOf(uint16_t led);
+bool    setTrim(uint16_t led, uint8_t v);
+void    clearTrims();
+bool    saveTrims();
+String  trimsJson();
+
 Colour colourOf(uint8_t ins);            // 0,0,0,0 when the insert has no colour
 Colour colourOfLed(uint16_t led);
 bool   setColour(uint8_t ins, Colour c); // all zero clears it
@@ -90,6 +103,19 @@ bool anyAssigned();
 
 String toJson();                    // {"leds":[{"i":0,"a":12},...]}
 bool   fromJson(const char* json);
+// La table d'inserts est EDITABLE. Elle etait decrite comme "the machine, it
+// does not change" - vrai tant que la machine etait l'Arena livree avec le
+// firmware. Pour un autre plateau il n'y a ni table Visual Pinball ni ROM sous
+// la main : il y a une photo et quelqu'un qui sait ou sont ses inserts.
+// Un point cree ainsi n'a PAS de numero de lampe (-1) : il ne vient d'aucune
+// ROM, donc l'attract d'origine ne le pilotera pas - les effets et les groupes,
+// si. C'est la difference entre rejouer une machine et eclairer un plateau.
+int  addInsert(float x, float y, const char* name);   // -1 si la table est pleine
+bool moveInsert(uint8_t ins, float x, float y);
+bool removeInsert(uint8_t ins);                        // recale les affectations
+void clearInserts();
+bool saveInserts();                                    // reecrit /arena_pf.json
+
 String insertsJson();               // the fixed table, straight from LittleFS
 bool   save();
 

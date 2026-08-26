@@ -24,6 +24,17 @@
 #define ARENA_AP_SSID        "Arena-LED"
 #define ARENA_AP_PASS        "pinball87"    // >= 8 chars
 
+// Puissance d emission WiFi, en quarts de dBm (esp_wifi_set_max_tx_power) :
+// 80 = 20 dBm, le maximum de la radio, et le plus gros appel de courant du
+// firmware. Une rafale d emission tire ~350 mA pendant quelques centaines de
+// microsecondes ; sur une alimentation juste, c est elle qui fait plonger le
+// 3,3 V et declenche le detecteur de brownout. La valeur SAFE n est PAS le
+// defaut : elle ne s applique que si le reset precedent etait justement un
+// brownout, pour que la carte revienne plus douce d elle-meme au lieu de
+// boucler sur le meme effondrement. 52 = 13 dBm, soit ~5x moins de puissance.
+#define ARENA_WIFI_TXPWR_QDBM       80
+#define ARENA_WIFI_TXPWR_SAFE_QDBM  52
+
 // ---- LED chain --------------------------------------------------------------
 // One single data chain: ESP32 -> LED1 -> LED2 -> ... -> LEDn (data only; +5V and
 // GND come from the two thick bus wires that thread through each board's slot

@@ -1,0 +1,18 @@
+{
+ "_comment": "Alien Poker (Williams, 1980) - System 7. Squelette de portage, PAS une carte des lampes. Les deux champs qui demandent le manuel de la machine sont vides EXPRES : func et author_fixes. Les remplir de memoire ou par deduction produirait un plan credible et faux, ce qui est pire qu'un plan vide - un plan vide se voit, un plan faux se croit. Le proprietaire lit la charte des lampes dans son manuel de service et la recopie ici ; l'outil marche deja sans, avec les libelles de la table VP.",
+
+ "pinmame": "alpok_l6",
+ "_pinmame_variants": "alpok_l6 (L-6, la plus courante), alpok_l2, alpok_b6, alpok_f6. Le nom doit correspondre a la ROM presente dans ~/.pinmame/roms/.",
+
+ "_kinds_comment": "Comment les noms d'objets de la table VP se traduisent. Le defaut de l'outil est la convention Gottlieb (L<n> insert, F flasher, GI/LS ignores). Les auteurs de tables Williams ne nomment pas tous pareil : ouvrir la table dans Visual Pinball, regarder comment les lumieres s'appellent VRAIMENT, et ajuster ici. Un motif faux ne rend pas une erreur - il rend un plateau vide, ou un plateau plausible ou les flashers passent pour des lampes.",
+ "kinds": [["^L\\d", "i"], ["^F", "f"]],
+ "ignore": ["^GI", "^LS"],
+
+ "_func_comment": "La charte des lampes du manuel de service : {\"9\": \"#1 TOP ROLLOVER\", ...}. Affichee en infobulle sur le plan. Vide tant que personne ne l'a lue sur le document.",
+ "func": {},
+
+ "_author_fixes_comment": "Erreurs de l'auteur de la table VP, constatees sur le VRAI plateau : {\"L1\": [\"L9\", 9]} renomme l'objet et fixe son numero de lampe reel. A ne remplir qu'apres verification devant la machine.",
+ "author_fixes": {},
+
+ "func_by_name": {}
+}

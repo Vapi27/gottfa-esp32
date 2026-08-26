@@ -154,11 +154,24 @@ fi
 cat <<EOF
 
 $(ok "Flashed.")
-   1. Join the WiFi network  'Arena-LED'   password 'pinball87'
+
+   WHICH ADDRESS? The board keeps its WiFi credentials across a flash, so it may
+   already be on your home network - and then 192.168.4.1 answers nothing at all.
+   Requests to it fail SILENTLY in a browser, which reads as "the setting does
+   not stick" rather than "you are talking to nobody".
+
+   Read the address off the serial log below, it prints both:
+        [net] SoftAP 'Playfield-XXXX' ip=192.168.4.1     <- no network joined
+        [net] STA OK ip=192.168.1.36                     <- on your network
+   The name works either way and survives a DHCP change:
+        http://playfield-xxxx.local/
+
+   1. No network joined yet? Join WiFi 'Arena-LED', password 'pinball87'.
    2. Single-LED bench test:
-        http://192.168.4.1/api/set?count=1&mode=test
+        <address>/api/set?count=1&mode=test
       -> the pixel must cycle RED -> GREEN -> BLUE -> WHITE, 2 s each.
-   3. Full UI: http://192.168.4.1/
+   3. Full UI:            <address>/
+      Why is it not working: <address>/api/why
    4. Current checks (multimeter in the +5V wire):
         .../api/set?mode=classic&r=0&g=0&b=0&w=255&bright=255       ~20 mA
         .../api/set?mode=classic&r=255&g=255&b=255&w=255&bright=255 ~70 mA

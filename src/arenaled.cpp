@@ -55,6 +55,11 @@ static uint32_t s_bootMs    = 0;       // soft-start reference
 // a request — it is flagged here and applied at the top of the next tick(), on
 // the render task, where nothing else is touching the pixel buffer.
 static volatile bool s_pendLen = false;
+static uint8_t       s_pin     = PIN_LED_DATA;   // broche data, reglable a chaud
+// Broche a laquelle la chaine est REELLEMENT accrochee. s_pin est le souhait,
+// celle-ci est le fait ; tant qu'elles sont egales il n'y a rien a refaire, et
+// surtout rien a toucher (voir applyPending).
+static uint8_t       s_pinLive = PIN_LED_DATA;
 
 // The animation clock. It only ever accumulates, so it must be a double: a float
 // carries 24 mantissa bits, and at ~0.017 s per frame its ulp reaches the frame
@@ -304,8 +309,13 @@ static void fxZoneSweep(Rgbw* buf) {
     if (k <= 0.0f) continue;
     const arenamap::Zone* zn = arenamap::zone(z);
     if (!zn) continue;                                 // table can shrink from the HTTP task
-    for (uint16_t i = zn->first; i < zn->first + zn->count && i < s_count; i++)
+    // Par APPARTENANCE, pas par tranche : un groupe disperse - des pop bumpers,
+    // l'eclairage general - n'occupe plus first..first+count.
+    for (uint16_t n = 0; n < zn->count; n++) {
+      const int i = arenamap::zoneNth(z, n);
+      if (i < 0 || i >= (int)s_count) continue;
       buf[i] = scale(s_color, 0.10f + 0.90f * k);
+    }
   }
 }
 
@@ -573,8 +583,12 @@ static void fxArena(Rgbw* buf) {
       if (k < 0.02f) continue;
       const arenamap::Zone* zn = arenamap::zone(z);
       if (!zn) continue;                               // table can shrink from the HTTP task
-      for (uint16_t i = zn->first; i < zn->first + zn->count && i < s_count; i++) {
-        float ph = 1.0f - fabsf((float)(i - zn->first) / (float)max<uint16_t>(1, zn->count) - 0.5f);
+      for (uint16_t n = 0; n < zn->count; n++) {
+        const int i = arenamap::zoneNth(z, n);
+        if (i < 0 || i >= (int)s_count) continue;
+        // Le rang DANS le groupe, plus l'ecart a son premier membre : sur un
+        // groupe disperse, l'ecart d'indice ne dit plus rien de la position.
+        float ph = 1.0f - fabsf((float)n / (float)max<uint16_t>(1, zn->count) - 0.5f);
         buf[i] = addSat(buf[i], scale(amber, k * ph));
       }
     }
@@ -623,7 +637,15 @@ static void fxTest(Rgbw* buf) {
 // a hidden SK6812 fed at ~4.4 V that accepts 3.3 V data and regenerates it for
 // the 5 V chain behind it (see arena_config.h). It is always kept dark, and all
 // indices the user ever sees stay 0-based on the first *visible* LED.
-static const uint16_t OFFS = LED_REPEATER_PIXEL ? 1 : 0;
+// ...mais AVOIR un repeteur est un fait de CABLAGE, pas de firmware. Le banc
+// Arena en porte un ; une carte controleur toute faite n'en a pas. En constante
+// de compilation, une installation sur deux est fausse - et quand elle l'est
+// dans ce sens, le firmware tient la premiere VRAIE LED eteinte et decale tout
+// le mapping d'un cran. Cela se presente comme "les LED ne s'allument pas", et
+// il faut reflasher pour en sortir. Reglable a chaud, garde en NVS.
+static bool s_repeater = (LED_REPEATER_PIXEL != 0);
+static inline uint16_t offs() { return s_repeater ? 1 : 0; }
+#define OFFS (offs())
 
 // Night — lucioles. Quelques points s'allument doucement, brillent, s'eteignent,
 // ailleurs, sans jamais tout allumer. C'est le mode qu'on laisse vivre a 23 h.
@@ -874,6 +896,18 @@ void setCount(uint16_t n) {
 static void applyPending() {
   if (!s_pendLen) return;
   s_pendLen = false;
+  // setPin() n'est PAS anodin ici : quand la chaine est deja demarree, il fait
+  // pinMode(nouvelle, OUTPUT) + digitalWrite(LOW) - exactement l'acte que le
+  // commentaire ci-dessous decrit comme arrachant la broche au canal RMT. Le
+  // banc a rendu le verdict : appele a chaque changement de longueur, meme pour
+  // la MEME broche, il noyait le port serie de "rmt_write_items : RMT DRIVER
+  // ERR" a chaque trame, et pas une LED ne s'allumait. On ne le touche donc que
+  // si la broche change vraiment, et on re-demarre la chaine derriere.
+  if (s_pin != s_pinLive) {
+    s_strip.setPin(s_pin);
+    s_strip.begin();
+    s_pinLive = s_pin;
+  }
   // Blank at the OLD length first. Shrinking the count otherwise stops addressing
   // the dropped pixels without ever telling them to go out, so the tail of the
   // chain stays latched on whatever it last showed — lit, and no longer counted
@@ -908,6 +942,24 @@ static void applyPending() {
   s_strip2.clear();                     // idem : surtout pas de begin()
   s_strip2.show();
 #endif
+}
+
+bool repeater() { return s_repeater; }
+
+void setRepeater(bool on) {
+  if (on == s_repeater) return;
+  s_repeater = on;
+  s_pendLen  = true;        // la longueur physique de la chaine change
+  markDirty();
+}
+
+uint8_t pin() { return s_pin; }
+
+void setPin(uint8_t p) {
+  if (p == s_pin || p > 48) return;
+  s_pin = p;
+  s_pendLen = true;         // la sortie est re-instanciee sur la nouvelle broche
+  markDirty();
 }
 
 void setBudgetMa(uint16_t ma) {
@@ -1029,6 +1081,8 @@ void save() {
   s_prefs.putUChar("inc", s_inc ? 1 : 0);
   s_prefs.putUShort("count", s_count);
   s_prefs.putUShort("budget", s_budget);
+  s_prefs.putBool("rep", s_repeater);
+  s_prefs.putUChar("pin", s_pin);
   s_prefs.putBytes("color", &s_color, sizeof(s_color));
   s_prefs.putString("order", s_order);
   if (s_dirtyAt == dirtyAtEntry) s_dirtyAt = 0;
@@ -1067,6 +1121,9 @@ void begin() {
   s_inc = s_prefs.getUChar("inc", 1) != 0;
   s_count  = s_prefs.getUShort("count", LED_COUNT_DEFAULT);
   s_budget = s_prefs.getUShort("budget", LED_POWER_BUDGET_MA);
+  s_repeater = s_prefs.getBool("rep", LED_REPEATER_PIXEL != 0);
+  s_pin      = s_prefs.getUChar("pin", PIN_LED_DATA);
+  if (s_pin != s_pinLive) { s_strip.setPin(s_pin); s_pinLive = s_pin; }
   // Un mur deja en service porte l'ancienne valeur dans sa NVS : sans cette
   // borne, la mise a jour ne changerait rien la ou elle compte, c'est-a-dire
   // sur les cartes deja posees.
@@ -1106,13 +1163,14 @@ void begin() {
   // seule LED pour essayer voit donc une LED qui ne s'allume jamais, et rien
   // nulle part ne le lui dit. Le dire fort, au demarrage.
   if (OFFS)
-    Serial.printf("[led] REPETEUR ACTIF (LED_REPEATER_PIXEL=1) : le 1er pixel physique "
-                  "reste ETEINT expres. Il faut donc %u+1 = %u LED cablees, et la "
-                  "premiere visible est la DEUXIEME de la chaine. Sur un banc a une "
-                  "seule LED, mettre LED_REPEATER_PIXEL a 0.\n",
+    Serial.printf("[led] REPETEUR ACTIF : le 1er pixel physique reste ETEINT expres. "
+                  "Il faut donc %u+1 = %u LED cablees, et la premiere visible est la "
+                  "DEUXIEME de la chaine. Une carte controleur du commerce n'a PAS de "
+                  "repeteur : dans ce cas -> /api/set?repeater=0 (garde en NVS, aucun "
+                  "reflashage).\n",
                   s_count, s_count + 1);
   Serial.printf("[led] %u px on GPIO%d, order=%s mode=%s bright=%u budget=%u mA\n",
-                s_count, PIN_LED_DATA, s_order, modeName(s_mode), s_bright, s_budget);
+                s_count, s_pin, s_order, modeName(s_mode), s_bright, s_budget);
 }
 
 void tick() {
@@ -1167,6 +1225,15 @@ void tick() {
     s_frame[i] = scale(Rgbw{ pc.r, pc.g, pc.b, pc.w }, lvl);
   }
 
+  // Correction de luminosite pixel par pixel. APRES le plastique et AVANT la
+  // luminosite globale : c'est une propriete de la lampe, pas du mode ni de
+  // l'ambiance. Posee avant le plastique elle deraperait la teinte, posee apres
+  // la luminosite globale elle serait ecrasee des qu'on baisse le mur.
+  for (uint16_t i = 0; i < s_count; i++) {
+    const uint8_t t = arenapf::trimOf(i);
+    if (t != 255) s_frame[i] = scale(s_frame[i], (float)t / 255.0f);
+  }
+
   // Mapping wizard overlay — works on top of any mode, auto-expires.
   if (s_idUntil) {
     if ((int32_t)(now - s_idUntil) >= 0) clearIdentify();
@@ -1180,8 +1247,14 @@ void tick() {
         const arenamap::Zone* zn = arenamap::zone((uint8_t)s_idZone);
         if (zn) {
           for (uint16_t i = 0; i < s_count; i++) s_frame[i] = scale(s_frame[i], 0.15f);
-          for (uint16_t i = zn->first; i < zn->first + zn->count && i < s_count; i++)
-            s_frame[i] = scale(hot, blink);
+          // Montrer le groupe, c'est montrer SES MEMBRES. Eclairer la tranche
+          // qui va du premier au dernier ferait clignoter les pixels des autres
+          // groupes intercales - et l'assistant de cartographie sert justement
+          // a repondre "lesquels ?", donc il ne peut pas mentir la-dessus.
+          for (uint16_t n = 0; n < zn->count; n++) {
+            const int i = arenamap::zoneNth((uint8_t)s_idZone, n);
+            if (i >= 0 && i < (int)s_count) s_frame[i] = scale(hot, blink);
+          }
         }
       }
     }

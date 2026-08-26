@@ -32,7 +32,10 @@ playfield, in VP table units — plus NAME. Table bounds come from GameData
 (LEFT/RGHT/TOPX/BOTM), so positions can be normalised to 0..1.
 """
 import json, re, struct, sys
-import olefile
+try:
+    import olefile
+except ImportError:
+    sys.exit("il manque olefile :  pip3 install olefile")
 
 ITEM_LIGHT, ITEM_BUMPER, ITEM_FLIPPER = 7, 5, 1
 WANTED = {ITEM_LIGHT: "light", ITEM_BUMPER: "bumper", ITEM_FLIPPER: "flipper"}
@@ -67,6 +70,43 @@ def as_text(payload):
                 except UnicodeDecodeError:
                     pass
     return payload.split(b"\x00")[0].decode("latin-1", "replace")
+
+
+def names(path):
+    """Dire ce que la table contient VRAIMENT, avant d'en extraire quoi que ce soit.
+
+    La traduction nom -> type d'insert est une convention par constructeur, et un
+    motif qui ne correspond a rien ne rend pas d'erreur : il rend un plateau a
+    zero insert, ou un plateau plausible ou les flashers passent pour des lampes.
+    La panne se decouvre alors devant le mur, apres le televersement.
+
+    Demander a quelqu'un d'ouvrir Visual Pinball pour verifier, c'est lui faire
+    faire a la main ce que le fichier sait deja dire.
+    """
+    ole = olefile.OleFileIO(path)
+    found = []
+    for entry in ole.listdir():
+        if len(entry) != 2 or entry[0] != "GameStg" or not entry[1].startswith("GameItem"):
+            continue
+        data = ole.openstream("/".join(entry)).read()
+        if len(data) < 4:
+            continue
+        (itype,) = struct.unpack_from("<I", data, 0)
+        if itype != ITEM_LIGHT:
+            continue
+        for tag, payload in biff_records(data, 4):
+            if tag == b"NAME":
+                found.append(payload.decode("utf-16-le", "ignore").rstrip("\x00"))
+                break
+    found.sort()
+    print("%d lumieres dans la table :" % len(found))
+    for n in found:
+        print("   ", n)
+    print()
+    print("Regarder le PREFIXE. Le defaut de l'outil est la convention Gottlieb :")
+    print('   "kinds":  [["^L\\\\d", "i"], ["^F", "f"]]     "ignore": ["^GI", "^LS"]')
+    print("Si les noms ci-dessus ne commencent pas par L<chiffre>, corriger ces")
+    print("deux champs dans tools/games/<jeu>.json AVANT de lancer l'extraction.")
 
 
 def main(path, cfg):
@@ -110,11 +150,23 @@ def main(path, cfg):
     # lamps on the real playfield. GI is house light, never commanded. What is
     # left: L* (the lamp matrix) and F* (flashers, driven by the solenoid board
     # rather than the matrix — commanded all the same, kept and marked 'f').
+    # Comment un NOM d'objet VP se traduit en type d'insert. C'etait ecrit en
+    # dur, et c'etait la convention Gottlieb : "GI"/"LS" ignores, "L<n>" insert
+    # de matrice, "F" flasher. Sur une table Williams - Alien Poker, System 7 -
+    # les auteurs ne nomment pas pareil, et un motif faux ne rend pas une erreur :
+    # il rend un plateau a zero insert, ou pire un plateau plausible ou les
+    # flashers sont comptes comme des lampes. Le reste de l'outil se disait
+    # "game-agnostic" pendant que cette fonction ne l'etait pas.
+    #
+    # Les motifs vivent donc dans le fichier de jeu, et le defaut reste Gottlieb.
+    KINDS  = cfg.get("kinds",  [["^L\\d", "i"], ["^F", "f"]])
+    IGNORE = cfg.get("ignore", ["^GI", "^LS"])
+
     def kind(name):
-        if name.startswith("GI"): return None            # general illumination
-        if name.startswith("LS"): return None            # ramp chaser, not lamps
-        if re.match(r"^L\d", name): return "i"           # lamp matrix insert
-        if name.startswith("F"):  return "f"             # flasher
+        for pat in IGNORE:
+            if re.match(pat, name): return None
+        for pat, k in KINDS:
+            if re.match(pat, name): return k
         return None
 
     # The VP table's light names FOLLOW the machine's own lamp chart (checked on
@@ -163,6 +215,13 @@ if __name__ == "__main__":
         i = args.index("--config")
         cfg = json.load(open(args[i + 1]))
         del args[i:i + 2]
+    want_names = "--names" in args
+    if want_names:
+        args.remove("--names")
     if not args:
-        sys.exit("usage: vpx_inserts.py <table.vpx> [--config tools/games/<game>.json]")
-    main(args[0], cfg)
+        sys.exit("usage: vpx_inserts.py <table.vpx> [--names] "
+                 "[--config tools/games/<game>.json]")
+    if want_names:
+        names(args[0])
+    else:
+        main(args[0], cfg)
