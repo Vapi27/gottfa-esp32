@@ -1259,7 +1259,7 @@ static void startServer() {
     t += "  Le rattrapage est prevu, dix minutes au fer : un fil de quelques mm\n";
     t += "  entre +5 V et la broche 4 de D2, avec une 1N4148 en l air (cathode\n";
     t += "  vers D2). VDD passe a ~4,3 V, dans la plage.\n";
-    t += "  En attendant : /api/set?statusled=0 l eteint plutot que de laisser\n";
+    t += "  En attendant : /api/set?statusled=0 lui envoie du noir une fois\n";
     t += "  un temoin qui ment.\n\n";
 
     t += "-- La flash --\n";
@@ -1596,7 +1596,15 @@ void begin() {
 //   vert   = associe a un reseau         rouge = defaut signale par le limiteur
 static void statusTick() {
 #if ARENA_STATUS_LED_ENABLE
-  if (!s_statOn) return;
+  // Un WS2812 CONSERVE sa derniere valeur : cesser de lui ecrire ne l'eteint
+  // pas, il reste fige sur ce qu'il affichait. Il faut lui envoyer du noir une
+  // fois, au moment ou on l'eteint - sans quoi statusled=0 ne fait rien de
+  // visible, ce qui est precisement ce qu'on reprochait aux diagnostics.
+  static bool wasOn = true;
+  if (!s_statOn) {
+    if (wasOn) { wasOn = false; neopixelWrite(s_statPin, 0, 0, 0); }
+    return;
+  }
   static uint32_t last = 0;
   const uint32_t now = millis();
   if (now - last < 200) return;                // 5 Hz : on ne fait que comparer
@@ -1617,6 +1625,7 @@ static void statusTick() {
   // vingt-cinq par seconde, et le partage du RMT redevient sans consequence.
   static uint8_t  lr = 1, lg = 1, lb = 1;
   static uint32_t lastPush = 0;
+  if (!wasOn) { wasOn = true; lr = lg = lb = 1; }   // rallumage : forcer l'ecriture
   if (rr == lr && gg == lg && bb == lb && now - lastPush < 5000) return;
   lr = rr; lg = gg; lb = bb; lastPush = now;
   neopixelWrite(s_statPin, rr, gg, bb);
