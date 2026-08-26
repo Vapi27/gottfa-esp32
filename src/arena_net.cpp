@@ -710,6 +710,57 @@ static void startServer() {
     r->send(200, "text/plain", "cleared");
   });
 
+  // Un pixel rejoint ou quitte un groupe, un par un : c'est le geste de la
+  // cartographie a la main. Un groupe n'etant plus une plage, il n'y a pas
+  // d'autre facon de decrire "ce bumper-la et celui d'en face, pas ce qu'il y a
+  // entre les deux".
+  //   /api/zone/assign?led=37&z=4     -> le pixel 37 rejoint le groupe 4
+  //   /api/zone/assign?led=37&z=-1    -> il n'appartient plus a rien
+  s_server.on("/api/zone/assign", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("led") || !r->hasParam("z")) {
+      r->send(400, "text/plain", "led= et z= requis (z=-1 pour retirer)");
+      return;
+    }
+    const long led = r->getParam("led")->value().toInt();
+    const long z   = r->getParam("z")->value().toInt();
+    if (led < 0 || led >= LED_MAX) { r->send(400, "text/plain", "led hors chaine"); return; }
+    const uint8_t zz = (z < 0) ? arenamap::ZONE_NONE : (uint8_t)z;
+    if (!arenamap::setLedZone((uint16_t)led, zz)) {
+      r->send(400, "text/plain", "groupe inconnu");
+      return;
+    }
+    arenamap::save();
+    r->send(200, "application/json", arenamap::toJson());
+  });
+
+  // Creer / renommer / supprimer un groupe sans reecrire toute la table.
+  //   /api/zone/add?n=pop-bumpers          -> groupe vide, a remplir pixel par pixel
+  //   /api/zone/name?z=4&n=eclairage
+  //   /api/zone/del?z=4
+  s_server.on("/api/zone/add", HTTP_GET, [](AsyncWebServerRequest* r) {
+    const String n = r->hasParam("n") ? r->getParam("n")->value() : String("groupe");
+    if (!arenamap::addZone(n.c_str(), 0, 0)) { r->send(400, "text/plain", "table pleine"); return; }
+    arenamap::save();
+    r->send(200, "application/json", arenamap::toJson());
+  });
+  s_server.on("/api/zone/name", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("z") || !r->hasParam("n")) { r->send(400, "text/plain", "z= et n= requis"); return; }
+    if (!arenamap::renameZone((uint8_t)r->getParam("z")->value().toInt(),
+                              r->getParam("n")->value().c_str())) {
+      r->send(400, "text/plain", "groupe inconnu"); return;
+    }
+    arenamap::save();
+    r->send(200, "application/json", arenamap::toJson());
+  });
+  s_server.on("/api/zone/del", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("z")) { r->send(400, "text/plain", "z= requis"); return; }
+    if (!arenamap::removeZone((uint8_t)r->getParam("z")->value().toInt())) {
+      r->send(400, "text/plain", "groupe inconnu"); return;
+    }
+    arenamap::save();
+    r->send(200, "application/json", arenamap::toJson());
+  });
+
   s_server.on("/api/zones", HTTP_GET, [](AsyncWebServerRequest* r) {
     r->send(200, "application/json", arenamap::toJson());
   });

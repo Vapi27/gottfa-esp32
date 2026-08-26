@@ -309,8 +309,13 @@ static void fxZoneSweep(Rgbw* buf) {
     if (k <= 0.0f) continue;
     const arenamap::Zone* zn = arenamap::zone(z);
     if (!zn) continue;                                 // table can shrink from the HTTP task
-    for (uint16_t i = zn->first; i < zn->first + zn->count && i < s_count; i++)
+    // Par APPARTENANCE, pas par tranche : un groupe disperse - des pop bumpers,
+    // l'eclairage general - n'occupe plus first..first+count.
+    for (uint16_t n = 0; n < zn->count; n++) {
+      const int i = arenamap::zoneNth(z, n);
+      if (i < 0 || i >= (int)s_count) continue;
       buf[i] = scale(s_color, 0.10f + 0.90f * k);
+    }
   }
 }
 
@@ -578,8 +583,12 @@ static void fxArena(Rgbw* buf) {
       if (k < 0.02f) continue;
       const arenamap::Zone* zn = arenamap::zone(z);
       if (!zn) continue;                               // table can shrink from the HTTP task
-      for (uint16_t i = zn->first; i < zn->first + zn->count && i < s_count; i++) {
-        float ph = 1.0f - fabsf((float)(i - zn->first) / (float)max<uint16_t>(1, zn->count) - 0.5f);
+      for (uint16_t n = 0; n < zn->count; n++) {
+        const int i = arenamap::zoneNth(z, n);
+        if (i < 0 || i >= (int)s_count) continue;
+        // Le rang DANS le groupe, plus l'ecart a son premier membre : sur un
+        // groupe disperse, l'ecart d'indice ne dit plus rien de la position.
+        float ph = 1.0f - fabsf((float)n / (float)max<uint16_t>(1, zn->count) - 0.5f);
         buf[i] = addSat(buf[i], scale(amber, k * ph));
       }
     }
@@ -1229,8 +1238,14 @@ void tick() {
         const arenamap::Zone* zn = arenamap::zone((uint8_t)s_idZone);
         if (zn) {
           for (uint16_t i = 0; i < s_count; i++) s_frame[i] = scale(s_frame[i], 0.15f);
-          for (uint16_t i = zn->first; i < zn->first + zn->count && i < s_count; i++)
-            s_frame[i] = scale(hot, blink);
+          // Montrer le groupe, c'est montrer SES MEMBRES. Eclairer la tranche
+          // qui va du premier au dernier ferait clignoter les pixels des autres
+          // groupes intercales - et l'assistant de cartographie sert justement
+          // a repondre "lesquels ?", donc il ne peut pas mentir la-dessus.
+          for (uint16_t n = 0; n < zn->count; n++) {
+            const int i = arenamap::zoneNth((uint8_t)s_idZone, n);
+            if (i >= 0 && i < (int)s_count) s_frame[i] = scale(hot, blink);
+          }
         }
       }
     }
