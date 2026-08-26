@@ -1012,7 +1012,10 @@ function wzDraw() {
   // table, donc l'image se pose telle quelle sous les pastilles.
   // 178 ko en 560 px de large : servi une fois puis garde en cache, alors que
   // l'original de la table fait 13,9 Mo.
-  s += '<image href="/playfield.jpg" x="0" y="0" width="' + W + '" height="' + H +
+  // Sa photo si elle existe, sinon le plateau livre. PF_IMG est fixe une fois
+  // au chargement : demander le fichier a chaque redessin ferait clignoter le
+  // plan a chaque coup de curseur.
+  s += '<image href="' + PF_IMG + '" x="0" y="0" width="' + W + '" height="' + H +
        '" preserveAspectRatio="none" opacity="0.85"/>';
   s += '<rect x="0" y="0" width="' + W + '" height="' + H +
        '" rx="64" fill="none" stroke="#2c241d" stroke-width="4"/>';
@@ -1087,6 +1090,21 @@ function wzDraw() {
       (giPads ? ' + ' + giPads + ' lighting pads hidden' : '') + '.'
     : 'The board has no /arena_pf.json - re-upload the filesystem.';
   $('wz-warn').className = PF.length ? 'hint' : 'hint warn';
+}
+
+// --- la photo du plateau --------------------------------------------------
+let PF_IMG = '/playfield.jpg';
+fetch('/pf.jpg', { method: 'HEAD' })
+  .then(r => { if (r.ok) PF_IMG = '/pf.jpg'; })
+  .catch(() => {});
+
+function uploadPf(file) {
+  if (!file) return;
+  toast('envoi de la photo...');
+  fetch('/api/pfimg', { method: 'POST', body: file })
+    .then(r => r.text())
+    .then(t => { PF_IMG = '/pf.jpg?' + Date.now(); toast(t); drawPlan && drawPlan(); })
+    .catch(() => toast('envoi echoue'));
 }
 
 // --- wifi / OTA ---

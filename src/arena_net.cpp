@@ -775,6 +775,74 @@ static void startServer() {
   // Consequence assumee : demander une teinte pour un pixel qui n'est pas encore
   // pose n'a nulle part ou aller. On le DIT, avec le geste qui manque. Accepter
   // en silence rendrait un reglage qui ne se voit jamais.
+  // --- la photo du plateau, et les points dessus ---------------------------
+  //
+  // POST /api/pfimg  (corps = le JPEG brut)  -> /pf.jpg
+  // Le plan prefere /pf.jpg quand il existe et retombe sur le playfield.jpg
+  // livre sinon. Deux fichiers separes, deliberement : une photo televersee est
+  // le travail du proprietaire, et /update?target=fs reecrit toute la partition
+  // - c'est deja ce qui avait fait perdre la cartographie une fois. Le sien
+  // porte un autre nom pour que la prochaine mise a jour de l'interface ne
+  // l'emporte pas avec elle.
+  s_server.on("/api/pfimg", HTTP_POST,
+    [](AsyncWebServerRequest* r) {
+      const bool ok = LittleFS.exists("/pf.jpg") && LittleFS.open("/pf.jpg", "r").size() > 0;
+      r->send(ok ? 200 : 400, "text/plain", ok ? "photo enregistree" : "rien recu");
+    },
+    nullptr,
+    [](AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total) {
+      static File up;
+      if (index == 0) {
+        up = LittleFS.open("/pf.jpg", "w");
+        Serial.printf("[pf] photo entrante, %u octets\n", (unsigned)total);
+      }
+      if (up) up.write(data, len);
+      if (up && index + len >= total) { up.close(); Serial.println("[pf] photo enregistree"); }
+    });
+
+  s_server.on("/api/pfimg", HTTP_DELETE, [](AsyncWebServerRequest* r) {
+    LittleFS.remove("/pf.jpg");
+    r->send(200, "text/plain", "photo retiree - retour au plateau livre");
+  });
+
+  // Poser, deplacer, retirer un point sur la photo. C'est le geste qui rend le
+  // mur possible pour une machine que le depot ne connait pas : pas de table
+  // Visual Pinball, pas de ROM, juste une photo et quelqu'un qui sait ou sont
+  // ses inserts.
+  //   /api/insert/add?x=0.42&y=0.71&n=pop-gauche
+  //   /api/insert/move?i=12&x=0.44&y=0.70
+  //   /api/insert/del?i=12
+  s_server.on("/api/insert/add", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("x") || !r->hasParam("y")) { r->send(400, "text/plain", "x= et y= (0..1) requis"); return; }
+    const int i = arenapf::addInsert(r->getParam("x")->value().toFloat(),
+                                     r->getParam("y")->value().toFloat(),
+                                     r->hasParam("n") ? r->getParam("n")->value().c_str() : nullptr);
+    if (i < 0) { r->send(400, "text/plain", "table pleine"); return; }
+    arenapf::saveInserts();
+    r->send(200, "application/json", "{\"insert\":" + String(i) + "}");
+  });
+  s_server.on("/api/insert/move", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("i") || !r->hasParam("x") || !r->hasParam("y")) {
+      r->send(400, "text/plain", "i=, x= et y= requis"); return;
+    }
+    if (!arenapf::moveInsert((uint8_t)r->getParam("i")->value().toInt(),
+                             r->getParam("x")->value().toFloat(),
+                             r->getParam("y")->value().toFloat())) {
+      r->send(400, "text/plain", "point inconnu"); return;
+    }
+    arenapf::saveInserts();
+    r->send(200, "text/plain", "deplace");
+  });
+  s_server.on("/api/insert/del", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("i")) { r->send(400, "text/plain", "i= requis"); return; }
+    if (!arenapf::removeInsert((uint8_t)r->getParam("i")->value().toInt())) {
+      r->send(400, "text/plain", "point inconnu"); return;
+    }
+    arenapf::saveInserts();
+    arenapf::save();                 // les affectations ont ete recalees
+    r->send(200, "text/plain", "retire");
+  });
+
   s_server.on("/api/pixel", HTTP_GET, [](AsyncWebServerRequest* r) {
     if (!r->hasParam("led")) { r->send(400, "text/plain", "led= requis"); return; }
     const long led = r->getParam("led")->value().toInt();

@@ -103,6 +103,19 @@ bool anyAssigned();
 
 String toJson();                    // {"leds":[{"i":0,"a":12},...]}
 bool   fromJson(const char* json);
+// La table d'inserts est EDITABLE. Elle etait decrite comme "the machine, it
+// does not change" - vrai tant que la machine etait l'Arena livree avec le
+// firmware. Pour un autre plateau il n'y a ni table Visual Pinball ni ROM sous
+// la main : il y a une photo et quelqu'un qui sait ou sont ses inserts.
+// Un point cree ainsi n'a PAS de numero de lampe (-1) : il ne vient d'aucune
+// ROM, donc l'attract d'origine ne le pilotera pas - les effets et les groupes,
+// si. C'est la difference entre rejouer une machine et eclairer un plateau.
+int  addInsert(float x, float y, const char* name);   // -1 si la table est pleine
+bool moveInsert(uint8_t ins, float x, float y);
+bool removeInsert(uint8_t ins);                        // recale les affectations
+void clearInserts();
+bool saveInserts();                                    // reecrit /arena_pf.json
+
 String insertsJson();               // the fixed table, straight from LittleFS
 bool   save();
 
