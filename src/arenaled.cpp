@@ -1225,6 +1225,15 @@ void tick() {
     s_frame[i] = scale(Rgbw{ pc.r, pc.g, pc.b, pc.w }, lvl);
   }
 
+  // Correction de luminosite pixel par pixel. APRES le plastique et AVANT la
+  // luminosite globale : c'est une propriete de la lampe, pas du mode ni de
+  // l'ambiance. Posee avant le plastique elle deraperait la teinte, posee apres
+  // la luminosite globale elle serait ecrasee des qu'on baisse le mur.
+  for (uint16_t i = 0; i < s_count; i++) {
+    const uint8_t t = arenapf::trimOf(i);
+    if (t != 255) s_frame[i] = scale(s_frame[i], (float)t / 255.0f);
+  }
+
   // Mapping wizard overlay — works on top of any mode, auto-expires.
   if (s_idUntil) {
     if ((int32_t)(now - s_idUntil) >= 0) clearIdentify();

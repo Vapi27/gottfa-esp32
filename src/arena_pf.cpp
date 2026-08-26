@@ -35,6 +35,44 @@ static char    s_nam[INSERT_MAX][NAME_LEN];  // owner's label, empty = use the s
 // browser so it is the same from every phone in the house.
 static uint8_t s_hid[INSERT_MAX];      // 1 = masque
 
+// Correction de luminosite, par PIXEL et non par insert, 255 = neutre.
+//
+// La teinte appartient a l'insert - c'est le plastique moule, elle doit survivre
+// a un rerouteage de la chaine, et c'est deja ainsi. La luminosite, elle,
+// appartient au pixel : deux SK6812 d'un meme lot ne rendent pas la meme chose,
+// un insert large avale plus qu'un petit, et un plastique epais assombrit ce
+// qu'il y a dessous. Aucune de ces trois causes ne suit le fil quand on le
+// deplace ; toutes suivent la LED.
+static const char* NVS_TRIM = "trim";
+static uint8_t s_trim[LED_MAX];
+
+uint8_t trimOf(uint16_t led)  { return (led < LED_MAX) ? s_trim[led] : 255; }
+
+bool setTrim(uint16_t led, uint8_t v) {
+  if (led >= LED_MAX) return false;
+  s_trim[led] = v;
+  return true;
+}
+
+void clearTrims() { memset(s_trim, 255, sizeof(s_trim)); }
+
+bool saveTrims() {
+  return s_prefs.putBytes(NVS_TRIM, s_trim, sizeof(s_trim)) == sizeof(s_trim);
+}
+
+String trimsJson() {
+  String j = "{\"trims\":[";
+  bool first = true;
+  for (uint16_t i = 0; i < LED_MAX; i++) {
+    if (s_trim[i] == 255) continue;          // le neutre ne s'ecrit pas
+    if (!first) j += ',';
+    j += "{\"i\":" + String(i) + ",\"t\":" + String(s_trim[i]) + "}";
+    first = false;
+  }
+  j += "]}";
+  return j;
+}
+
 uint8_t       insertCount()       { return s_nIns; }
 const Insert* insert(uint8_t i)   { return (i < s_nIns) ? &s_ins[i] : nullptr; }
 uint8_t       ledInsert(uint16_t led) { return (led < LED_MAX) ? s_led[led] : UNASSIGNED; }
@@ -266,6 +304,9 @@ void begin() {
     s_prefs.getBytes(NVS_NAM, s_nam, sizeof(s_nam));
   if (s_prefs.getBytesLength(NVS_HID) == sizeof(s_hid))
     s_prefs.getBytes(NVS_HID, s_hid, sizeof(s_hid));
+  clearTrims();
+  if (s_prefs.getBytesLength(NVS_TRIM) == sizeof(s_trim))
+    s_prefs.getBytes(NVS_TRIM, s_trim, sizeof(s_trim));
   uint16_t n = 0;
   for (uint16_t i = 0; i < LED_MAX; i++) if (s_led[i] != UNASSIGNED) n++;
   Serial.printf("[pf] %u inserts%s, %u pixels placed\n",

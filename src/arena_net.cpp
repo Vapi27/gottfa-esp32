@@ -761,6 +761,66 @@ static void startServer() {
     r->send(200, "application/json", arenamap::toJson());
   });
 
+  // Un pixel, sa luminosite et sa teinte.
+  //   /api/pixel?led=37                 -> ce qu'il porte
+  //   /api/pixel?led=37&trim=180        -> sa luminosite propre (0..255, 255 = neutre)
+  //   /api/pixel?led=37&r=255&g=40&b=0  -> sa teinte
+  //
+  // Les deux ne vont PAS au meme endroit, et c'est deliberé. La luminosite est
+  // ecrite sur le pixel : elle corrige la lampe - dispersion du lot, taille de
+  // l'insert, epaisseur du plastique - et ces causes suivent la LED. La teinte
+  // est ecrite sur l'INSERT : c'est le plastique moule, il reste sur le plateau
+  // quand on refait passer le fil autrement.
+  //
+  // Consequence assumee : demander une teinte pour un pixel qui n'est pas encore
+  // pose n'a nulle part ou aller. On le DIT, avec le geste qui manque. Accepter
+  // en silence rendrait un reglage qui ne se voit jamais.
+  s_server.on("/api/pixel", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("led")) { r->send(400, "text/plain", "led= requis"); return; }
+    const long led = r->getParam("led")->value().toInt();
+    if (led < 0 || led >= LED_MAX) { r->send(400, "text/plain", "led hors chaine"); return; }
+
+    if (r->hasParam("trim")) {
+      long v = r->getParam("trim")->value().toInt();
+      if (v < 0)   v = 0;
+      if (v > 255) v = 255;
+      arenapf::setTrim((uint16_t)led, (uint8_t)v);
+      arenapf::saveTrims();
+    }
+
+    const uint8_t ins = arenapf::ledInsert((uint16_t)led);
+    if (r->hasParam("r") || r->hasParam("g") || r->hasParam("b") || r->hasParam("w")) {
+      if (ins == arenapf::UNASSIGNED) {
+        r->send(409, "text/plain",
+                "ce pixel n'est pose sur aucun insert : la teinte est une propriete "
+                "de l'insert (le plastique), pas du fil. Placer le pixel d'abord "
+                "(assistant de cartographie), puis recommencer.");
+        return;
+      }
+      arenapf::Colour c = arenapf::colourOf(ins);
+      if (r->hasParam("r")) c.r = (uint8_t)r->getParam("r")->value().toInt();
+      if (r->hasParam("g")) c.g = (uint8_t)r->getParam("g")->value().toInt();
+      if (r->hasParam("b")) c.b = (uint8_t)r->getParam("b")->value().toInt();
+      if (r->hasParam("w")) c.w = (uint8_t)r->getParam("w")->value().toInt();
+      arenapf::setColour(ins, c);
+      arenapf::saveColours();
+    }
+
+    const arenapf::Colour c = arenapf::colourOfLed((uint16_t)led);
+    String j = "{\"led\":" + String(led);
+    j += ",\"trim\":" + String(arenapf::trimOf((uint16_t)led));
+    j += ",\"insert\":" + String(ins == arenapf::UNASSIGNED ? -1 : (int)ins);
+    j += ",\"zone\":"   + String(arenamap::zoneOfLed((uint16_t)led));
+    j += ",\"r\":" + String(c.r) + ",\"g\":" + String(c.g) +
+         ",\"b\":" + String(c.b) + ",\"w\":" + String(c.w) + "}";
+    r->send(200, "application/json", j);
+  });
+
+  s_server.on("/api/pixel/trims", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (r->hasParam("clear")) { arenapf::clearTrims(); arenapf::saveTrims(); }
+    r->send(200, "application/json", arenapf::trimsJson());
+  });
+
   s_server.on("/api/zones", HTTP_GET, [](AsyncWebServerRequest* r) {
     r->send(200, "application/json", arenamap::toJson());
   });

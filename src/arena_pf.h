@@ -80,6 +80,19 @@ bool  hidden(uint8_t ins);
 bool  setHidden(uint8_t ins, bool h);
 bool  saveHidden();
 
+// Correction de luminosite par PIXEL, 255 = neutre.
+//
+// La teinte appartient a l'insert - c'est le plastique moule, et elle doit
+// survivre a un rerouteage de la chaine. La luminosite appartient au PIXEL :
+// deux SK6812 d'un meme lot ne rendent pas la meme chose, un insert large avale
+// plus qu'un petit, un plastique epais assombrit ce qu'il porte. Aucune de ces
+// causes ne suit le fil quand on le deplace ; toutes suivent la LED.
+uint8_t trimOf(uint16_t led);
+bool    setTrim(uint16_t led, uint8_t v);
+void    clearTrims();
+bool    saveTrims();
+String  trimsJson();
+
 Colour colourOf(uint8_t ins);            // 0,0,0,0 when the insert has no colour
 Colour colourOfLed(uint16_t led);
 bool   setColour(uint8_t ins, Colour c); // all zero clears it
