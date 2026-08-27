@@ -44,7 +44,8 @@ struct Zone {
   uint16_t count;      // nombre de MEMBRES (0 = groupe vide)
 };
 
-void begin();                       // load ARENA_MAP_PATH, else install the default table
+void begin();
+const char* source();               // "nvs" | "file" | "default"                       // load ARENA_MAP_PATH, else install the default table
 bool load();                        // (re)load from LittleFS  — false if absent/invalid
 bool save();                        // write the current table to LittleFS
 void reset();                       // back to the compiled-in default template

@@ -1,4 +1,5 @@
 #include <LittleFS.h>
+#include <Preferences.h>
 #include <ArduinoJson.h>
 #include <string.h>
 #include "arena_map.h"
@@ -32,6 +33,30 @@ static uint8_t s_n = 0;
 // L'appartenance, un octet par pixel. C'est ELLE qui definit les groupes ;
 // s_zones[].first/count en sont recalcules et ne servent qu'a l'affichage.
 static uint8_t s_ledZone[LED_MAX];
+
+// --- Persistance -----------------------------------------------------------
+//
+// Les groupes vivaient UNIQUEMENT dans /arena_map.json, sur LittleFS. Or un OTA
+// du systeme de fichiers reecrit la partition entiere : chaque mise a jour de
+// l'interface effacait donc les groupes crees par le proprietaire, en silence.
+// Constate deux fois de suite sur la vraie carte le 2026-08-27 - le groupe
+// champignons a disparu aux deux flashs.
+//
+// Ce n'etait pas une question de fichier livre dans data/ : le retirer n'a rien
+// change, puisque c'est la partition qui est effacee, pas le fichier qui est
+// ecrase. Le mapping LED, lui, survivait - parce qu'il est en NVS
+// (arena_pf.cpp, putBytes) et que la NVS est une AUTRE partition, que l'OTA fs
+// ne touche pas. On aligne les groupes sur le meme choix.
+//
+// LittleFS reste lu au demarrage, en migration : une carte qui tourne
+// aujourd'hui a ses groupes la-bas et doit les retrouver une derniere fois.
+static Preferences s_prefs;
+// D'ou viennent les zones au demarrage. Publie dans /api/state : sans ca, un
+// groupe disparu ne dit pas s'il a ete efface ou simplement jamais relu.
+static const char* s_src = "?";
+static const char* NVS_NS   = "arenamap";
+static const char* NVS_ZONE = "zones";     // le tableau s_zones
+static const char* NVS_LEDZ = "ledzone";   // l appartenance de chaque pixel
 
 static void recount() {
   for (uint8_t z = 0; z < s_n; z++) { s_zones[z].first = 0; s_zones[z].count = 0; }
@@ -219,19 +244,52 @@ bool load() {
   return fromJson(s.c_str());
 }
 
+// La NVS est la reference. Le fichier reste ecrit pour rester lisible depuis un
+// navigateur ou un outil, mais plus rien n'en depend.
 bool save() {
+  const bool okZ = s_prefs.putBytes(NVS_ZONE, s_zones, sizeof(s_zones)) == sizeof(s_zones);
+  const bool okL = s_prefs.putBytes(NVS_LEDZ, s_ledZone, sizeof(s_ledZone)) == sizeof(s_ledZone);
+  s_prefs.putUChar("n", s_n);
+
   File f = LittleFS.open(ARENA_MAP_PATH, "w");
-  if (!f) return false;
-  String j = toJson();
-  size_t w = f.print(j);
-  f.close();
-  return w == j.length();
+  if (f) { String j = toJson(); f.print(j); f.close(); }
+  return okZ && okL;
 }
+
+static bool loadNvs() {
+  if (s_prefs.getBytesLength(NVS_ZONE) != sizeof(s_zones)) return false;
+  if (s_prefs.getBytesLength(NVS_LEDZ) != sizeof(s_ledZone)) return false;
+  s_prefs.getBytes(NVS_ZONE, s_zones, sizeof(s_zones));
+  s_prefs.getBytes(NVS_LEDZ, s_ledZone, sizeof(s_ledZone));
+  s_n = s_prefs.getUChar("n", 0);
+  if (s_n > ZONE_MAX) s_n = ZONE_MAX;
+  // Un nom non termine rendrait toute la table illisible : on borne plutot que
+  // de faire confiance a ce qui sort de la flash.
+  for (uint8_t z = 0; z < ZONE_MAX; z++) s_zones[z].name[ZONE_NAME_LEN - 1] = 0;
+  for (uint16_t i = 0; i < LED_MAX; i++)
+    if (s_ledZone[i] != ZONE_NONE && s_ledZone[i] >= s_n) s_ledZone[i] = ZONE_NONE;
+  recount();
+  return s_n > 0;
+}
+
+const char* source() { return s_src; }
 
 void begin() {
   reset();
-  if (load()) Serial.printf("[map] loaded %s (%u zones)\n", ARENA_MAP_PATH, s_n);
-  else        Serial.printf("[map] default template (%u zones)\n", s_n);
+  s_prefs.begin(NVS_NS, false);
+  if (loadNvs()) {
+    s_src = "nvs";
+    Serial.printf("[map] %u zones depuis la NVS\n", s_n);
+  } else if (load()) {
+    // Migration : la carte avait ses groupes dans LittleFS. On les remonte en
+    // NVS tout de suite, pour que le prochain flash fs ne les emporte pas.
+    s_src = "file";
+    Serial.printf("[map] migration de %s vers la NVS (%u zones)\n", ARENA_MAP_PATH, s_n);
+    save();
+  } else {
+    s_src = "default";
+    Serial.printf("[map] modele par defaut (%u zones)\n", s_n);
+  }
 }
 
 }  // namespace arenamap
