@@ -36,9 +36,24 @@ static int    g_channels = 1;
 static double g_rate     = 48000.0;
 static std::atomic<bool> g_record{false};
 
+// ⚠️ Ce que ce rappel RENVOIE devient samples_this_frame dans le mixeur de MAME.
+//
+//   mixer_sh_start()  ->  r = osd_start_audio_stream(...)  ->  samples_this_frame = r
+//   et osd_start_audio_stream() retourne directement ce que rend ce rappel.
+//
+// Renvoyer le FORMAT (INT16 = 0, comme le fait tools/capture_attract.cpp) revient
+// donc a dire "zero echantillon par trame" : le mixeur tourne, le rappel audio est
+// appele a chaque trame, et il annonce toujours 0. Aucune erreur, aucun message -
+// juste le silence. C'est ce qui a fait croire pendant une heure que la
+// bibliotheque etait construite sans son.
+//
+// La bonne valeur est samplesPerFrame, que PinMAME vient de calculer pour nous
+// (sample_rate / frames_per_second = 48000/60 = 800).
 int PINMAMECALLBACK OnAudioAvailable(PinmameAudioInfo* a, const void*) {
-  if (a) { g_channels = a->channels; g_rate = a->sampleRate; }
-  return PINMAME_AUDIO_FORMAT_INT16;      // on demande de l'entier : c'est ce qu'un WAV veut
+  if (!a) return 0;
+  g_channels = a->channels;
+  g_rate     = a->sampleRate;
+  return a->samplesPerFrame;
 }
 int PINMAMECALLBACK OnAudioUpdated(void* buf, int samples, const void*) {
   if (g_record.load() && buf && samples > 0) {

@@ -29,8 +29,19 @@ void PINMAMECALLBACK OnDisplayAvailable(int, int, PinmameDisplayLayout*, const v
 #include <atomic>
 static std::atomic<long> g_frame{0};
 void PINMAMECALLBACK OnDisplayUpdated(int, void*, PinmameDisplayLayout*, const void*) { g_frame++; }
+// ⚠️ Ce que ce rappel RENVOIE devient samples_this_frame dans le mixeur de MAME :
+//   mixer_sh_start() -> r = osd_start_audio_stream(...) -> samples_this_frame = r
+// et osd_start_audio_stream() retourne directement la valeur rendue ici. Ce n'est
+// donc PAS un format qu'on annonce, c'est un nombre d'echantillons par trame.
+//
+// Ici on rend 1 A DESSEIN : cet outil ne capture que les lampes, et demander au
+// mixeur de produire une trame audio complete a chaque image coute du temps pour
+// rien. Ne pas "corriger" en samplesPerFrame sans raison.
+//
+// tools/capture_sound.cpp, lui, doit rendre a->samplesPerFrame - sans quoi
+// PinMAME comprend "zero echantillon" et se tait sans le moindre message.
 int PINMAMECALLBACK OnAudioAvailable(PinmameAudioInfo*, const void*) {
-  return PINMAME_AUDIO_FORMAT_FLOAT;
+  return 1;
 }
 int  PINMAMECALLBACK OnAudioUpdated(void*, int frames, const void*) { return frames; }
 void PINMAMECALLBACK OnMechAvailable(int, PinmameMechInfo*, const void*) {}
