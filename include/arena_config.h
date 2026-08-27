@@ -362,6 +362,13 @@
 // default: the background is faithful, but a wall piece that never goes dark is
 // a matter of taste and the owner should meet it turned down rather than up.
 #define ARENA_GI_DEFAULT 90
+
+// Nom du groupe traite comme "les champignons" : un troisieme etage permanent,
+// a cote du fond, avec son propre niveau. C'est un groupe ordinaire de arenamap
+// - on lui affecte des pixels avec l'outil de groupes habituel - et non une
+// notion cablee dans le rendu. S'il n'existe pas, le reglage n'a simplement
+// aucun membre et ne fait rien.
+#define ARENA_CHAMP_ZONE "champignons"
 // Filament warmth at boot: 0 = spectral (orange), 255 = white-forward. 217 is
 // the 0.85 white share the bench settled on before this became a setting.
 #define ARENA_WARM_DEFAULT 217

@@ -132,6 +132,7 @@ static const char FALLBACK[] PROGMEM =
 // RMT part vraiment, ou si rmtInit() echoue (carte hors USB, donc pas de log).
 extern "C" {
   extern volatile uint32_t espShowRmtFail, espShowFrames, espShowLockMiss;
+  extern volatile uint32_t espShowInstalls, espShowNoIram;
   extern volatile int32_t  espShowBusType;
 }
 
@@ -387,6 +388,27 @@ static String stateJson() {
   j += ",\"bright\":" + String(arenaled::brightness());
   j += ",\"speed\":"  + String(arenaled::speed());
   j += ",\"gi\":"     + String(arenaled::gi());
+  j += ",\"insb\":"   + String(arenaled::insBright());
+  j += ",\"champ\":"  + String(arenaled::champ());
+  {
+    // Le groupe existe-t-il, et avec combien de pixels ? Un reglage qui ne
+    // commande rien doit se voir comme tel dans l'interface, pas passer pour
+    // une panne. -1 = le groupe n'existe pas encore.
+    const int cz = arenamap::indexOf(ARENA_CHAMP_ZONE);
+    const arenamap::Zone* z = (cz >= 0) ? arenamap::zone((uint8_t)cz) : nullptr;
+    j += ",\"champn\":" + String(z ? (int)z->count : -1);
+  }
+  j += ",\"lock\":"   + String(arenaled::levelLock() ? 1 : 0);
+  j += ",\"mapsrc\":\"" + String(arenamap::source()) + "\"";
+  j += ",\"framehz\":" + String(arenaled::frameHz());
+  {
+    // Teinte du fond, publiee a part des r/g/b/w des inserts : tout a zero
+    // veut dire "suit le panneau Couleur", ce que l'interface affiche comme
+    // tel au lieu d'un noir trompeur.
+    const arenaled::Rgbw gc = arenaled::giColor();
+    j += ",\"gir\":" + String(gc.r) + ",\"gig\":" + String(gc.g)
+       + ",\"gib\":" + String(gc.b) + ",\"giw\":" + String(gc.w);
+  }
   j += ",\"density\":" + String(arenaled::density());
   j += ",\"warm\":"   + String(arenaled::warm());
   j += ",\"inc\":"    + String(arenaled::incandescent() ? 1 : 0);
@@ -421,6 +443,14 @@ static String stateJson() {
   j += ",\"rmtframes\":" + String((uint32_t)espShowFrames);
   j += ",\"rmtfail\":"  + String((uint32_t)espShowRmtFail);
   j += ",\"lockmiss\":" + String((uint32_t)espShowLockMiss);
+  // Le canal RMT est desormais garde d une trame a l autre. rmtinst doit donc
+  // rester de l ordre d une installation par broche : s il grimpe a la cadence
+  // des trames, la garde ne prend pas et on est revenu au comportement d avant.
+  // noiram > 0 = le pilote a refuse ESP_INTR_FLAG_IRAM et on tourne degrade :
+  // la sortie RMT redevient vulnerable aux lectures flash (donc au service des
+  // pages), ce qui est exactement le defaut qu on corrige.
+  j += ",\"rmtinst\":" + String((uint32_t)espShowInstalls);
+  j += ",\"noiram\":"  + String((uint32_t)espShowNoIram);
   // Rendu gele pendant un appairage BLE. Sans ce champ, fps/ma/rmtframes figes
   // ressemblent a s'y meprendre a un rendu normal.
   j += ",\"paused\":" + String(arenaled::paused() ? "true" : "false");
@@ -527,6 +557,20 @@ static String stateJson() {
   return j;
 }
 
+// Verrou de niveaux : l'un bouge, l'autre suit. On conserve le RAPPORT et non
+// l'ecart, parce que c'est le rapport qu'on percoit comme "le meme equilibre"
+// quand on monte ou descend l'ensemble. Le rapport n'est pas defini quand la
+// source part de zero : dans ce seul cas on reporte l'ECART, faute de quoi un
+// fond descendu a 0 y resterait pour toujours et le verrou aurait l'air casse.
+static uint8_t followLevel(int from, int to, int other) {
+  if (from == to) return (uint8_t)other;
+  long v = (from > 0) ? lroundf((float)other * (float)to / (float)from)
+                      : (long)other + (to - from);
+  if (v < 0) v = 0;
+  if (v > 255) v = 255;
+  return (uint8_t)v;
+}
+
 static uint8_t param8(AsyncWebServerRequest* r, const char* k, uint8_t cur) {
   if (!r->hasParam(k)) return cur;
   long v = r->getParam(k)->value().toInt();
@@ -538,8 +582,25 @@ static uint8_t param8(AsyncWebServerRequest* r, const char* k, uint8_t cur) {
 static void startServer() {
   // --- UI ---------------------------------------------------------------
   s_server.on("/", HTTP_GET, [](AsyncWebServerRequest* r) {
-    if (LittleFS.exists("/arena.html")) r->send(LittleFS, "/arena.html", "text/html");
-    else                                r->send_P(200, "text/html", FALLBACK);
+    // La page compressee d'abord. Ce n'est pas de l'economie de place, c'est du
+    // temps d'antenne : mesure sur la carte, servir les 70 ko de la page fait
+    // tomber la cadence de rendu de 60,3 a 55,7 trames/s, et surtout une
+    // interruption WiFi qui tombe DANS un s_strip.show() (2,4 ms pour 75 pixels)
+    // depasse les 50 us de silence que les WS2812 lisent comme une fin de trame :
+    // tout ce qui suit dans la chaine recoit la suite comme une nouvelle trame et
+    // decroche. D'ou des pixels qui sautent en bout de chaine quand on rafraichit
+    // la page. 71,5 ko -> 25,9 ko, c'est 2,8 fois moins de fenetre pour ca.
+    //
+    // ATTENTION : arena.html.gz est genere, pas edite. Apres toute modification de
+    // data/arena.html il faut refaire  gzip -9 -k -f data/arena.html  avant
+    // buildfs, sinon la carte sert l'ancienne interface sans rien signaler.
+    if (LittleFS.exists("/arena.html.gz")) {
+      AsyncWebServerResponse* rsp = r->beginResponse(LittleFS, "/arena.html.gz", "text/html");
+      rsp->addHeader("Content-Encoding", "gzip");
+      r->send(rsp);
+    }
+    else if (LittleFS.exists("/arena.html")) r->send(LittleFS, "/arena.html", "text/html");
+    else                                     r->send_P(200, "text/html", FALLBACK);
   });
 
   // --- State / control ----------------------------------------------------
@@ -556,7 +617,29 @@ static void startServer() {
     }
     if (r->hasParam("bright")) arenaled::setBrightness(param8(r, "bright", arenaled::brightness()));
     if (r->hasParam("speed"))  arenaled::setSpeed(param8(r, "speed", arenaled::speed()));
-    if (r->hasParam("gi"))     arenaled::setGi(param8(r, "gi", arenaled::gi()));
+    if (r->hasParam("lock")) arenaled::setLevelLock(r->getParam("lock")->value().toInt() != 0);
+    if (r->hasParam("framehz")) arenaled::setFrameHz(param8(r, "framehz", arenaled::frameHz()));
+    if (r->hasParam("insb")) arenaled::setInsBright(param8(r, "insb", arenaled::insBright()));
+    // Les deux etages permanents, traites ensemble parce que le verrou fait
+    // dependre l'un de l'autre. Bouger les DEUX dans la meme requete est un
+    // reglage explicite : le verrou ne s'en mele pas, sans quoi on ne pourrait
+    // plus jamais refixer l'equilibre une fois verrouille.
+    if (r->hasParam("gi") || r->hasParam("champ")) {
+      const uint8_t oldG = arenaled::gi(), oldC = arenaled::champ();
+      uint8_t newG = param8(r, "gi", oldG), newC = param8(r, "champ", oldC);
+      if (arenaled::levelLock()) {
+        // Le suiveur se deduit du couple de REFERENCE, pas de la valeur courante
+        // - sinon un ecretage a 255 se propage dans le rapport et l'aller-retour
+        // ne redonne plus la valeur de depart.
+        const uint8_t rg = arenaled::levelRefGi(), rc = arenaled::levelRefChamp();
+        if (r->hasParam("gi") && !r->hasParam("champ"))      newC = followLevel(rg, newG, rc);
+        else if (r->hasParam("champ") && !r->hasParam("gi")) newG = followLevel(rc, newC, rg);
+      }
+      arenaled::setGi(newG);
+      arenaled::setChamp(newC);
+      // Poser les deux ensemble redefinit l'equilibre.
+      if (r->hasParam("gi") && r->hasParam("champ")) arenaled::setLevelRef(newG, newC);
+    }
     if (r->hasParam("density")) arenaled::setDensity(param8(r, "density", arenaled::density()));
     if (r->hasParam("warm"))   arenaled::setWarm(param8(r, "warm", arenaled::warm()));
     if (r->hasParam("inc"))    arenaled::setIncandescent(r->getParam("inc")->value().toInt() != 0);
@@ -568,6 +651,15 @@ static void startServer() {
       c.b = param8(r, "b", c.b);
       c.w = param8(r, "w", c.w);
       arenaled::setColor(c);
+    }
+    if (r->hasParam("gir") || r->hasParam("gig") ||
+        r->hasParam("gib") || r->hasParam("giw")) {
+      arenaled::Rgbw c = arenaled::giColor();
+      c.r = param8(r, "gir", c.r);
+      c.g = param8(r, "gig", c.g);
+      c.b = param8(r, "gib", c.b);
+      c.w = param8(r, "giw", c.w);
+      arenaled::setGiColor(c);
     }
     if (r->hasParam("order")) {
       if (!arenaled::setOrder(r->getParam("order")->value().c_str())) {
@@ -1259,8 +1351,9 @@ static void startServer() {
     t += "  Le rattrapage est prevu, dix minutes au fer : un fil de quelques mm\n";
     t += "  entre +5 V et la broche 4 de D2, avec une 1N4148 en l air (cathode\n";
     t += "  vers D2). VDD passe a ~4,3 V, dans la plage.\n";
-    t += "  En attendant : /api/set?statusled=0 lui envoie du noir une fois\n";
-    t += "  un temoin qui ment.\n\n";
+    t += "  statusled=0 cesse de lui ecrire - il RESTE alors fige sur sa\n"
+           "  derniere couleur. Rien en logiciel ne l eteint : lui parler\n"
+           "  arrete la chaine LED. Seul le fil le remet dans sa plage.\n\n";
 
     t += "-- La flash --\n";
     t += "puce         : " + String(s_flashPhys >> 20) + " Mo (identifiant JEDEC)\n";
@@ -1600,11 +1693,15 @@ static void statusTick() {
   // pas, il reste fige sur ce qu'il affichait. Il faut lui envoyer du noir une
   // fois, au moment ou on l'eteint - sans quoi statusled=0 ne fait rien de
   // visible, ce qui est precisement ce qu'on reprochait aux diagnostics.
-  static bool wasOn = true;
-  if (!s_statOn) {
-    if (wasOn) { wasOn = false; neopixelWrite(s_statPin, 0, 0, 0); }
-    return;
-  }
+  // D2 AU REPOS : quand il est eteint, on ne lui ecrit PLUS JAMAIS - ni au
+  // demarrage, ni a la transition. Mesure sur la carte : neopixelWrite lie le
+  // RMT a la premiere broche appelee, et UNE seule ecriture sur GPIO48 arrete
+  // la chaine sur GPIO16 - rmtframes se fige, rmtfail monte a la cadence des
+  // trames, et l'extinction ne rend pas le canal.
+  // Consequence assumee : un temoin deja allume reste fige sur sa couleur. Un
+  // WS2812 conserve sa derniere valeur, et rien en logiciel ne l'eteint sans
+  // lui parler. Seul le fil vers +5 V le remet dans sa plage.
+  if (!s_statOn) return;
   static uint32_t last = 0;
   const uint32_t now = millis();
   if (now - last < 200) return;                // 5 Hz : on ne fait que comparer
@@ -1625,7 +1722,6 @@ static void statusTick() {
   // vingt-cinq par seconde, et le partage du RMT redevient sans consequence.
   static uint8_t  lr = 1, lg = 1, lb = 1;
   static uint32_t lastPush = 0;
-  if (!wasOn) { wasOn = true; lr = lg = lb = 1; }   // rallumage : forcer l'ecriture
   if (rr == lr && gg == lg && bb == lb && now - lastPush < 5000) return;
   lr = rr; lg = gg; lb = bb; lastPush = now;
   neopixelWrite(s_statPin, rr, gg, bb);

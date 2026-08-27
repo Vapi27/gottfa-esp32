@@ -95,6 +95,17 @@ void    setSpeed(uint8_t s);               // 0..255 -> x0.25 .. x4
 uint8_t speed();
 void    setColor(Rgbw c);                  // base colour for CLASSIC / ATTRACT / ARENA
 Rgbw    color();
+void    setGiColor(Rgbw c);                // GI tint; all-zero = follow the Colour panel
+Rgbw    giColor();
+void    setInsBright(uint8_t b);           // inserts only, independent of the GI behind them
+uint8_t insBright();
+void    setChamp(uint8_t b);               // "champignons" group: a second permanent layer
+uint8_t champ();
+void    setLevelLock(bool on);             // tie insert + GI levels: one moves, the ratio holds
+bool    levelLock();
+void    setLevelRef(uint8_t gi, uint8_t champ);  // refixe l'equilibre du verrou
+uint8_t levelRefGi();
+uint8_t levelRefChamp();
 void    setCount(uint16_t n);              // live LED count (1..LED_MAX)
 uint16_t count();
 void    setBudgetMa(uint16_t ma);          // power ceiling for the whole chain
@@ -138,6 +149,8 @@ float    lastAmps();       // A estimated for the frame just pushed
 bool     limited();        // true if the power limiter had to scale the last frame
 uint32_t frameCount();
 uint16_t fps();
+void    setFrameHz(uint8_t h);             // refresh rate, 1..120 Hz (was compile-time only)
+uint8_t frameHz();
 
 void save();               // persist mode/brightness/speed/colour/count to NVS
 
