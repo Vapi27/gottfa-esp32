@@ -115,8 +115,6 @@ header h1 img{filter:saturate(.9)}
       <input type="range" id="bright" min="0" max="255"><output id="o-bright"></output></div>
     <div class="row"><label>Speed</label>
       <input type="range" id="speed" min="0" max="255"><output id="o-speed"></output></div>
-    <div class="row"><label>Background glow</label>
-      <input type="range" id="gi" min="0" max="255"><output id="o-gi"></output></div>
 
     <div class="row"><label>How many at once</label>
       <input type="range" id="density" min="0" max="255"><output id="o-density"></output></div>
@@ -129,6 +127,41 @@ header h1 img{filter:saturate(.9)}
       <div class="bar"><i id="pbar" style="width:0"></i></div><output id="o-pow"></output></div>
     <p class="hint">The firmware meters every frame and dims the whole wall rather than
        exceeding the budget below — the PSU and the bus wires are never asked for more.</p>
+  </section>
+
+  <section>
+    <h2>Background glow (GI)</h2>
+    <p class="hint">Everything the ROM attract lights, in one place. The attract drives only the
+       inserts the ROM itself drives; <b>champignons</b> are a group you assign by hand, and the
+       <b>background</b> is every pixel that carries no insert at all. It does not touch the
+       inserts: one the ROM leaves dark stays dark, so the wall keeps showing what the machine
+       is actually doing.</p>
+    <div class="row"><label>Inserts</label>
+      <input type="range" id="insb" min="0" max="255"><output id="o-insb"></output></div>
+    <div class="row"><label>Champignons</label>
+      <input type="range" id="champ" min="0" max="255"><output id="o-champ"></output></div>
+    <div class="row"><label>Background</label>
+      <input type="range" id="gi" min="0" max="255"><output id="o-gi"></output></div>
+    <div class="row"><label>Lock</label>
+      <button id="lockbtn" class="tog" onclick="push('lock=' + (st.lock ? 0 : 1))">&ndash;</button>
+      <span class="hint" id="lockhint" style="margin:0"></span></div>
+    <p class="hint" id="champhint"></p>
+    <h3 style="margin:14px 0 6px;font-size:.95em;opacity:.75">Background colour</h3>
+    <p class="hint" style="margin-top:0">Leave all four at zero and the background follows the
+       Colour panel below. Set a tint and it becomes its own thing &mdash; an amber wash under
+       white inserts.</p>
+    <div class="presets" style="margin-bottom:8px">
+      <button onclick="push('gir=0&amp;gig=0&amp;gib=0&amp;giw=0')">follow Colour</button>
+      <button class="sw" title="Amber"       style="background:#ff6400" data-gc="255,100,0,0"></button>
+      <button class="sw" title="Warm white"  style="background:#fff1dc" data-gc="0,0,0,255"></button>
+      <button class="sw" title="Deep blue"   style="background:#1030c0" data-gc="0,20,255,0"></button>
+      <button class="sw" title="Green"       style="background:#20c040" data-gc="0,255,40,0"></button>
+    </div>
+    <div class="row"><label>Red</label>   <input type="range" id="gir" min="0" max="255"><output id="o-gir"></output></div>
+    <div class="row"><label>Green</label> <input type="range" id="gig" min="0" max="255"><output id="o-gig"></output></div>
+    <div class="row"><label>Blue</label>  <input type="range" id="gib" min="0" max="255"><output id="o-gib"></output></div>
+    <div class="row"><label>White</label> <input type="range" id="giw" min="0" max="255"><output id="o-giw"></output></div>
+    <p class="hint" id="gi-mode"></p>
   </section>
 
   <section>
@@ -150,6 +183,7 @@ header h1 img{filter:saturate(.9)}
     <div class="row"><label>White</label> <input type="range" id="w" min="0" max="255"><output id="o-w"></output></div>
   </section>
 
+
   <section>
     <h2>Chain setup</h2>
     <div class="grid2">
@@ -157,6 +191,9 @@ header h1 img{filter:saturate(.9)}
         <input type="number" id="count" min="1" max="150"></div>
       <div><label class="hint">Power budget (mA)</label>
         <input type="number" id="budget" min="500" max="15000" step="100"></div>
+      <div><label class="hint">Refresh rate (Hz)</label>
+        <input type="number" id="framehz" min="1" max="120" step="1"
+               onchange="push('framehz=' + this.value)"></div>
       <div><label class="hint">Colour order</label>
         <select id="order" onchange="push('order='+this.value)">
           <option value="grbw">GRBW (SK6812 default)</option>
@@ -167,6 +204,10 @@ header h1 img{filter:saturate(.9)}
           <option value="bgrw">BGRW</option>
         </select></div>
     </div>
+    <p class="hint">A chain that drops pixels near its far end while the page is loading is not
+       short of volts — it is being interrupted mid-frame. Lowering the <b>refresh rate</b> is the
+       cure and the test at once: fewer frames means fewer windows in which a WiFi interrupt can
+       land inside one. 60 Hz is the default; 30 is still perfectly smooth.</p>
     <p class="hint">Run <b>Wiring test</b>: the field must cycle red → green → blue → white in
        that order. If two of them are swapped, pick the matching colour order above — the change
        is live, no reflash.</p>
@@ -210,6 +251,7 @@ header h1 img{filter:saturate(.9)}
       <p class="hint" id="wz-idle-say">Tap an insert to name it or colour it.</p>
       <div class="modes">
         <button id="wz-start" onclick="wzStart()">Map the pixels</button>
+        <button onclick="grStart()">Groups</button>
         <button id="pf-gi" onclick="pfToggleGi()">show lighting pads</button>
       </div>
     </div>
@@ -226,6 +268,27 @@ header h1 img{filter:saturate(.9)}
         <button onclick="wzGo(wz.at-1)">&#9664; Back</button>
         <button onclick="wzGo(wz.at+1)">Skip &#9654;</button>
         <button onclick="wzFinish()">Stop</button>
+      </div>
+    </div>
+
+    <!-- etat "groupes" : creer un groupe et lui donner des pixels en touchant
+         le plan. Il n'existait AUCUN moyen de le faire depuis l'interface - zero
+         appel a /api/zone* dans toute la page - alors que le curseur
+         Champignons, lui, exige un groupe pour commander quoi que ce soit. Le
+         proprietaire s'est retrouve devant un reglage inerte et un message qui
+         l'envoyait vers un panneau inexistant. -->
+    <div id="wz-group" style="display:none">
+      <p class="hint" id="gr-say"></p>
+      <div class="row"><label>Group</label>
+        <select id="gr-sel" onchange="grPick(this.value)"></select>
+        <output id="gr-n" style="width:auto"></output></div>
+      <div class="row"><label>Name</label>
+        <input type="text" id="gr-name" maxlength="15" placeholder="champignons">
+        <button onclick="grRename()">Rename</button>
+        <button onclick="grNew()">New</button></div>
+      <div class="modes">
+        <button onclick="grDel()">Delete group</button>
+        <button onclick="grDone()">Done</button>
       </div>
     </div>
 
@@ -530,7 +593,26 @@ function renameWall() {
     .catch(() => toast('rename failed'));
 }
 
-const toast = m => { $('msg').textContent = m; setTimeout(() => $('msg').textContent = '', 4000); };
+// toast() ecrivait dans #msg - un element qui N'EXISTE dans aucune version de
+// cette page. Chaque appel levait donc un TypeError et interrompait la fonction
+// appelante en silence : aucun "saved", aucun "group created", et le
+// proprietaire n'avait jamais le moindre accuse de reception. On cree l'element
+// a la volee, et on ne suppose plus qu'il est la.
+const toast = m => {
+  let e = $('msg');
+  if (!e) {
+    e = document.createElement('div');
+    e.id = 'msg';
+    e.style.cssText = 'position:fixed;left:50%;bottom:18px;transform:translateX(-50%);' +
+      'background:#c60;color:#fff;padding:.6em 1.1em;border-radius:8px;font-weight:600;' +
+      'z-index:99;pointer-events:none;transition:opacity .3s;max-width:90vw;text-align:center';
+    document.body.appendChild(e);
+  }
+  e.textContent = m;
+  e.style.opacity = m ? '1' : '0';
+  clearTimeout(toast._t);
+  toast._t = setTimeout(() => { e.style.opacity = '0'; }, 4000);
+};
 
 // --- mode buttons ---
 MODES.forEach(m => {
@@ -577,7 +659,7 @@ function toggleBoot() { push('boot=' + (st.boot ? 0 : 1)); }
 // you land on rather than one you hunt for, while the whole range stays
 // reachable. Shown as a multiplier, since "128" means nothing to a human.
 const speedLabel = v => (+v === 128) ? 'x1 (orig)' : 'x' + Math.pow(2, (v - 128) / 64).toFixed(2);
-['bright','speed','gi','density','warm','r','g','b','w'].forEach(k => {
+['bright','speed','gi','insb','champ','density','warm','r','g','b','w','gir','gig','gib','giw'].forEach(k => {
   const el = $(k);
   el.oninput = () => {
     if (k === 'speed' && Math.abs(el.value - 128) < 11 && el.value != 128) el.value = 128;
@@ -587,8 +669,15 @@ const speedLabel = v => (+v === 128) ? 'x1 (orig)' : 'x' + Math.pow(2, (v - 128)
   el.onchange = () => push(k + '=' + el.value);
 });
 document.querySelectorAll('.sw').forEach(sw => sw.onclick = () => {
-  const [r,g,b,w] = sw.dataset.c.split(',');
-  push(`r=${r}&g=${g}&b=${b}&w=${w}`);
+  // Deux familles de pastilles dans la meme classe : data-c colore les inserts,
+  // data-gc colore le fond. Les separer par l'attribut evite un second style.
+  if (sw.dataset.gc) {
+    const [r,g,b,w] = sw.dataset.gc.split(',');
+    push(`gir=${r}&gig=${g}&gib=${b}&giw=${w}`);
+  } else if (sw.dataset.c) {
+    const [r,g,b,w] = sw.dataset.c.split(',');
+    push(`r=${r}&g=${g}&b=${b}&w=${w}`);
+  }
 });
 
 function push(q) { fetch('/api/set?' + q).then(r => r.json()).then(render).catch(() => {}); }
@@ -653,7 +742,23 @@ function render(s) {
 
   if (Date.now() < holdUntil) return;            // don't stomp a slider being dragged
   set('bright', s.bright); set('speed', s.speed); set('gi', s.gi); set('warm', s.warm);
+  if (s.insb  !== undefined) set('insb',  s.insb);
+  if (s.champ !== undefined) set('champ', s.champ);
+  if (s.gir !== undefined) {
+    set('gir', s.gir); set('gig', s.gig); set('gib', s.gib); set('giw', s.giw);
+    // Tout a zero ne veut pas dire "fond noir" mais "fond qui suit le panneau
+    // Couleur". L'afficher comme un noir enverrait chercher une panne.
+    const follow = !(s.gir | s.gig | s.gib | s.giw);
+    if ($('gi-mode')) $('gi-mode').textContent = follow
+      ? (s.inc ? 'All four at zero = following the bulb simulation (a real #47 at its own temperature).'
+               : 'All four at zero = following the Colour panel below.')
+      : 'Background has its own tint — the Colour panel no longer reaches it.';
+  }
   if (s.density !== undefined) set('density', s.density);
+  // Le setpoint, pas la cadence mesuree : un mur qui peine a 22 fps avec 60 Hz
+  // demandes est indiscernable d'un mur regle bas si on n'affiche que le mesure.
+  if (s.framehz !== undefined && $('framehz') && document.activeElement !== $('framehz'))
+    $('framehz').value = s.framehz;
   showRelevant(s);
   if ($('nw-ssid')) $('nw-ssid').textContent = s.net === 'Matter' ? (s.ip || '–') : (s.net || '–');
   if ($('nw-fail')) {
@@ -676,6 +781,22 @@ function render(s) {
   }
   $('incbtn').textContent = s.inc ? 'bulb simulation: on' : 'bulb simulation: off';
   $('incbtn').classList.toggle('on', !!s.inc);
+  if ($('lockbtn') && s.lock !== undefined) {
+    $('lockbtn').textContent = s.lock ? 'levels tied' : 'levels free';
+    $('lockbtn').classList.toggle('on', !!s.lock);
+    $('lockhint').textContent = s.lock
+      ? 'Champignons and Background move together — the ratio you set is kept. Move both in one go to re-balance.'
+      : 'Champignons and Background move on their own.';
+  }
+  if ($('champhint') && s.champn !== undefined) {
+    // Un curseur qui ne commande rien doit le DIRE. Sans ce message, un groupe
+    // vide se lit comme une panne du reglage.
+    $('champhint').textContent = s.champn < 0
+      ? 'No "champignons" group yet — open <b>Groups</b> under Playfield, name it champignons, and tap the pads over the bumper caps &mdash; until then this slider has nothing to drive.'
+      : s.champn === 0
+        ? 'The "champignons" group exists but has no LED assigned — this slider drives nothing yet.'
+        : 'Champignons: ' + s.champn + ' LED' + (s.champn > 1 ? 's' : '') + ' in the group.';
+  }
   set('r', s.r); set('g', s.g); set('b', s.b); set('w', s.w);
   if (document.activeElement !== $('count'))  $('count').value  = s.count;
   if (document.activeElement !== $('budget')) $('budget').value = s.budget;
@@ -734,7 +855,7 @@ function pfLoad() {
 // affiches ensemble et rien ne disait lequel etait actif.
 function wzUi(st) {
   wzState = st || wzState;
-  ['idle','map','edit'].forEach(k => {
+  ['idle','map','edit','group'].forEach(k => {
     const e = $('wz-' + k); if (e) e.style.display = (k === wzState) ? '' : 'none';
   });
   wzMode = (wzState === 'edit') ? 'edit' : 'place';
@@ -742,6 +863,80 @@ function wzUi(st) {
 let wzState = 'idle';
 
 function wzStart() { wzUi('map'); pfLoad().then(() => wzGo(wz.at)); }
+
+// --- Groupes ---------------------------------------------------------------
+// Un groupe est une liste de PIXELS, pas de pastilles : c'est ce que le firmware
+// consulte (arenamap::zoneOfLed). Mais on ne peut pas demander a quelqu'un de
+// designer un pixel par son numero - il designe une lucarne, et on traduit.
+// Consequence assumee : un pixel qu'aucune pastille ne porte n'est pas
+// atteignable ici. Ils sont dits dans le message plutot que passes sous silence.
+let GR = [], grSel = -1;
+
+function grStart() {
+  wzUi('group');
+  Promise.all([pfLoad(), grLoad()]).then(grDraw);
+}
+function grLoad() {
+  return fetch('/api/zones').then(r => r.json()).then(j => {
+    GR = j.zones || [];
+    if (grSel >= GR.length) grSel = GR.length - 1;
+    if (grSel < 0 && GR.length) grSel = 0;
+  }).catch(() => { GR = []; });
+}
+function grPick(v) { grSel = +v; grDraw(); }
+function grDraw() {
+  const sel = $('gr-sel');
+  sel.innerHTML = GR.map((z, i) => '<option value="' + i + '"' +
+      (i === grSel ? ' selected' : '') + '>' + z.n + '</option>').join('');
+  const z = GR[grSel];
+  $('gr-name').value = z ? z.n : '';
+  $('gr-n').textContent = z ? (z.m.length + ' pixel' + (z.m.length > 1 ? 's' : '')) : '';
+  // LEDMAP est indexe par pixel : sa taille EST le nombre de pixels places.
+  // st.count est la longueur declaree de la chaine.
+  const placed = Object.keys(LEDMAP).length, total = (st && st.count) || 0;
+  const orphelins = Math.max(0, total - placed);
+  $('gr-say').innerHTML = !GR.length
+    ? 'No group yet. Type a name and press <b>New</b>.'
+    : 'Tap a pad to put its pixel in <b>' + (z ? z.n : '?') + '</b>, tap again to take it out. ' +
+      'Pads already in the group are ringed in blue. ' +
+      (orphelins
+        ? '<b>' + orphelins + '</b> pixel' + (orphelins > 1 ? 's carry' : ' carries') +
+          ' no pad and cannot be reached from here &mdash; map them first if you need them in a group.'
+        : '');
+  wzDraw();
+}
+function grNew() {
+  const n = ($('gr-name').value || '').trim();
+  if (!n) { toast('name it first'); return; }
+  fetch('/api/zone/add?n=' + encodeURIComponent(n)).then(r => r.json()).then(j => {
+    GR = j.zones || []; grSel = GR.length - 1; grDraw(); toast('group created');
+  });
+}
+function grRename() {
+  const z = GR[grSel]; if (!z) return;
+  const n = ($('gr-name').value || '').trim();
+  if (!n) { toast('name it first'); return; }
+  fetch('/api/zone/name?z=' + grSel + '&n=' + encodeURIComponent(n))
+    .then(r => r.json()).then(j => { GR = j.zones || []; grDraw(); toast('renamed'); });
+}
+function grDel() {
+  const z = GR[grSel]; if (!z) return;
+  fetch('/api/zone/del?z=' + grSel).then(r => r.json()).then(j => {
+    GR = j.zones || []; if (grSel >= GR.length) grSel = GR.length - 1; grDraw(); toast('group deleted');
+  });
+}
+function grDone() { wzUi('idle'); wzDraw(); }
+
+// Le pixel d'une pastille entre ou sort du groupe choisi.
+function grToggle(i) {
+  const z = GR[grSel];
+  if (!z) { toast('create a group first'); return; }
+  const led = pfOwner()[i];
+  if (led === undefined) { toast('no pixel on that pad - map it first'); return; }
+  const inside = z.m.indexOf(led) >= 0;
+  fetch('/api/zone/assign?led=' + led + '&z=' + (inside ? -1 : grSel))
+    .then(r => r.json()).then(j => { GR = j.zones || []; grDraw(); });
+}
 function edDone()  { edSel = -1; wzSpotOff(); wzUi('idle'); wzDraw(); }
 
 // Eteindre le projecteur n'est PAS quitter. Les deux etaient la meme fonction :
@@ -819,7 +1014,8 @@ function wzClick(i) {
   // ca supprime le bouton "Edit inserts" qui obligeait a choisir un mode avant
   // de savoir ce qu'on voulait faire.
   if (wzState === 'idle') { edSelect(i); wzUi('edit'); wzDraw(); return; }
-  if (wzState === 'edit') { edSelect(i); return; }
+  if (wzState === 'edit')  { edSelect(i); return; }
+  if (wzState === 'group') { grToggle(i); return; }
   // Rien n'est allume : un appui ne peut pas designer un pixel. On refuse plutot
   // que d'ecrire une affectation que le proprietaire n'a pas voulue.
   if (!wz.live) { toast('press "Start walking" first - no pixel is lit'); return; }
@@ -1048,10 +1244,15 @@ function wzDraw() {
     // and a label wider than the circle it names. Both stay legible under zoom -
     // the SVG magnifies them with everything else.
     const sw = (i === edSel ? 7 : (taken ? 5 : 3)) * Math.max(.5, r / 30);
+    // En mode groupe, l'appartenance prime sur le reste : c'est la seule chose
+    // qu'on regarde a ce moment-la.
+    const inGrp = (wzState === 'group' && GR[grSel] && own !== undefined &&
+                   GR[grSel].m.indexOf(own) >= 0);
     s += '<g onclick="wzClick(' + i + ')" style="cursor:pointer">' +
          '<title>' + p.n + (p.f ? ' - ' + p.f : '') + (taken ? ' - pixel ' + own : ' - free') + '</title>' +
          '<circle cx="' + cx + '" cy="' + cy + '" r="' + r + '" fill="' + (pc || (taken ? col : '#241c16')) +
-         '" stroke="' + (i === edSel ? '#7fb3ff' : (taken ? '#efe6da' : col)) + '" stroke-width="' + sw.toFixed(1) + '"/>' +
+         '" stroke="' + (inGrp ? '#4ea3ff' : (i === edSel ? '#7fb3ff' : (taken ? '#efe6da' : col))) +
+         '" stroke-width="' + (inGrp ? (sw * 2).toFixed(1) : sw.toFixed(1)) + '"/>' +
          '<text x="' + cx + '" y="' + cy + '" font-size="' + (r * .87).toFixed(1) + '" font-weight="700" text-anchor="middle" ' +
          'dominant-baseline="central" fill="' + (taken ? '#0d0b09' : '#9a8a78') + '">' +
          p.n.replace(/^L/, '') + '</text></g>';
@@ -1190,6 +1391,11 @@ const APPLIES = {
   bright : null,                                            // partout
   speed  : ['attract','arena','rainbow','night','music'],   // pas classic : il est fixe
   gi     : ['attract'],                                     // les ampoules de fond de la ROM
+  insb   : ['attract'],                                     // ce que la ROM allume
+  champ  : ['attract'],                                     // le groupe "champignons"
+  lockbtn: ['attract'],                                     // le lien entre champignons et fond
+  gir    : ['attract'], gig : ['attract'],                  // teinte de ces memes ampoules
+  gib    : ['attract'], giw : ['attract'],
   density: ['night'],
   warm   : ['classic','attract','night'],                   // + simulation d'ampoule active
   r      : ['classic','attract','arena','night'],
@@ -1213,6 +1419,14 @@ function showRelevant(s) {
   // Le bloc couleur entier disparait quand aucune de ses composantes n'agit.
   const cs = $('r') && $('r').closest ? $('r').closest('section') : null;
   if (cs) cs.style.display = applies('r', s) ? '' : 'none';
+  // Idem pour le fond : il n'existe que sous l'attract de la ROM.
+  const gs = $('gi') && $('gi').closest ? $('gi').closest('section') : null;
+  if (gs) gs.style.display = applies('gi', s) ? '' : 'none';
+  // Le message du groupe champignons est un <p>, pas une .row : la boucle
+  // ci-dessus ne le voit pas. Sans ca il restait affiche dans les modes ou les
+  // curseurs qu'il commente sont masques, et se retrouvait colle sous
+  // Brightness - une phrase qui parle d'un reglage absent de l'ecran.
+  if ($('champhint')) $('champhint').style.display = applies('champ', s) ? '' : 'none';
 }
 
 // Balayage lance par la carte, pas par le telephone : ce qui compte est ce que
