@@ -28,8 +28,20 @@
 static volatile int g_running = 0;
 void PINMAMECALLBACK OnStateUpdated(int state, const void*) { g_running = state; }
 void PINMAMECALLBACK OnDisplayAvailable(int, int, PinmameDisplayLayout*, const void*) {}
+// ⚠️ NE PAS se servir du rappel d'affichage comme horloge.
+//
+// Il n'est PAS appele une fois par trame emulee : libpinmame le declenche par
+// AFFICHEUR, et Alien Poker en a plusieurs. Mesure sur la carte : 8,96 rappels
+// d'affichage pour un rappel audio. Une capture pacee dessus s'arrete donc bien
+// avant la duree demandee - 16,7 s d'audio pour 150 s reclamees - et on croit
+// avoir ecoute deux minutes d'attract alors qu'on en a entendu seize secondes.
+//
+// Le rappel AUDIO, lui, vient de sound_update(), appele une fois par trame
+// emulee dans updatescreen() SANS condition (le saut d'image ne saute que le
+// dessin). Une trame = samplesPerFrame echantillons = 1/60 s de temps de jeu,
+// exactement. C'est la seule horloge fiable ici.
 static std::atomic<long> g_frame{0};
-void PINMAMECALLBACK OnDisplayUpdated(int, void*, PinmameDisplayLayout*, const void*) { g_frame++; }
+void PINMAMECALLBACK OnDisplayUpdated(int, void*, PinmameDisplayLayout*, const void*) {}
 
 static std::vector<int16_t> g_pcm;
 static int    g_channels = 1;
@@ -56,6 +68,7 @@ int PINMAMECALLBACK OnAudioAvailable(PinmameAudioInfo* a, const void*) {
   return a->samplesPerFrame;
 }
 int PINMAMECALLBACK OnAudioUpdated(void* buf, int samples, const void*) {
+  g_frame++;                       // une trame emulee, l'horloge de reference
   if (g_record.load() && buf && samples > 0) {
     const int16_t* p = (const int16_t*)buf;
     g_pcm.insert(g_pcm.end(), p, p + (size_t)samples * g_channels);
