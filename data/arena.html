@@ -110,6 +110,20 @@ header h1 img{filter:saturate(.9)}
 </section>
 
   <section>
+    <h2>Attract sound</h2>
+    <p class="hint">Played by <b>this browser</b>, not by the wall &mdash; there is no speaker on the
+       board, and decoding audio there would compete with the LED output for exactly the cycles the
+       chain cannot spare. Open the page on a phone next to the machine and it becomes the sound system.</p>
+    <div class="modes">
+      <button id="snd-play" onclick="sndToggle()">Play</button>
+      <button onclick="$('snd-file').click()">Load a file</button>
+      <button onclick="sndDel()">Remove</button>
+    </div>
+    <input type="file" id="snd-file" accept="audio/*" style="display:none" onchange="sndUpload(this)">
+    <p class="hint" id="snd-say"></p>
+  </section>
+
+  <section>
     <h2>Level</h2>
     <div class="row"><label>Brightness</label>
       <input type="range" id="bright" min="0" max="255"><output id="o-bright"></output></div>
@@ -299,10 +313,11 @@ header h1 img{filter:saturate(.9)}
         <input type="text" id="ed-name" maxlength="7" placeholder="from your manual">
         <button onclick="edApply()">Save</button></div>
       <div class="row"><label>Colour</label>
-        <input type="color" id="ed-rgb" style="width:64px;height:34px;padding:2px">
-        <input type="range" id="ed-w" min="0" max="255" value="0">
+        <input type="color" id="ed-rgb" style="width:64px;height:34px;padding:2px" oninput="edWarn()">
+        <input type="range" id="ed-w" min="0" max="255" value="0" oninput="edWarn()">
         <output id="ed-w-o" style="width:auto">white</output>
         <button onclick="edApply()">Set</button></div>
+      <p class="hint" id="ed-warn" style="margin-top:-2px"></p>
       <div class="modes">
         <button onclick="edClear()">Reset</button>
         <button id="ed-hide" onclick="edHide()">Hide this pad</button>
@@ -598,6 +613,54 @@ function renameWall() {
 // appelante en silence : aucun "saved", aucun "group created", et le
 // proprietaire n'avait jamais le moindre accuse de reception. On cree l'element
 // a la volee, et on ne suppose plus qu'il est la.
+// --- son d'attract ---------------------------------------------------------
+// Un navigateur REFUSE de jouer un son sans geste de l'utilisateur : le bouton
+// n'est donc pas une commodite, c'est la seule facon de demarrer. On boucle,
+// puisqu'un attract boucle.
+let sndAudio = null;
+function sndToggle() {
+  if (sndAudio && !sndAudio.paused) { sndAudio.pause(); sndAudio.currentTime = 0; sndUi(); return; }
+  if (!sndAudio) {
+    sndAudio = new Audio('/api/sound');
+    sndAudio.loop = true;
+    sndAudio.onpause = sndUi; sndAudio.onplay = sndUi;
+  }
+  sndAudio.play().then(sndUi).catch(e => toast('lecture refusee : ' + e.message));
+}
+function sndUi() {
+  const b = $('snd-play'); if (!b) return;
+  const on = sndAudio && !sndAudio.paused;
+  b.textContent = on ? 'Stop' : 'Play';
+  b.classList.toggle('on', !!on);
+  const e = $('snd-say'); if (!e) return;
+  const n = st && st.snd;
+  e.innerHTML = !n
+    ? 'No sound loaded yet. <b>Load a file</b> &mdash; a recording made on the machine itself is the ' +
+      'truest source there is, and better than any emulation.'
+    : 'Loaded: <b>' + (n / 1024).toFixed(0) + ' kB</b>' + (on ? ' &mdash; playing, looped.' : '.');
+}
+function sndUpload(inp) {
+  const f = inp.files && inp.files[0]; if (!f) return;
+  // La carte refuse deja un fichier trop gros, mais autant le dire ici plutot
+  // que de televerser deux megaoctets pour rien.
+  const libre = st ? (st.fst - st.fsu) : 0;
+  if (libre && f.size + 32768 > libre) {
+    toast('trop gros : ' + (f.size / 1024).toFixed(0) + ' ko pour ' + (libre / 1024).toFixed(0) + ' ko libres');
+    inp.value = ''; return;
+  }
+  toast('envoi de ' + (f.size / 1024).toFixed(0) + ' ko...');
+  fetch('/api/sound', { method: 'POST', body: f })
+    .then(r => r.text()).then(t => { toast(t); sndAudio = null; poll(); })
+    .catch(e => toast('echec : ' + e.message));
+  inp.value = '';
+}
+function sndDel() {
+  fetch('/api/sound', { method: 'DELETE' }).then(r => r.text()).then(t => {
+    if (sndAudio) { sndAudio.pause(); sndAudio = null; }
+    toast(t); poll();
+  });
+}
+
 const toast = m => {
   let e = $('msg');
   if (!e) {
@@ -759,6 +822,7 @@ function render(s) {
   // demandes est indiscernable d'un mur regle bas si on n'affiche que le mesure.
   if (s.framehz !== undefined && $('framehz') && document.activeElement !== $('framehz'))
     $('framehz').value = s.framehz;
+  sndUi();
   showRelevant(s);
   if ($('nw-ssid')) $('nw-ssid').textContent = s.net === 'Matter' ? (s.ip || '–') : (s.net || '–');
   if ($('nw-fail')) {
@@ -1031,6 +1095,7 @@ function edSelect(i) {
   $('ed-w').value = c[3] || 0;
   const hb = $('ed-hide');
   if (hb) { hb.textContent = p.h ? 'Show on the plan' : 'Hide this pad'; hb.classList.toggle('on', !!p.h); }
+  edWarn();
   $('ed-say').innerHTML = 'Editing <b>' + (p.n || '?') + '</b>' +
     (p.f ? ' &mdash; <b>' + p.f + '</b> (manual E-25440)' : '') +
     (p.d && p.d !== p.n ? ' (shipped: ' + p.d + ')' : '') +
@@ -1040,6 +1105,25 @@ function edSelect(i) {
   if (own !== undefined) api('/api/identify?led=' + own + '&ms=60000');
   wzDraw();
 }
+// Le canal blanc d'un ruban RGBW est une LED SEPAREE, pas une luminosite : la
+// monter n'eclaircit pas la teinte, elle ajoute du blanc PAR-DESSUS et la noie.
+// Un proprietaire a regle un insert sur [255,0,136,255] et a conclu que la
+// couleur par pixel ne marchait pas - elle marchait, elle sortait blanche.
+function edWarn() {
+  const e = $('ed-warn'); if (!e) return;
+  const h = ($('ed-rgb').value || '#000000').replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16), g = parseInt(h.slice(2, 4), 16), b = parseInt(h.slice(4, 6), 16);
+  const w = +$('ed-w').value;
+  const hue = Math.max(r, g, b) - Math.min(r, g, b);      // 0 = gris, 255 = teinte pure
+  e.innerHTML = (w > 60 && hue > 40)
+    ? '&#9888; <b>White is a separate LED</b>, not a brightness. At ' + w +
+      ' it sits on top of the colour and washes it out &mdash; the pad will look white on the wall. ' +
+      'Pull it to <b>0</b> to see the tint, and use the wall\'s own Brightness for level.'
+    : (hue > 40 && w === 0)
+      ? 'Pure tint, no white added. This is what a coloured plastic over a bulb really does.'
+      : '';
+}
+
 function edApply() {
   if (edSel < 0) { toast('click an insert first'); return; }
   const h = $('ed-rgb').value.replace('#', '');

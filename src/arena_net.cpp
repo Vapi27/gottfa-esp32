@@ -400,6 +400,9 @@ static String stateJson() {
   }
   j += ",\"lock\":"   + String(arenaled::levelLock() ? 1 : 0);
   j += ",\"mapsrc\":\"" + String(arenamap::source()) + "\"";
+  { size_t sz = 0;
+    if (LittleFS.exists("/attract.mp3")) { File f = LittleFS.open("/attract.mp3", "r"); sz = f.size(); f.close(); }
+    j += ",\"snd\":" + String((uint32_t)sz); }
   j += ",\"framehz\":" + String(arenaled::frameHz());
   {
     // Teinte du fond, publiee a part des r/g/b/w des inserts : tout a zero
@@ -891,6 +894,59 @@ static void startServer() {
       if (up) up.write(data, len);
       if (up && index + len >= total) { up.close(); Serial.println("[pf] photo enregistree"); }
     });
+
+  // --- Son d'attract -------------------------------------------------------
+  //
+  // Le fichier est joue par le NAVIGATEUR, pas par la carte : le mur n'a ni
+  // amplificateur ni haut-parleur, et l'ESP32 a mieux a faire que decoder un
+  // MP3 pendant qu'il pousse des trames - toute la correction du pilote RMT
+  // consiste justement a ne rien laisser preempter la sortie.
+  //
+  // La source est laissee ouverte a dessein. Capturer le son de la ROM sous
+  // PinMAME ne marche pas avec cette bibliotheque : le rappel audio est bien
+  // appele mais toujours avec 0 echantillon, meme en declenchant des sons a la
+  // main (mixer_samples_this_frame() rend 0, le mixeur n'a jamais demarre).
+  // Un enregistrement de la vraie machine est de toute facon plus fidele qu'une
+  // emulation.
+  s_server.on("/api/sound", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!LittleFS.exists("/attract.mp3")) { r->send(404, "text/plain", "aucun son"); return; }
+    AsyncWebServerResponse* rsp = r->beginResponse(LittleFS, "/attract.mp3", "audio/mpeg");
+    r->send(rsp);
+  });
+
+  s_server.on("/api/sound", HTTP_POST,
+    [](AsyncWebServerRequest* r) {
+      size_t sz = 0;
+      if (LittleFS.exists("/attract.mp3")) { File f = LittleFS.open("/attract.mp3", "r"); sz = f.size(); f.close(); }
+      r->send(sz ? 200 : 400, "text/plain", sz ? "son enregistre" : "rien recu");
+    },
+    nullptr,
+    [](AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total) {
+      static File up;
+      static bool full = false;
+      if (index == 0) {
+        full = false;
+        // Refuser AVANT d'ecrire : remplir LittleFS a ras bord rend la carte
+        // inflashable par OTA fs, ce qui coute bien plus cher qu'un son absent.
+        const size_t libre = LittleFS.totalBytes() - LittleFS.usedBytes();
+        if (total + 32768 > libre) {
+          full = true;
+          Serial.printf("[son] refuse : %u octets pour %u libres\n",
+                        (unsigned)total, (unsigned)libre);
+          return;
+        }
+        up = LittleFS.open("/attract.mp3", "w");
+        Serial.printf("[son] entrant, %u octets\n", (unsigned)total);
+      }
+      if (full) return;
+      if (up) up.write(data, len);
+      if (up && index + len >= total) { up.close(); Serial.println("[son] enregistre"); }
+    });
+
+  s_server.on("/api/sound", HTTP_DELETE, [](AsyncWebServerRequest* r) {
+    LittleFS.remove("/attract.mp3");
+    r->send(200, "text/plain", "son retire");
+  });
 
   s_server.on("/api/pfimg", HTTP_DELETE, [](AsyncWebServerRequest* r) {
     LittleFS.remove("/pf.jpg");

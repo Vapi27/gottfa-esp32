@@ -129,22 +129,22 @@ static inline Rgbw mix(const Rgbw& a, const Rgbw& b, float t) {
   return { clamp8(a.r + (b.r - a.r) * t), clamp8(a.g + (b.g - a.g) * t),
            clamp8(a.b + (b.b - a.b) * t), clamp8(a.w + (b.w - a.w) * t) };
 }
-// Le fond est un PLANCHER, pas un ajout.
+// Composition des etages permanents (fond, champignons) avec la lumiere de la ROM.
 //
-// Il etait additionne (addSat) a chaque pixel, y compris aux inserts allumes :
-// monter le fond eclaircissait donc AUSSI les lampes de la ROM, le contraste
-// s'effondrait et elles disparaissaient dans le halo. Rapporte tel quel par le
-// proprietaire - "quand je touche a background ca detruit toutes mes autres
-// lampes" - et c'est exact. L'ancien plafond a 0,25 masquait le probleme sans
-// le corriger : il rendait seulement le fond trop faible pour qu'on le voie.
+// Trois formes essayees sur la vraie carte, dans cet ordre :
 //
-// Un maximum par canal donne ce qu'un eclairage general fait vraiment : un
-// insert eteint prend le niveau du fond, un insert allume garde le sien tant
-// qu'il est plus lumineux. Monter le fond ne peut plus rien effacer.
-static inline Rgbw maxCh(const Rgbw& a, const Rgbw& b) {
-  return { (uint8_t)max(a.r, b.r), (uint8_t)max(a.g, b.g),
-           (uint8_t)max(a.b, b.b), (uint8_t)max(a.w, b.w) };
-}
+//  1. addSat sur TOUS les pixels : monter le fond eclaircissait aussi les inserts
+//     allumes, le contraste s'effondrait et la ROM se noyait dans le halo.
+//     "Quand je touche a background ca detruit toutes mes autres lampes."
+//  2. maximum par canal : corrige le point 1, mais des que la lueur permanente
+//     depasse la lampe de la ROM elle l'avale et le pixel cesse de clignoter.
+//     "Les champignons s'allument mais ne clignotent plus."
+//  3. ce qui est en place : le plancher prend le bas de la dynamique et la
+//     lampe est comprimee dans la place qui RESTE au-dessus. Le clignotement
+//     survit a n'importe quel niveau de plancher, et monter la lueur reduit le
+//     contraste progressivement au lieu de le supprimer d'un coup.
+//
+// Voir le calcul de `head` dans fxRomAttract.
 static inline Rgbw addSat(const Rgbw& a, const Rgbw& b) {
   return { (uint8_t)min(255, a.r + b.r), (uint8_t)min(255, a.g + b.g),
            (uint8_t)min(255, a.b + b.b), (uint8_t)min(255, a.w + b.w) };
@@ -433,6 +433,9 @@ static void fxRomAttract(Rgbw* buf) {
   };
   const Rgbw giC = glow(s_gi);       // le fond
   const Rgbw chC = glow(s_champ);    // les champignons
+  // Hauteur du plancher des champignons, 0..1. Elle sert a laisser de la place
+  // AU-DESSUS : voir plus bas pourquoi un simple maximum ne suffit pas.
+  const float chK = (float)max(max(chC.r, chC.g), max(chC.b, chC.w)) / 255.0f;
 
   // Le groupe est resolu une fois par trame, pas par pixel : c'est un groupe
   // arenamap ordinaire, donc il peut etre renomme, vide, ou absent.
@@ -459,6 +462,20 @@ static void fxRomAttract(Rgbw* buf) {
     // de commander.
     const Rgbw base  = isChamp ? chC : giC;
     const Rgbw floorC = isChamp ? chC : Rgbw{ 0, 0, 0, 0 };
+    // Le plancher prend le BAS de la dynamique, la ROM garde la tete.
+    //
+    // Un simple maximum ne marche pas : des que la lueur permanente depasse la
+    // lampe de la ROM, elle l'avale et le pixel cesse de clignoter. Rapporte
+    // tel quel - "les champignons s'allument mais ne clignotent plus quand tu
+    // montes la puissance". Le clignotement est justement ce qui fait qu'un
+    // champignon est un champignon et pas une veilleuse.
+    //
+    // En comprimant la lampe dans la place qui RESTE au-dessus du plancher, le
+    // clignotement survit a n'importe quel niveau tant que le plancher n'est pas
+    // au maximum : monter la lueur reduit le contraste progressivement au lieu
+    // de le supprimer d'un coup. Vaut 1 pour les pixels sans plancher, donc rien
+    // ne change pour eux.
+    const float head = isChamp ? (1.0f - chK) : 1.0f;
 
     // With the simulation off this is a plain switch: no thermal lag, no colour
     // ramp. Worth having, because an insert that carries its own colour is
@@ -474,13 +491,13 @@ static void fxRomAttract(Rgbw* buf) {
       // ramp is invisible on a real bulb too, so nothing of value is lost.
       const Rgbw f = filament(T[i]);
       if ((s_color.r | s_color.g | s_color.b) == 0) {
-        buf[i] = maxCh(floorC, scale(f, ib));
+        buf[i] = addSat(floorC, scale(f, ib * head));
       } else {
         const float lvl = (float)max(max(f.r, f.g), max(f.b, f.w)) / 255.0f;
-        buf[i] = maxCh(floorC, scale(s_color, lvl * ib));
+        buf[i] = addSat(floorC, scale(s_color, lvl * ib * head));
       }
     } else {
-      buf[i] = maxCh(floorC, scale(s_color, T[i] * ib));
+      buf[i] = addSat(floorC, scale(s_color, T[i] * ib * head));
     }
   }
   // Insert colours are applied globally in tick(), not here: the plastic
