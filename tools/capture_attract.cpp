@@ -65,11 +65,22 @@ int main(int argc, char** argv) {
     return 1;
   }
 
-  // 3 emulated frames = 50 ms of game time. System 80 strobes its lamp matrix
-  // far faster, but PinMAME's lamp API reports the de-multiplexed logical state,
-  // which is what a human sees.
-  const int FRAMES_PER_STEP = 3;
-  const int STEP_MS = FRAMES_PER_STEP * 1000 / 60;
+  // UNE trame emulee par pas, pas trois.
+  //
+  // A trois (50 ms), PinmameGetChangedLamps n'etait interroge que toutes les
+  // 50 ms alors qu'il ne rend que les changements DEPUIS LE DERNIER APPEL : une
+  // lampe qui s'allume et s'eteint dans le meme pas etait invisible, et les
+  // animations rapides se retrouvaient etirees. Mesure sur Alien Poker, meme
+  // ROM, deux resolutions : duree d'allumage MEDIANE de 400 ms a 50 ms de pas,
+  // contre 128 ms a 16 ms de pas. La capture grossiere jouait donc chaque
+  // evenement trois fois trop long. Rapporte depuis la vraie machine :
+  // "la vitesse sur mon vrai Alien est vraiment beaucoup plus rapide".
+  //
+  // L'arrondi compte : 1000/60 = 16,667 et la division entiere donnait 16, soit
+  // 4 % trop rapide. A 17 l'erreur tombe a 2 %, dans l'autre sens. Le format du
+  // .bin ne stocke le pas qu'en millisecondes entiers, d'ou ce reliquat.
+  const int FRAMES_PER_STEP = 1;
+  const int STEP_MS = (FRAMES_PER_STEP * 1000 + 30) / 60;
   const int steps = (int)(seconds * 1000 / STEP_MS);
   std::vector<PinmameLampState> chg(PinmameGetMaxLamps() > 0 ? PinmameGetMaxLamps() : 128);
 
