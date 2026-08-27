@@ -26,6 +26,24 @@ static uint8_t  s_spark[LED_MAX];      // "random inserts" decay envelopes
 static Mode     s_mode      = MODE_CLASSIC;
 static uint8_t  s_bright    = ARENA_BRIGHT_DEFAULT;
 static uint8_t  s_gi        = ARENA_GI_DEFAULT;   // GI level under ROM attract, 0 = off
+static Rgbw     s_giColor   = { 0, 0, 0, 0 };     // GI tint; all-zero = follow the Colour panel
+static uint8_t  s_insBright = 255;                // inserts, separately from the GI behind them
+static uint8_t  s_champ     = 255;                // "champignons": a second permanent layer
+static bool     s_lvlLock   = false;              // move one level, the other keeps the ratio
+// Couple de REFERENCE, fige au moment ou l'on verrouille.
+//
+// Le suiveur etait calcule a partir de la valeur COURANTE de l'autre etage, puis
+// ecrete a 255. Un aller-retour detruisait donc l'equilibre sans retour possible :
+// avec fond=90 et champignons=255, monter le fond a 255 demandait 722 pour les
+// champignons -> ecrete a 255, sans rien de visible ; redescendre le fond a 90
+// recalculait alors 255*90/255 = 90 au lieu de 255. L'interface promet "le
+// rapport que tu as regle est conserve" ; il ne l'etait pas.
+//
+// En gardant le couple de depart, le rapport ne derive plus : l'ecretage
+// n'affecte que la valeur emise, jamais la reference. L'aller-retour redonne
+// exactement la valeur de depart.
+static uint8_t  s_lockGi    = 0;
+static uint8_t  s_lockChamp = 0;
 static uint8_t  s_density   = 110;   // mode lucioles : combien vivent a la fois
 // Ce que la carte fait quand le courant revient. Une piece murale qui reste
 // noire apres une coupure passe pour cassee : le proprietaire ne va pas
@@ -55,6 +73,11 @@ static uint32_t s_bootMs    = 0;       // soft-start reference
 // a request — it is flagged here and applied at the top of the next tick(), on
 // the render task, where nothing else is touching the pixel buffer.
 static volatile bool s_pendLen = false;
+static uint8_t       s_pin     = PIN_LED_DATA;   // broche data, reglable a chaud
+// Broche a laquelle la chaine est REELLEMENT accrochee. s_pin est le souhait,
+// celle-ci est le fait ; tant qu'elles sont egales il n'y a rien a refaire, et
+// surtout rien a toucher (voir applyPending).
+static uint8_t       s_pinLive = PIN_LED_DATA;
 
 // The animation clock. It only ever accumulates, so it must be a double: a float
 // carries 24 mantissa bits, and at ~0.017 s per frame its ulp reaches the frame
@@ -67,6 +90,14 @@ static volatile bool s_pendLen = false;
 static double   s_phase     = 0.0;     // animation clock (s, speed-scaled)
 static uint32_t s_lastUs    = 0;
 static uint32_t s_lastFrame = 0;
+// Cadence de rafraichissement, reglable a chaud. Elle etait figee a la
+// compilation, ce qui en faisait un parametre inaccessible la ou il sert le
+// plus : sur une chaine limite. Une cadence basse laisse plus de temps mort
+// entre deux trames - donc plus de marge au signal et a l'alimentation - et
+// c'est aussi le test qui separe les deux : un defaut de signal se calme
+// quand on ralentit, un affaissement de tension non, puisque le courant moyen
+// ne bouge pas.
+static uint8_t  s_frameHz   = LED_FRAME_HZ;
 static uint32_t s_frames    = 0;
 static uint16_t s_fps       = 0;
 static uint32_t s_fpsT0     = 0, s_fpsN = 0;
@@ -97,6 +128,22 @@ static inline Rgbw scale(const Rgbw& c, float k) {
 static inline Rgbw mix(const Rgbw& a, const Rgbw& b, float t) {
   return { clamp8(a.r + (b.r - a.r) * t), clamp8(a.g + (b.g - a.g) * t),
            clamp8(a.b + (b.b - a.b) * t), clamp8(a.w + (b.w - a.w) * t) };
+}
+// Le fond est un PLANCHER, pas un ajout.
+//
+// Il etait additionne (addSat) a chaque pixel, y compris aux inserts allumes :
+// monter le fond eclaircissait donc AUSSI les lampes de la ROM, le contraste
+// s'effondrait et elles disparaissaient dans le halo. Rapporte tel quel par le
+// proprietaire - "quand je touche a background ca detruit toutes mes autres
+// lampes" - et c'est exact. L'ancien plafond a 0,25 masquait le probleme sans
+// le corriger : il rendait seulement le fond trop faible pour qu'on le voie.
+//
+// Un maximum par canal donne ce qu'un eclairage general fait vraiment : un
+// insert eteint prend le niveau du fond, un insert allume garde le sien tant
+// qu'il est plus lumineux. Monter le fond ne peut plus rien effacer.
+static inline Rgbw maxCh(const Rgbw& a, const Rgbw& b) {
+  return { (uint8_t)max(a.r, b.r), (uint8_t)max(a.g, b.g),
+           (uint8_t)max(a.b, b.b), (uint8_t)max(a.w, b.w) };
 }
 static inline Rgbw addSat(const Rgbw& a, const Rgbw& b) {
   return { (uint8_t)min(255, a.r + b.r), (uint8_t)min(255, a.g + b.g),
@@ -304,8 +351,13 @@ static void fxZoneSweep(Rgbw* buf) {
     if (k <= 0.0f) continue;
     const arenamap::Zone* zn = arenamap::zone(z);
     if (!zn) continue;                                 // table can shrink from the HTTP task
-    for (uint16_t i = zn->first; i < zn->first + zn->count && i < s_count; i++)
+    // Par APPARTENANCE, pas par tranche : un groupe disperse - des pop bumpers,
+    // l'eclairage general - n'occupe plus first..first+count.
+    for (uint16_t n = 0; n < zn->count; n++) {
+      const int i = arenamap::zoneNth(z, n);
+      if (i < 0 || i >= (int)s_count) continue;
       buf[i] = scale(s_color, 0.10f + 0.90f * k);
+    }
   }
 }
 
@@ -327,6 +379,19 @@ static void fxRomAttract(Rgbw* buf) {
   lastMs = now;
   if (dt > 0.2f) dt = 0.2f;                       // after a stall, do not jump
 
+  // L'inertie du filament suit la MEME horloge que la sequence.
+  //
+  // Elle tournait en temps reel pendant que la sequence, elle, etait acceleree
+  // par le curseur de vitesse. A 2x, un eclair de lampe dure deux fois moins
+  // longtemps alors que l'ampoule met toujours ~100 ms a monter et ~170 ms a
+  // s'eteindre : les flashs n'atteignent plus le plein et ne redescendent plus,
+  // tout se fond en une lueur molle. Rapporte comme "l'attract est plus rapide
+  // sur le vrai flipper que sur notre simulation" - alors que la mesure disait
+  // l'inverse (curseur a 194, soit 2,04x). Ce n'etait pas la vitesse de la
+  // sequence, c'etait le flou. Une ampoule vue en accelere doit s'allumer en
+  // accelere, sinon accelerer RALENTIT l'image.
+  dt *= speedFactor();
+
   // The sequence runs on the animation clock, so the speed slider works on it.
   const uint64_t mask = arenaattract::maskAt((uint32_t)(phase(1.0, 3600.0) * 1000.0f)) | s_latched;
 
@@ -337,19 +402,69 @@ static void fxRomAttract(Rgbw* buf) {
   // curve. With the filament OFF the whole attract runs on the Colour panel —
   // which is what gives that panel a meaning in this mode at all: reported as
   // "the colour menu does not apply", and with the simulation on, it must not.
-  const Rgbw giC = !s_gi ? Rgbw{ 0, 0, 0, 0 }
-                 : s_inc ? filament(ARENA_GI_T * (float)s_gi / 255.0f)
-                         : scale(s_color, (float)s_gi / 255.0f * 0.25f);
+  //
+  // MEASURED, not assumed. Averaging 18 samples per setting to get out from
+  // under the animation's own current swing (sigma ~40 mA), the previous form
+  // fed the setting in as a TEMPERATURE - filament(ARENA_GI_T * gi/255). A hot
+  // body's emission is a power law, so from gi=0 to gi=192 - three quarters of
+  // the travel - the whole change stayed inside the noise (+9, +7, +13 mA) and
+  // everything happened between 192 and 255 (+64 mA). The slider commanded
+  // nothing usable. The 0.25 ceiling on the non-filament branch did the same
+  // thing by a different route.
+  //
+  // Now temperature carries only the TINT - it still reddens as you come down,
+  // the way a dimmed bulb does - and the setting carries the INTENSITY, which
+  // is what a level control is supposed to mean. Renormalising the filament
+  // colour to its own peak before rescaling is what separates the two.
+  // Un etage permanent du mur, a partir de son seul niveau. Le fond et les
+  // champignons sont de meme nature - meme teinte, meme loi - et ne different
+  // que par ce niveau, ce qui est exactement ce qui les rend independants :
+  // descendre le fond a zero n'eteint pas les champignons.
+  auto glow = [&](uint8_t lvl) -> Rgbw {
+    if (!lvl) return Rgbw{ 0, 0, 0, 0 };
+    const float k = (float)lvl / 255.0f;
+    // A tint of its own: the background stops following the Colour panel, so
+    // an amber wash can sit under white inserts.
+    if (s_giColor.r | s_giColor.g | s_giColor.b | s_giColor.w) return scale(s_giColor, k);
+    if (!s_inc) return scale(s_color, k);
+    const Rgbw f = filament(ARENA_GI_T * (0.70f + 0.30f * k));
+    const float pk = (float)max(max(f.r, f.g), max(f.b, f.w)) / 255.0f;
+    return (pk > 0.004f) ? scale(f, k / pk) : Rgbw{ 0, 0, 0, 0 };
+  };
+  const Rgbw giC = glow(s_gi);       // le fond
+  const Rgbw chC = glow(s_champ);    // les champignons
+
+  // Le groupe est resolu une fois par trame, pas par pixel : c'est un groupe
+  // arenamap ordinaire, donc il peut etre renomme, vide, ou absent.
+  const int champZ = arenamap::indexOf(ARENA_CHAMP_ZONE);
+
+  // Les inserts et le fond sont deux etages separes. Le mur porte les deux en
+  // meme temps - ce que la ROM allume, et l'eclairage permanent derriere - et
+  // l'equilibre entre les deux est un choix de gout qui ne devrait pas dependre
+  // de la luminosite generale. Elle reste maitresse par-dessus les deux.
+  const float ib = (float)s_insBright / 255.0f;
 
   for (uint16_t i = 0; i < s_count; i++) {
     const int lamp = arenapf::lampOfLed(i);
     const bool on  = (lamp >= 0) && ((mask >> lamp) & 1ULL);
+    const bool isChamp = (champZ >= 0 && arenamap::zoneOfLed(i) == champZ);
+
+    // "Background" ne porte que le FOND : les pixels qui ne sont sur aucun
+    // insert. Il s'appliquait a tout le monde, insert compris, donc le monter
+    // rallumait les 52 lampes que la ROM laisse eteintes - rapporte tel quel :
+    // "background fait background sur toutes les LED". Un insert eteint par la
+    // ROM doit rester eteint, sinon le mur cesse de montrer ce que la machine
+    // fait. Les champignons, eux, gardent leur plancher meme s'ils portent un
+    // insert : c'est un groupe pose a la main, il commande ce qu'on lui a dit
+    // de commander.
+    const Rgbw base  = isChamp ? chC : giC;
+    const Rgbw floorC = isChamp ? chC : Rgbw{ 0, 0, 0, 0 };
 
     // With the simulation off this is a plain switch: no thermal lag, no colour
     // ramp. Worth having, because an insert that carries its own colour is
     // usually meant to be seen as that colour rather than through a filament.
     T[i] = s_inc ? filamentStep(T[i], on, dt) : (on ? 1.0f : 0.0f);
-    if (lamp < 0) { buf[i] = giC; continue; }
+    if (lamp < 0) { buf[i] = base; continue; }
 
     if (s_inc) {
       // The Colour panel is the bulb's GLASS. Pure white (W only) is clear
@@ -359,13 +474,13 @@ static void fxRomAttract(Rgbw* buf) {
       // ramp is invisible on a real bulb too, so nothing of value is lost.
       const Rgbw f = filament(T[i]);
       if ((s_color.r | s_color.g | s_color.b) == 0) {
-        buf[i] = addSat(giC, f);
+        buf[i] = maxCh(floorC, scale(f, ib));
       } else {
         const float lvl = (float)max(max(f.r, f.g), max(f.b, f.w)) / 255.0f;
-        buf[i] = addSat(giC, scale(s_color, lvl));
+        buf[i] = maxCh(floorC, scale(s_color, lvl * ib));
       }
     } else {
-      buf[i] = addSat(giC, scale(s_color, T[i]));
+      buf[i] = maxCh(floorC, scale(s_color, T[i] * ib));
     }
   }
   // Insert colours are applied globally in tick(), not here: the plastic
@@ -477,6 +592,47 @@ static void musicSampleMic() {
 
 #endif
 
+// --- Hauteur de chaque pixel, y compris ceux qu'aucun insert ne place --------
+//
+// arenapf::xy() ne sait situer qu'un pixel pose sur un insert. Sur ce mur, 23
+// des 75 n'en portent aucun : les laisser de cote, comme le fait fxArenaGeo,
+// ferait 23 LED immobiles au milieu d'un mouvement. Mais un ruban est continu -
+// un pixel sans insert est physiquement ENTRE ses voisins qui en ont un - donc
+// sa hauteur s'interpole le long de la chaine. Ce n'est pas une supposition sur
+// le cablage : c'est la seule propriete qu'un ruban garantisse, l'ordre.
+//
+// Recalcule toutes les 2 s plutot que branche sur une invalidation : la carte a
+// 75 pixels, le calcul est negligeable, et une invalidation oubliee donnerait un
+// mouvement faux que rien ne signalerait. h = 0 en bas (flippers), 1 en haut.
+static float s_ledH[LED_MAX];
+static uint32_t s_ledHMs = 0;
+
+static void refreshLedHeights() {
+  const uint32_t now = millis();
+  if (s_ledHMs && (now - s_ledHMs) < 2000) return;
+  s_ledHMs = now ? now : 1;
+
+  float x, y;
+  int   lo = -1;                       // dernier pixel place rencontre
+  float loH = 0.5f;
+  for (uint16_t i = 0; i < s_count; i++) {
+    if (arenapf::xy(i, x, y)) {
+      const float h = 1.0f - y;        // y=1 aux flippers -> h=0 en bas
+      s_ledH[i] = h;
+      for (int k = lo + 1; k < (int)i; k++) {
+        const float f = (float)(k - lo) / (float)(i - lo);
+        s_ledH[k] = loH + f * (h - loH);
+      }
+      lo = i; loH = h;
+    }
+  }
+  // Queue de chaine sans aucun insert : on prolonge la derniere hauteur connue
+  // plutot que d'inventer une pente.
+  for (int k = lo + 1; k < (int)s_count; k++) s_ledH[k] = loH;
+  if (lo < 0) for (uint16_t i = 0; i < s_count; i++)   // aucun pixel place du tout
+    s_ledH[i] = s_count > 1 ? 1.0f - (float)i / (float)(s_count - 1) : 0.5f;
+}
+
 static void fxMusic(Rgbw* buf) {
   const uint32_t now = millis();
 #if ARENA_MIC_ENABLE
@@ -492,31 +648,57 @@ static void fxMusic(Rgbw* buf) {
     return;
   }
 
-  // Bass breathes the field in the panel colour.
-  fill(buf, scale(s_color, 0.04f + 0.55f * s_musB * s_musB));
+  // Le mode monte des flippers vers le fronton. Il remplissait le champ
+  // uniformement et faisait partir le battement du CENTRE, donc rien n'avait de
+  // direction : demande explicite du proprietaire d'en faire un mouvement de bas
+  // en haut. Les trois etages vont maintenant dans le meme sens.
+  refreshLedHeights();
 
-  // Beat: a ripple leaves the centre of the playfield.
+  // Un fond faible partout : sans lui, un passage calme eteint le mur au lieu de
+  // le faire respirer, ce qui se lit comme une panne.
+  fill(buf, scale(s_color, 0.04f));
+
+  // Graves : une colonne qui monte du bas, comme l'aiguille d'un vumetre. Le
+  // bord est adouci sur 0,12 de hauteur, sinon la limite est une ligne dure qui
+  // saute d'un pixel a l'autre au lieu de monter.
+  const float lvl = 0.10f + 0.95f * s_musB * s_musB;
+  for (uint16_t i = 0; i < s_count; i++) {
+    const float h = s_ledH[i];
+    float k = (lvl - h) / 0.12f;
+    if (k <= 0.0f) continue;
+    if (k > 1.0f) k = 1.0f;
+    buf[i] = addSat(buf[i], scale(s_color, k * 0.55f));
+  }
+
+  // Battement : une bande qui quitte les flippers et monte. Elle depasse 1.0
+  // pour sortir par le haut au lieu de s'eteindre sur place.
   const float tb = (now - s_musBeatMs) / 1000.0f;
   if (tb < 0.6f) {
     const Rgbw gold = { ARENA_GOLD_R, ARENA_GOLD_G, ARENA_GOLD_B, ARENA_GOLD_W };
-    const float rip = tb * 1.9f;
+    const float front = tb * 2.1f;              // 0 -> 1.26 en 0,6 s
     for (uint16_t i = 0; i < s_count; i++) {
-      float x, y;
-      if (!arenapf::xy(i, x, y)) continue;
-      const float dx = x - 0.5f, dy = y - 0.55f;
-      const float dr = fabsf(sqrtf(dx * dx + dy * dy) - rip);
-      if (dr < 0.10f)
-        buf[i] = addSat(buf[i], scale(gold, (1.0f - dr / 0.10f) * (1.0f - tb / 0.6f)));
+      const float d = fabsf(s_ledH[i] - front);
+      if (d < 0.14f)
+        buf[i] = addSat(buf[i], scale(gold, (1.0f - d / 0.14f) * (1.0f - tb / 0.6f)));
     }
   }
 
-  // Treble sparkles random inserts, reusing the spark decay buffer.
-  uint8_t decay = 26;
+  // Aigus : des etincelles, mais AU-DESSUS de la colonne des graves. Tirees au
+  // hasard sur toute la chaine elles annulaient la direction; cantonnees au
+  // sommet, elles se lisent comme l'ecume poussee par la colonne. On tire dans
+  // la zone libre, avec une garde : si les graves saturent, il n'y a plus de
+  // zone libre et on ne veut pas boucler indefiniment.
+  const uint8_t decay = 26;
   for (uint16_t i = 0; i < s_count; i++)
     s_spark[i] = (s_spark[i] > decay) ? s_spark[i] - decay : 0;
   if (s_musT > 0.15f) {
     const int n = 1 + (int)(s_musT * 3.0f);
-    for (int k = 0; k < n; k++) s_spark[esp_random() % s_count] = 255;
+    for (int k = 0; k < n; k++) {
+      for (int tries = 0; tries < 8; tries++) {
+        const uint16_t c = esp_random() % s_count;
+        if (s_ledH[c] > lvl) { s_spark[c] = 255; break; }
+      }
+    }
   }
   for (uint16_t i = 0; i < s_count; i++)
     if (s_spark[i]) buf[i] = addSat(buf[i], scale(s_color, s_spark[i] / 255.0f * 0.8f));
@@ -573,8 +755,12 @@ static void fxArena(Rgbw* buf) {
       if (k < 0.02f) continue;
       const arenamap::Zone* zn = arenamap::zone(z);
       if (!zn) continue;                               // table can shrink from the HTTP task
-      for (uint16_t i = zn->first; i < zn->first + zn->count && i < s_count; i++) {
-        float ph = 1.0f - fabsf((float)(i - zn->first) / (float)max<uint16_t>(1, zn->count) - 0.5f);
+      for (uint16_t n = 0; n < zn->count; n++) {
+        const int i = arenamap::zoneNth(z, n);
+        if (i < 0 || i >= (int)s_count) continue;
+        // Le rang DANS le groupe, plus l'ecart a son premier membre : sur un
+        // groupe disperse, l'ecart d'indice ne dit plus rien de la position.
+        float ph = 1.0f - fabsf((float)n / (float)max<uint16_t>(1, zn->count) - 0.5f);
         buf[i] = addSat(buf[i], scale(amber, k * ph));
       }
     }
@@ -623,7 +809,15 @@ static void fxTest(Rgbw* buf) {
 // a hidden SK6812 fed at ~4.4 V that accepts 3.3 V data and regenerates it for
 // the 5 V chain behind it (see arena_config.h). It is always kept dark, and all
 // indices the user ever sees stay 0-based on the first *visible* LED.
-static const uint16_t OFFS = LED_REPEATER_PIXEL ? 1 : 0;
+// ...mais AVOIR un repeteur est un fait de CABLAGE, pas de firmware. Le banc
+// Arena en porte un ; une carte controleur toute faite n'en a pas. En constante
+// de compilation, une installation sur deux est fausse - et quand elle l'est
+// dans ce sens, le firmware tient la premiere VRAIE LED eteinte et decale tout
+// le mapping d'un cran. Cela se presente comme "les LED ne s'allument pas", et
+// il faut reflasher pour en sortir. Reglable a chaud, garde en NVS.
+static bool s_repeater = (LED_REPEATER_PIXEL != 0);
+static inline uint16_t offs() { return s_repeater ? 1 : 0; }
+#define OFFS (offs())
 
 // Night — lucioles. Quelques points s'allument doucement, brillent, s'eteignent,
 // ailleurs, sans jamais tout allumer. C'est le mode qu'on laisse vivre a 23 h.
@@ -853,6 +1047,23 @@ void setSpeed(uint8_t s) { s_speed = s; markDirty(); }
 uint8_t speed() { return s_speed; }
 void setColor(Rgbw c) { s_color = c; markDirty(); }
 Rgbw color() { return s_color; }
+void setGiColor(Rgbw c) { s_giColor = c; markDirty(); }
+Rgbw giColor() { return s_giColor; }
+void setInsBright(uint8_t b) { s_insBright = b; markDirty(); }
+void setChamp(uint8_t b) { s_champ = b; markDirty(); }
+uint8_t champ() { return s_champ; }
+uint8_t insBright() { return s_insBright; }
+void setLevelLock(bool on) {
+  if (on && !s_lvlLock) { s_lockGi = s_gi; s_lockChamp = s_champ; }
+  s_lvlLock = on;
+  markDirty();
+}
+// Refixer l'equilibre : appele quand les deux etages sont poses dans la meme
+// requete, ce qui est un reglage explicite et non un suivi.
+void setLevelRef(uint8_t g, uint8_t c) { s_lockGi = g; s_lockChamp = c; }
+uint8_t levelRefGi()    { return s_lockGi; }
+uint8_t levelRefChamp() { return s_lockChamp; }
+bool levelLock() { return s_lvlLock; }
 uint16_t count() { return s_count; }
 uint16_t budgetMa() { return s_budget; }
 void     setBudgetShare(uint8_t n) { s_share = n ? n : 1; }
@@ -874,6 +1085,18 @@ void setCount(uint16_t n) {
 static void applyPending() {
   if (!s_pendLen) return;
   s_pendLen = false;
+  // setPin() n'est PAS anodin ici : quand la chaine est deja demarree, il fait
+  // pinMode(nouvelle, OUTPUT) + digitalWrite(LOW) - exactement l'acte que le
+  // commentaire ci-dessous decrit comme arrachant la broche au canal RMT. Le
+  // banc a rendu le verdict : appele a chaque changement de longueur, meme pour
+  // la MEME broche, il noyait le port serie de "rmt_write_items : RMT DRIVER
+  // ERR" a chaque trame, et pas une LED ne s'allumait. On ne le touche donc que
+  // si la broche change vraiment, et on re-demarre la chaine derriere.
+  if (s_pin != s_pinLive) {
+    s_strip.setPin(s_pin);
+    s_strip.begin();
+    s_pinLive = s_pin;
+  }
   // Blank at the OLD length first. Shrinking the count otherwise stops addressing
   // the dropped pixels without ever telling them to go out, so the tail of the
   // chain stays latched on whatever it last showed — lit, and no longer counted
@@ -908,6 +1131,24 @@ static void applyPending() {
   s_strip2.clear();                     // idem : surtout pas de begin()
   s_strip2.show();
 #endif
+}
+
+bool repeater() { return s_repeater; }
+
+void setRepeater(bool on) {
+  if (on == s_repeater) return;
+  s_repeater = on;
+  s_pendLen  = true;        // la longueur physique de la chaine change
+  markDirty();
+}
+
+uint8_t pin() { return s_pin; }
+
+void setPin(uint8_t p) {
+  if (p == s_pin || p > 48) return;
+  s_pin = p;
+  s_pendLen = true;         // la sortie est re-instanciee sur la nouvelle broche
+  markDirty();
 }
 
 void setBudgetMa(uint16_t ma) {
@@ -987,6 +1228,10 @@ float    lastAmps()   { return s_amps; }
 bool     limited()    { return s_limited; }
 uint32_t frameCount() { return s_frames; }
 uint16_t fps()        { return s_fps; }
+// Bornee a 1..120 : zero arreterait le rendu sans que rien ne le dise, et
+// au-dela de 120 la trame ne tient plus sur le fil (150 px RGBW = 4,8 ms).
+void setFrameHz(uint8_t h) { s_frameHz = h < 1 ? 1 : (h > 120 ? 120 : h); markDirty(); }
+uint8_t frameHz() { return s_frameHz; }
 
 // Voir arenaled.h pour pourquoi il y en a deux.
 void resetLook() {
@@ -996,6 +1241,12 @@ void resetLook() {
   s_bright  = ARENA_BRIGHT_DEFAULT;
   s_speed   = ARENA_SPEED_DEFAULT;
   s_gi      = ARENA_GI_DEFAULT;
+  s_giColor = { 0, 0, 0, 0 };
+  s_insBright = 255;
+  s_champ = 255;
+  s_frameHz = LED_FRAME_HZ;
+  s_lvlLock = false;
+  s_lockGi = s_gi; s_lockChamp = s_champ;
   s_warm    = ARENA_WARM_DEFAULT;
   s_density = 110;
   s_inc     = true;
@@ -1005,6 +1256,12 @@ void resetLook() {
 }
 
 void resetAll() {
+  // Desarmer AVANT d'effacer. tick() finit par "si s_dirtyAt a plus de 3 s,
+  // save()", et save() reecrit les 17 cles depuis la RAM sans condition. Le
+  // redemarrage, lui, n'est programme qu'a 800 ms (arena_net.cpp). Bouger un
+  // curseur puis demander l'effacement dans la fenetre qui suit rendait donc
+  // toute l'apparence de l'ancien proprietaire, console affirmant le contraire.
+  s_dirtyAt = 0;
   s_prefs.clear();      // le cablage part avec : c'est le but, pas un effet de bord
   Serial.println("[led] NVS 'arena' efface en entier");
 }
@@ -1029,7 +1286,16 @@ void save() {
   s_prefs.putUChar("inc", s_inc ? 1 : 0);
   s_prefs.putUShort("count", s_count);
   s_prefs.putUShort("budget", s_budget);
+  s_prefs.putBool("rep", s_repeater);
+  s_prefs.putUChar("pin", s_pin);
   s_prefs.putBytes("color", &s_color, sizeof(s_color));
+  s_prefs.putBytes("gicol", &s_giColor, sizeof(s_giColor));
+  s_prefs.putUChar("insb", s_insBright);
+  s_prefs.putUChar("champ", s_champ);
+  s_prefs.putUChar("framehz", s_frameHz);
+  s_prefs.putUChar("lvllock", s_lvlLock ? 1 : 0);
+  s_prefs.putUChar("lockgi",  s_lockGi);
+  s_prefs.putUChar("lockch",  s_lockChamp);
   s_prefs.putString("order", s_order);
   if (s_dirtyAt == dirtyAtEntry) s_dirtyAt = 0;
 }
@@ -1067,6 +1333,9 @@ void begin() {
   s_inc = s_prefs.getUChar("inc", 1) != 0;
   s_count  = s_prefs.getUShort("count", LED_COUNT_DEFAULT);
   s_budget = s_prefs.getUShort("budget", LED_POWER_BUDGET_MA);
+  s_repeater = s_prefs.getBool("rep", LED_REPEATER_PIXEL != 0);
+  s_pin      = s_prefs.getUChar("pin", PIN_LED_DATA);
+  if (s_pin != s_pinLive) { s_strip.setPin(s_pin); s_pinLive = s_pin; }
   // Un mur deja en service porte l'ancienne valeur dans sa NVS : sans cette
   // borne, la mise a jour ne changerait rien la ou elle compte, c'est-a-dire
   // sur les cartes deja posees.
@@ -1074,6 +1343,15 @@ void begin() {
   if (s_count < 1 || s_count > LED_MAX) s_count = LED_COUNT_DEFAULT;
   if (s_prefs.getBytesLength("color") == sizeof(s_color))
     s_prefs.getBytes("color", &s_color, sizeof(s_color));
+  if (s_prefs.getBytesLength("gicol") == sizeof(s_giColor))
+    s_prefs.getBytes("gicol", &s_giColor, sizeof(s_giColor));
+  s_insBright = s_prefs.getUChar("insb", 255);
+  s_champ     = s_prefs.getUChar("champ", 255);
+  s_frameHz   = s_prefs.getUChar("framehz", LED_FRAME_HZ);
+  if (s_frameHz < 1 || s_frameHz > 120) s_frameHz = LED_FRAME_HZ;
+  s_lvlLock   = s_prefs.getUChar("lvllock", 0) != 0;
+  s_lockGi    = s_prefs.getUChar("lockgi",  s_gi);
+  s_lockChamp = s_prefs.getUChar("lockch",  s_champ);
   String ord = s_prefs.getString("order", ARENA_ORDER_DEFAULT);
   strncpy(s_order, ord.c_str(), sizeof(s_order) - 1);
   s_order[sizeof(s_order) - 1] = '\0';
@@ -1106,13 +1384,14 @@ void begin() {
   // seule LED pour essayer voit donc une LED qui ne s'allume jamais, et rien
   // nulle part ne le lui dit. Le dire fort, au demarrage.
   if (OFFS)
-    Serial.printf("[led] REPETEUR ACTIF (LED_REPEATER_PIXEL=1) : le 1er pixel physique "
-                  "reste ETEINT expres. Il faut donc %u+1 = %u LED cablees, et la "
-                  "premiere visible est la DEUXIEME de la chaine. Sur un banc a une "
-                  "seule LED, mettre LED_REPEATER_PIXEL a 0.\n",
+    Serial.printf("[led] REPETEUR ACTIF : le 1er pixel physique reste ETEINT expres. "
+                  "Il faut donc %u+1 = %u LED cablees, et la premiere visible est la "
+                  "DEUXIEME de la chaine. Une carte controleur du commerce n'a PAS de "
+                  "repeteur : dans ce cas -> /api/set?repeater=0 (garde en NVS, aucun "
+                  "reflashage).\n",
                   s_count, s_count + 1);
   Serial.printf("[led] %u px on GPIO%d, order=%s mode=%s bright=%u budget=%u mA\n",
-                s_count, PIN_LED_DATA, s_order, modeName(s_mode), s_bright, s_budget);
+                s_count, s_pin, s_order, modeName(s_mode), s_bright, s_budget);
 }
 
 void tick() {
@@ -1131,7 +1410,7 @@ void tick() {
   pollFault();
 
   uint32_t now = millis();
-  if (now - s_lastFrame < (uint32_t)(1000 / LED_FRAME_HZ)) return;
+  if (now - s_lastFrame < (uint32_t)(1000 / (s_frameHz ? s_frameHz : 1))) return;
   s_lastFrame = now;
 
   applyPending();       // strip length changes land here, not in an HTTP handler
@@ -1167,6 +1446,15 @@ void tick() {
     s_frame[i] = scale(Rgbw{ pc.r, pc.g, pc.b, pc.w }, lvl);
   }
 
+  // Correction de luminosite pixel par pixel. APRES le plastique et AVANT la
+  // luminosite globale : c'est une propriete de la lampe, pas du mode ni de
+  // l'ambiance. Posee avant le plastique elle deraperait la teinte, posee apres
+  // la luminosite globale elle serait ecrasee des qu'on baisse le mur.
+  for (uint16_t i = 0; i < s_count; i++) {
+    const uint8_t t = arenapf::trimOf(i);
+    if (t != 255) s_frame[i] = scale(s_frame[i], (float)t / 255.0f);
+  }
+
   // Mapping wizard overlay — works on top of any mode, auto-expires.
   if (s_idUntil) {
     if ((int32_t)(now - s_idUntil) >= 0) clearIdentify();
@@ -1180,8 +1468,14 @@ void tick() {
         const arenamap::Zone* zn = arenamap::zone((uint8_t)s_idZone);
         if (zn) {
           for (uint16_t i = 0; i < s_count; i++) s_frame[i] = scale(s_frame[i], 0.15f);
-          for (uint16_t i = zn->first; i < zn->first + zn->count && i < s_count; i++)
-            s_frame[i] = scale(hot, blink);
+          // Montrer le groupe, c'est montrer SES MEMBRES. Eclairer la tranche
+          // qui va du premier au dernier ferait clignoter les pixels des autres
+          // groupes intercales - et l'assistant de cartographie sert justement
+          // a repondre "lesquels ?", donc il ne peut pas mentir la-dessus.
+          for (uint16_t n = 0; n < zn->count; n++) {
+            const int i = arenamap::zoneNth((uint8_t)s_idZone, n);
+            if (i >= 0 && i < (int)s_count) s_frame[i] = scale(hot, blink);
+          }
         }
       }
     }

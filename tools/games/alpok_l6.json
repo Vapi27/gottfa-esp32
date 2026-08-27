@@ -1,0 +1,29 @@
+{
+  "_comment": "Alien Poker (Williams, 1980) - System 7. Squelette de portage, PAS une carte des lampes. Les deux champs qui demandent le manuel de la machine sont vides EXPRES : func et author_fixes. Les remplir de memoire ou par deduction produirait un plan credible et faux, ce qui est pire qu'un plan vide - un plan vide se voit, un plan faux se croit. Le proprietaire lit la charte des lampes dans son manuel de service et la recopie ici ; l'outil marche deja sans, avec les libelles de la table VP.",
+  "pinmame": "alpok_l6",
+  "_pinmame_variants": "alpok_l6 (L-6, la plus courante), alpok_l2, alpok_b6, alpok_f6. Le nom doit correspondre a la ROM presente dans ~/.pinmame/roms/.",
+  "_kinds_comment": "Comment les noms d'objets de la table VP se traduisent. Le defaut de l'outil est la convention Gottlieb (L<n> insert, F flasher, GI/LS ignores). Les auteurs de tables Williams ne nomment pas tous pareil : ouvrir la table dans Visual Pinball, regarder comment les lumieres s'appellent VRAIMENT, et ajuster ici. Un motif faux ne rend pas une erreur - il rend un plateau vide, ou un plateau plausible ou les flashers passent pour des lampes.",
+  "kinds": [
+    [
+      "^L\\d",
+      "i"
+    ],
+    [
+      "^F",
+      "f"
+    ]
+  ],
+  "ignore": [
+    "^GI",
+    "^LS"
+  ],
+  "_func_comment": "La charte des lampes du manuel de service : {\"9\": \"#1 TOP ROLLOVER\", ...}. Affichee en infobulle sur le plan. Vide tant que personne ne l'a lue sur le document.",
+  "func": {},
+  "_author_fixes_comment": "Erreurs de l'auteur de la table VP, constatees sur le VRAI plateau : {\"L1\": [\"L9\", 9]} renomme l'objet et fixe son numero de lampe reel. A ne remplir qu'apres verification devant la machine.",
+  "author_fixes": {},
+  "func_by_name": {},
+  "_offset_comment": "Calage de la texture de plateau. Essaye a +0.05 le 2026-08-27 sur demande, puis ANNULE : le proprietaire a juge que c'etait mieux sans. La mecanique reste en place pour les portages ou l'image et les bornes d'objets n'ont pas la meme origine.",
+  "offset_x": 0.0,
+  "offset_y": 0.0,
+  "_drop_comment": "NE PAS remettre 'drop' ici tant que ce mur a un mapping LED. Le mapping stocke l'INDICE de l'insert dans le tableau, pas son nom : retirer des pastilles decale tous les indices suivants et le mapping pointe en silence sur les mauvaises lucarnes. Les 4 doublons de halo de la table VPX (l29a l30a l31a l32a, meme lampe, 0.037-0.039 d'ecart, 'en vrai qu'une seule' confirme sur la machine) sont donc MASQUES sur la carte via /api/insert?ins=N&hide=1, ce qui vit en NVS. Le mecanisme 'drop' de l'outil reste utile pour un portage NEUF, ou aucun mapping n'existe encore. Les lampes 18 et 37 ont aussi deux pastilles, mais a 0.57-0.59 d'ecart et chacune avec sa LED : ce sont deux vraies lucarnes eloignees, on les garde."
+}

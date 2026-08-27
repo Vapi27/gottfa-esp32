@@ -35,6 +35,44 @@ static char    s_nam[INSERT_MAX][NAME_LEN];  // owner's label, empty = use the s
 // browser so it is the same from every phone in the house.
 static uint8_t s_hid[INSERT_MAX];      // 1 = masque
 
+// Correction de luminosite, par PIXEL et non par insert, 255 = neutre.
+//
+// La teinte appartient a l'insert - c'est le plastique moule, elle doit survivre
+// a un rerouteage de la chaine, et c'est deja ainsi. La luminosite, elle,
+// appartient au pixel : deux SK6812 d'un meme lot ne rendent pas la meme chose,
+// un insert large avale plus qu'un petit, et un plastique epais assombrit ce
+// qu'il y a dessous. Aucune de ces trois causes ne suit le fil quand on le
+// deplace ; toutes suivent la LED.
+static const char* NVS_TRIM = "trim";
+static uint8_t s_trim[LED_MAX];
+
+uint8_t trimOf(uint16_t led)  { return (led < LED_MAX) ? s_trim[led] : 255; }
+
+bool setTrim(uint16_t led, uint8_t v) {
+  if (led >= LED_MAX) return false;
+  s_trim[led] = v;
+  return true;
+}
+
+void clearTrims() { memset(s_trim, 255, sizeof(s_trim)); }
+
+bool saveTrims() {
+  return s_prefs.putBytes(NVS_TRIM, s_trim, sizeof(s_trim)) == sizeof(s_trim);
+}
+
+String trimsJson() {
+  String j = "{\"trims\":[";
+  bool first = true;
+  for (uint16_t i = 0; i < LED_MAX; i++) {
+    if (s_trim[i] == 255) continue;          // le neutre ne s'ecrit pas
+    if (!first) j += ',';
+    j += "{\"i\":" + String(i) + ",\"t\":" + String(s_trim[i]) + "}";
+    first = false;
+  }
+  j += "]}";
+  return j;
+}
+
 uint8_t       insertCount()       { return s_nIns; }
 const Insert* insert(uint8_t i)   { return (i < s_nIns) ? &s_ins[i] : nullptr; }
 uint8_t       ledInsert(uint16_t led) { return (led < LED_MAX) ? s_led[led] : UNASSIGNED; }
@@ -157,6 +195,81 @@ String insertsJson() {
   return j;
 }
 
+// --- une table d'inserts EDITABLE ------------------------------------------
+//
+// L'en-tete disait de cette table "it does not change: it is the machine", et
+// c'etait vrai tant que la machine etait l'Arena livree avec le firmware. Pour
+// un autre plateau - un Alien Poker - il n'y a ni table Visual Pinball ni ROM
+// sous la main : il y a une photo, et quelqu'un qui sait ou sont ses inserts.
+// Poser un point la ou l'on tape doit donc etre possible, sinon le mur ne peut
+// exister que pour les machines que le depot connait deja.
+//
+// Le fichier reste la source : on l'ecrit, et loadInserts() le relit tel quel
+// au demarrage suivant. Rien de nouveau a charger.
+bool saveInserts() {
+  File f = LittleFS.open(PF_PATH, "w");
+  if (!f) return false;
+  String j = insertsJson();
+  const size_t w = f.print(j);
+  f.close();
+  return w == j.length();
+}
+
+int addInsert(float x, float y, const char* name) {
+  if (s_nIns >= INSERT_MAX) return -1;
+  Insert& it = s_ins[s_nIns];
+  memset(&it, 0, sizeof(it));
+  if (name && *name) { strncpy(it.name, name, NAME_LEN - 1); it.name[NAME_LEN - 1] = 0; }
+  else               { snprintf(it.name, NAME_LEN, "P%u", (unsigned)(s_nIns + 1)); }
+  it.func[0] = 0;
+  it.kind = 'i';
+  it.lamp = -1;                     // aucune lampe : ce point ne vient d'aucune ROM
+  it.x = (x < 0) ? 0 : (x > 1 ? 1 : x);
+  it.y = (y < 0) ? 0 : (y > 1 ? 1 : y);
+  s_col[s_nIns] = Colour{ 0, 0, 0, 0 };
+  s_nam[s_nIns][0] = 0;
+  s_hid[s_nIns] = 0;
+  return (int)s_nIns++;
+}
+
+bool moveInsert(uint8_t ins, float x, float y) {
+  if (ins >= s_nIns) return false;
+  s_ins[ins].x = (x < 0) ? 0 : (x > 1 ? 1 : x);
+  s_ins[ins].y = (y < 0) ? 0 : (y > 1 ? 1 : y);
+  return true;
+}
+
+bool removeInsert(uint8_t ins) {
+  if (ins >= s_nIns) return false;
+  // Les pixels designent les inserts par INDICE. Retirer un insert sans
+  // recaler ces indices ne casse rien de visible : chaque pixel pose apres lui
+  // glisse d'un cran et se retrouve sur le voisin. Un plan qui a bouge tout
+  // seul est plus couteux qu'un plan casse, parce qu'il reste credible.
+  for (uint16_t k = 0; k < LED_MAX; k++) {
+    if (s_led[k] == ins)                              s_led[k] = UNASSIGNED;
+    else if (s_led[k] != UNASSIGNED && s_led[k] > ins) s_led[k]--;
+  }
+  for (uint8_t k = ins; k + 1 < s_nIns; k++) {
+    s_ins[k] = s_ins[k + 1];
+    s_col[k] = s_col[k + 1];
+    s_hid[k] = s_hid[k + 1];
+    memcpy(s_nam[k], s_nam[k + 1], NAME_LEN);
+  }
+  s_nIns--;
+  s_any = false;
+  for (uint16_t k = 0; k < LED_MAX; k++) if (s_led[k] != UNASSIGNED) { s_any = true; break; }
+  return true;
+}
+
+void clearInserts() {
+  s_nIns = 0;
+  memset(s_led, UNASSIGNED, sizeof(s_led));
+  memset(s_col, 0, sizeof(s_col));
+  memset(s_hid, 0, sizeof(s_hid));
+  memset(s_nam, 0, sizeof(s_nam));
+  s_any = false;
+}
+
 static bool loadInserts() {
   s_nIns = 0;
   if (!LittleFS.exists(PF_PATH)) return false;
@@ -266,6 +379,9 @@ void begin() {
     s_prefs.getBytes(NVS_NAM, s_nam, sizeof(s_nam));
   if (s_prefs.getBytesLength(NVS_HID) == sizeof(s_hid))
     s_prefs.getBytes(NVS_HID, s_hid, sizeof(s_hid));
+  clearTrims();
+  if (s_prefs.getBytesLength(NVS_TRIM) == sizeof(s_trim))
+    s_prefs.getBytes(NVS_TRIM, s_trim, sizeof(s_trim));
   uint16_t n = 0;
   for (uint16_t i = 0; i < LED_MAX; i++) if (s_led[i] != UNASSIGNED) n++;
   Serial.printf("[pf] %u inserts%s, %u pixels placed\n",

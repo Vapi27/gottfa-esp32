@@ -5,6 +5,7 @@
 #include <ESPmDNS.h>
 #include <ESPAsyncWebServer.h>
 #include <Preferences.h>
+#include <Adafruit_NeoPixel.h>   // le pixel de statut, meme bibliotheque que la chaine
 #include <esp_ota_ops.h>   // validation de l'image apres une OTA
 
 // esp_read_mac : dans esp_mac.h depuis IDF 5, dans esp_system.h avant.
@@ -16,6 +17,7 @@
 #include <Update.h>
 #include <esp_ota_ops.h>
 #include <esp_partition.h>   // ecriture directe de la partition fichiers
+#include <esp_flash.h>       // taille physique de la puce, via son identifiant JEDEC
 // Empreinte de build exposee dans /api/state. L'en-tete a demenage entre les
 // versions de l'IDF : esp_app_desc.h n'existe qu'a partir de la 5, alors que le
 // build Arduino/PlatformIO tourne encore sur la 4.4. Meme structure, deux noms.
@@ -130,6 +132,7 @@ static const char FALLBACK[] PROGMEM =
 // RMT part vraiment, ou si rmtInit() echoue (carte hors USB, donc pas de log).
 extern "C" {
   extern volatile uint32_t espShowRmtFail, espShowFrames, espShowLockMiss;
+  extern volatile uint32_t espShowInstalls, espShowNoIram;
   extern volatile int32_t  espShowBusType;
 }
 
@@ -168,8 +171,84 @@ static String        s_scanErr    = "";
 // difference se lit ici : le compteur monte a chaque demarrage, et la cause du
 // dernier reset dit si c'etait une coupure, un plantage ou un chien de garde.
 static uint8_t       s_statPin    = ARENA_STATUS_PIN;
+
+// Le pixel de statut et la chaine du mur se partagent le peripherique RMT, et
+// le conflit vient de la CADENCE, pas de la bibliotheque.
+//
+// L'histoire, parce qu'elle a coute trois tours : neopixelWrite() re-reclame un
+// canal RMT a chaque appel, et a 25 Hz - la respiration de ce temoin - il
+// rendait la chaine muette ("RMT DRIVER ERR" a 25 Hz, exactement). J'ai d'abord
+// eteint le temoin, ce qui reglait le conflit en supprimant l'un des deux ; puis
+// je l'ai passe a Adafruit_NeoPixel, et il est sorti BLANC A FOND.
+//
+// Les timings de la branche heritee d'Adafruit sont ceux du WS2812 (T1H 800 ns);
+// un SK6812 attend 600 ns et lit alors des uns partout - du blanc plein, a
+// pleine echelle, insensible a la luminosite qu'on lui demande. neopixelWrite()
+// rendait les bonnes couleurs sur CETTE carte : c'est un fait mesure, et il
+// repasse devant mon raisonnement.
+//
+// On revient donc a neopixelWrite(), et on retire ce qui obligeait au 25 Hz : la
+// respiration. Le temoin est fixe, et n'est reecrit que lorsque sa couleur
+// change - plus un rafraichissement lent de securite.
+static bool          s_statOn     = true;
+// Luminosite du temoin, 0..255. Elle etait ecrite en dur, et un temoin en dur
+// est un temoin qui eblouit quelqu'un : la meme LED sert de veilleuse a cote
+// d'un lit et de repere en plein jour. 60 par defaut - visible sans agresser.
+static uint8_t       s_statBright = 60;
 static String        s_reset      = "?";
 static uint32_t      s_boots      = 0;
+
+// Un brownout ne laisse aucune trace apres le redemarrage suivant : la cause du
+// reset ne parle que du DERNIER. Ce compteur-la, lui, tient le total, et c est
+// lui qui distingue "une fois, en debranchant" de "a chaque rafale WiFi".
+static uint32_t      s_brownouts  = 0;
+static uint8_t       s_txq        = ARENA_WIFI_TXPWR_QDBM;   // quarts de dBm
+static bool          s_txDerated  = false;   // baissee d office apres un brownout
+
+// A appeler seulement quand la radio tourne (esp_wifi_start est passe) : sinon
+// l IDF repond ESP_ERR_WIFI_NOT_STARTED et la valeur est perdue en silence.
+static void applyTxPower() {
+  const esp_err_t e = esp_wifi_set_max_tx_power((int8_t)s_txq);
+  if (e != ESP_OK) {
+    Serial.printf("[net] puissance TX refusee (%d)\n", (int)e);
+    return;
+  }
+  Serial.printf("[net] puissance TX = %.2f dBm%s\n", s_txq / 4.0f,
+                s_txDerated ? "  (baissee apres un brownout)" : "");
+}
+
+// La taille de flash annoncee par ESP.getFlashChipSize() vient de l en-tete que
+// l outil de flashage a ecrit : elle repete ce que le build a SUPPOSE, pas ce que
+// la puce porte. L identifiant JEDEC, lui, vient du silicium - octet 3 = capacite
+// en puissance de deux. C est la seule source qui puisse contredire le build.
+static uint32_t physicalFlashBytes() {
+  uint32_t id = 0;
+  if (esp_flash_read_id(esp_flash_default_chip, &id) != ESP_OK) return 0;
+  const uint8_t cap = (uint8_t)(id & 0xFF);
+  if (cap < 0x14 || cap > 0x1A) return 0;      // hors 1 Mo..64 Mo : code inconnu
+  return 1UL << cap;
+}
+
+// Fin de la derniere partition de la table. Si elle depasse la flash reelle, les
+// partitions du haut - OTA et fichiers, justement - pointent dans le vide : une
+// OTA s ecrit par-dessus elle-meme et LittleFS se corrompt au premier montage.
+// Rien de tout cela ne se voit au demarrage, ce qui est exactement le probleme.
+static uint32_t partitionEndBytes() {
+  uint32_t end = 0;
+  esp_partition_iterator_t it =
+      esp_partition_find(ESP_PARTITION_TYPE_ANY, ESP_PARTITION_SUBTYPE_ANY, nullptr);
+  while (it) {
+    const esp_partition_t* p = esp_partition_get(it);
+    if (p && p->address + p->size > end) end = p->address + p->size;
+    it = esp_partition_next(it);
+  }
+  esp_partition_iterator_release(it);
+  return end;
+}
+
+static uint32_t s_flashPhys = 0;
+static uint32_t s_partEnd   = 0;
+static bool     s_flashBad  = false;
 
 static const char* resetReasonName(esp_reset_reason_t r) {
   switch (r) {
@@ -309,6 +388,27 @@ static String stateJson() {
   j += ",\"bright\":" + String(arenaled::brightness());
   j += ",\"speed\":"  + String(arenaled::speed());
   j += ",\"gi\":"     + String(arenaled::gi());
+  j += ",\"insb\":"   + String(arenaled::insBright());
+  j += ",\"champ\":"  + String(arenaled::champ());
+  {
+    // Le groupe existe-t-il, et avec combien de pixels ? Un reglage qui ne
+    // commande rien doit se voir comme tel dans l'interface, pas passer pour
+    // une panne. -1 = le groupe n'existe pas encore.
+    const int cz = arenamap::indexOf(ARENA_CHAMP_ZONE);
+    const arenamap::Zone* z = (cz >= 0) ? arenamap::zone((uint8_t)cz) : nullptr;
+    j += ",\"champn\":" + String(z ? (int)z->count : -1);
+  }
+  j += ",\"lock\":"   + String(arenaled::levelLock() ? 1 : 0);
+  j += ",\"mapsrc\":\"" + String(arenamap::source()) + "\"";
+  j += ",\"framehz\":" + String(arenaled::frameHz());
+  {
+    // Teinte du fond, publiee a part des r/g/b/w des inserts : tout a zero
+    // veut dire "suit le panneau Couleur", ce que l'interface affiche comme
+    // tel au lieu d'un noir trompeur.
+    const arenaled::Rgbw gc = arenaled::giColor();
+    j += ",\"gir\":" + String(gc.r) + ",\"gig\":" + String(gc.g)
+       + ",\"gib\":" + String(gc.b) + ",\"giw\":" + String(gc.w);
+  }
   j += ",\"density\":" + String(arenaled::density());
   j += ",\"warm\":"   + String(arenaled::warm());
   j += ",\"inc\":"    + String(arenaled::incandescent() ? 1 : 0);
@@ -335,9 +435,22 @@ static String stateJson() {
   j += ",\"fps\":"    + String(arenaled::fps());
   // Diagnostic sortie LED : pin reellement compilee, trames emises, echecs.
   j += ",\"pin\":"      + String(PIN_LED_DATA);
+  // Le repeteur decide si le 1er pixel physique est tenu eteint. C'est le
+  // reglage qui explique "les LED ne s'allument pas" une fois sur deux, et il
+  // n'etait expose NULLE PART : ni la page ni /api/state ne disaient sa valeur,
+  // donc personne ne pouvait verifier ce qu'il venait de changer.
+  j += ",\"repeater\":" + String(arenaled::repeater() ? 1 : 0);
   j += ",\"rmtframes\":" + String((uint32_t)espShowFrames);
   j += ",\"rmtfail\":"  + String((uint32_t)espShowRmtFail);
   j += ",\"lockmiss\":" + String((uint32_t)espShowLockMiss);
+  // Le canal RMT est desormais garde d une trame a l autre. rmtinst doit donc
+  // rester de l ordre d une installation par broche : s il grimpe a la cadence
+  // des trames, la garde ne prend pas et on est revenu au comportement d avant.
+  // noiram > 0 = le pilote a refuse ESP_INTR_FLAG_IRAM et on tourne degrade :
+  // la sortie RMT redevient vulnerable aux lectures flash (donc au service des
+  // pages), ce qui est exactement le defaut qu on corrige.
+  j += ",\"rmtinst\":" + String((uint32_t)espShowInstalls);
+  j += ",\"noiram\":"  + String((uint32_t)espShowNoIram);
   // Rendu gele pendant un appairage BLE. Sans ce champ, fps/ma/rmtframes figes
   // ressemblent a s'y meprendre a un rendu normal.
   j += ",\"paused\":" + String(arenaled::paused() ? "true" : "false");
@@ -420,10 +533,42 @@ static String stateJson() {
   j += ",\"ip\":\""   + s_ip + "\",\"net\":\"" + s_mode + "\"";
   j += ",\"staFail\":\"" + s_staReason + "\"";
   j += ",\"reset\":\"" + s_reset + "\",\"boots\":" + String(s_boots);
+  j += ",\"brownouts\":" + String(s_brownouts);
+  j += ",\"txpwr\":" + String(s_txq / 4.0f, 2);
+  j += ",\"txDerated\":" + String(s_txDerated ? 1 : 0);
+  j += ",\"flashMb\":" + String(s_flashPhys >> 20);
+  j += ",\"partMb\":"  + String(s_partEnd >> 20);
+  j += ",\"flashBad\":" + String(s_flashBad ? 1 : 0);
+  j += ",\"statusLed\":" + String(s_statOn ? 1 : 0);
+  j += ",\"statusBright\":" + String(s_statBright);
+  // La page doit savoir QUI possede le reseau. Sous Matter, l'appairage apporte
+  // les identifiants et il n'y a rien a saisir ; sans Matter, la saisie est le
+  // SEUL moyen de rejoindre un reseau. Afficher le discours Matter dans une
+  // image qui n'en a pas, c'est dire au proprietaire qu'il n'a rien a faire
+  // pendant qu'on lui retire le seul geste qui marche.
+#ifdef ARENA_MATTER
+  j += ",\"matter\":1";
+#else
+  j += ",\"matter\":0";
+#endif
   j += ",\"up\":"     + String(millis() / 1000);
   j += ",\"heap\":"   + String(ESP.getFreeHeap());
   j += "}";
   return j;
+}
+
+// Verrou de niveaux : l'un bouge, l'autre suit. On conserve le RAPPORT et non
+// l'ecart, parce que c'est le rapport qu'on percoit comme "le meme equilibre"
+// quand on monte ou descend l'ensemble. Le rapport n'est pas defini quand la
+// source part de zero : dans ce seul cas on reporte l'ECART, faute de quoi un
+// fond descendu a 0 y resterait pour toujours et le verrou aurait l'air casse.
+static uint8_t followLevel(int from, int to, int other) {
+  if (from == to) return (uint8_t)other;
+  long v = (from > 0) ? lroundf((float)other * (float)to / (float)from)
+                      : (long)other + (to - from);
+  if (v < 0) v = 0;
+  if (v > 255) v = 255;
+  return (uint8_t)v;
 }
 
 static uint8_t param8(AsyncWebServerRequest* r, const char* k, uint8_t cur) {
@@ -437,8 +582,25 @@ static uint8_t param8(AsyncWebServerRequest* r, const char* k, uint8_t cur) {
 static void startServer() {
   // --- UI ---------------------------------------------------------------
   s_server.on("/", HTTP_GET, [](AsyncWebServerRequest* r) {
-    if (LittleFS.exists("/arena.html")) r->send(LittleFS, "/arena.html", "text/html");
-    else                                r->send_P(200, "text/html", FALLBACK);
+    // La page compressee d'abord. Ce n'est pas de l'economie de place, c'est du
+    // temps d'antenne : mesure sur la carte, servir les 70 ko de la page fait
+    // tomber la cadence de rendu de 60,3 a 55,7 trames/s, et surtout une
+    // interruption WiFi qui tombe DANS un s_strip.show() (2,4 ms pour 75 pixels)
+    // depasse les 50 us de silence que les WS2812 lisent comme une fin de trame :
+    // tout ce qui suit dans la chaine recoit la suite comme une nouvelle trame et
+    // decroche. D'ou des pixels qui sautent en bout de chaine quand on rafraichit
+    // la page. 71,5 ko -> 25,9 ko, c'est 2,8 fois moins de fenetre pour ca.
+    //
+    // ATTENTION : arena.html.gz est genere, pas edite. Apres toute modification de
+    // data/arena.html il faut refaire  gzip -9 -k -f data/arena.html  avant
+    // buildfs, sinon la carte sert l'ancienne interface sans rien signaler.
+    if (LittleFS.exists("/arena.html.gz")) {
+      AsyncWebServerResponse* rsp = r->beginResponse(LittleFS, "/arena.html.gz", "text/html");
+      rsp->addHeader("Content-Encoding", "gzip");
+      r->send(rsp);
+    }
+    else if (LittleFS.exists("/arena.html")) r->send(LittleFS, "/arena.html", "text/html");
+    else                                     r->send_P(200, "text/html", FALLBACK);
   });
 
   // --- State / control ----------------------------------------------------
@@ -455,7 +617,29 @@ static void startServer() {
     }
     if (r->hasParam("bright")) arenaled::setBrightness(param8(r, "bright", arenaled::brightness()));
     if (r->hasParam("speed"))  arenaled::setSpeed(param8(r, "speed", arenaled::speed()));
-    if (r->hasParam("gi"))     arenaled::setGi(param8(r, "gi", arenaled::gi()));
+    if (r->hasParam("lock")) arenaled::setLevelLock(r->getParam("lock")->value().toInt() != 0);
+    if (r->hasParam("framehz")) arenaled::setFrameHz(param8(r, "framehz", arenaled::frameHz()));
+    if (r->hasParam("insb")) arenaled::setInsBright(param8(r, "insb", arenaled::insBright()));
+    // Les deux etages permanents, traites ensemble parce que le verrou fait
+    // dependre l'un de l'autre. Bouger les DEUX dans la meme requete est un
+    // reglage explicite : le verrou ne s'en mele pas, sans quoi on ne pourrait
+    // plus jamais refixer l'equilibre une fois verrouille.
+    if (r->hasParam("gi") || r->hasParam("champ")) {
+      const uint8_t oldG = arenaled::gi(), oldC = arenaled::champ();
+      uint8_t newG = param8(r, "gi", oldG), newC = param8(r, "champ", oldC);
+      if (arenaled::levelLock()) {
+        // Le suiveur se deduit du couple de REFERENCE, pas de la valeur courante
+        // - sinon un ecretage a 255 se propage dans le rapport et l'aller-retour
+        // ne redonne plus la valeur de depart.
+        const uint8_t rg = arenaled::levelRefGi(), rc = arenaled::levelRefChamp();
+        if (r->hasParam("gi") && !r->hasParam("champ"))      newC = followLevel(rg, newG, rc);
+        else if (r->hasParam("champ") && !r->hasParam("gi")) newG = followLevel(rc, newC, rg);
+      }
+      arenaled::setGi(newG);
+      arenaled::setChamp(newC);
+      // Poser les deux ensemble redefinit l'equilibre.
+      if (r->hasParam("gi") && r->hasParam("champ")) arenaled::setLevelRef(newG, newC);
+    }
     if (r->hasParam("density")) arenaled::setDensity(param8(r, "density", arenaled::density()));
     if (r->hasParam("warm"))   arenaled::setWarm(param8(r, "warm", arenaled::warm()));
     if (r->hasParam("inc"))    arenaled::setIncandescent(r->getParam("inc")->value().toInt() != 0);
@@ -467,6 +651,15 @@ static void startServer() {
       c.b = param8(r, "b", c.b);
       c.w = param8(r, "w", c.w);
       arenaled::setColor(c);
+    }
+    if (r->hasParam("gir") || r->hasParam("gig") ||
+        r->hasParam("gib") || r->hasParam("giw")) {
+      arenaled::Rgbw c = arenaled::giColor();
+      c.r = param8(r, "gir", c.r);
+      c.g = param8(r, "gig", c.g);
+      c.b = param8(r, "gib", c.b);
+      c.w = param8(r, "giw", c.w);
+      arenaled::setGiColor(c);
     }
     if (r->hasParam("order")) {
       if (!arenaled::setOrder(r->getParam("order")->value().c_str())) {
@@ -480,7 +673,45 @@ static void startServer() {
     if (r->hasParam("pin"))      arenaled::setPin((uint8_t)r->getParam("pin")->value().toInt());
     if (r->hasParam("statuspin")) {
       const uint8_t p = (uint8_t)r->getParam("statuspin")->value().toInt();
-      if (p <= 48) { s_statPin = p; s_prefs.putUChar("statpin", p); }
+      if (p <= 48) {
+        s_statPin = p;
+        s_prefs.putUChar("statpin", p);
+      }
+    }
+    // /api/set?btnup=7&btndown=15&btnok=17
+    // Les trois ensemble : un remappage partiel laisserait deux roles sur la
+    // meme broche, donc un poussoir muet et un autre qui fait deux choses.
+    if (r->hasParam("btnup") && r->hasParam("btndown") && r->hasParam("btnok")) {
+      arenaoled::setButtons((uint8_t)r->getParam("btnup")->value().toInt(),
+                            (uint8_t)r->getParam("btndown")->value().toInt(),
+                            (uint8_t)r->getParam("btnok")->value().toInt());
+    }
+    // /api/set?btnrot=1 : faire tourner les roles d'un cran, a l'aveugle.
+    if (r->hasParam("btnrot")) arenaoled::rotateButtons();
+    // /api/set?statusbright=0..255 - le temoin de la carte, pas le mur.
+    if (r->hasParam("statusbright")) {
+      long v = r->getParam("statusbright")->value().toInt();
+      if (v < 0)   v = 0;
+      if (v > 255) v = 255;
+      s_statBright = (uint8_t)v;
+      s_prefs.putUChar("statbr", s_statBright);
+    }
+    if (r->hasParam("statusled")) {
+      s_statOn = r->getParam("statusled")->value().toInt() != 0;
+      s_prefs.putUChar("staten", s_statOn ? 1 : 0);
+      Serial.printf("[net] pixel de statut : %s\n", s_statOn ? "allume (il peut couper la chaine)" : "eteint");
+    }
+    // /api/set?txpwr=13   puissance d emission en dBm (2..20). Baisser echange
+    // de la portee contre des rafales de courant plus petites : c est le seul
+    // levier logiciel sur un brownout, et il ne repare pas une alimentation.
+    if (r->hasParam("txpwr")) {
+      float d = r->getParam("txpwr")->value().toFloat();
+      if (d < 2)  d = 2;
+      if (d > 20) d = 20;
+      s_txq = (uint8_t)lroundf(d * 4.0f);
+      s_txDerated = false;              // choix explicite du proprietaire
+      s_prefs.putUChar("txq", s_txq);
+      applyTxPower();
     }
     r->send(200, "application/json", stateJson());
   });
@@ -569,6 +800,185 @@ static void startServer() {
     arenapf::clearAssignment();
     arenapf::save();
     r->send(200, "text/plain", "cleared");
+  });
+
+  // Un pixel rejoint ou quitte un groupe, un par un : c'est le geste de la
+  // cartographie a la main. Un groupe n'etant plus une plage, il n'y a pas
+  // d'autre facon de decrire "ce bumper-la et celui d'en face, pas ce qu'il y a
+  // entre les deux".
+  //   /api/zone/assign?led=37&z=4     -> le pixel 37 rejoint le groupe 4
+  //   /api/zone/assign?led=37&z=-1    -> il n'appartient plus a rien
+  s_server.on("/api/zone/assign", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("led") || !r->hasParam("z")) {
+      r->send(400, "text/plain", "led= et z= requis (z=-1 pour retirer)");
+      return;
+    }
+    const long led = r->getParam("led")->value().toInt();
+    const long z   = r->getParam("z")->value().toInt();
+    if (led < 0 || led >= LED_MAX) { r->send(400, "text/plain", "led hors chaine"); return; }
+    const uint8_t zz = (z < 0) ? arenamap::ZONE_NONE : (uint8_t)z;
+    if (!arenamap::setLedZone((uint16_t)led, zz)) {
+      r->send(400, "text/plain", "groupe inconnu");
+      return;
+    }
+    arenamap::save();
+    r->send(200, "application/json", arenamap::toJson());
+  });
+
+  // Creer / renommer / supprimer un groupe sans reecrire toute la table.
+  //   /api/zone/add?n=pop-bumpers          -> groupe vide, a remplir pixel par pixel
+  //   /api/zone/name?z=4&n=eclairage
+  //   /api/zone/del?z=4
+  s_server.on("/api/zone/add", HTTP_GET, [](AsyncWebServerRequest* r) {
+    const String n = r->hasParam("n") ? r->getParam("n")->value() : String("groupe");
+    if (!arenamap::addZone(n.c_str(), 0, 0)) { r->send(400, "text/plain", "table pleine"); return; }
+    arenamap::save();
+    r->send(200, "application/json", arenamap::toJson());
+  });
+  s_server.on("/api/zone/name", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("z") || !r->hasParam("n")) { r->send(400, "text/plain", "z= et n= requis"); return; }
+    if (!arenamap::renameZone((uint8_t)r->getParam("z")->value().toInt(),
+                              r->getParam("n")->value().c_str())) {
+      r->send(400, "text/plain", "groupe inconnu"); return;
+    }
+    arenamap::save();
+    r->send(200, "application/json", arenamap::toJson());
+  });
+  s_server.on("/api/zone/del", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("z")) { r->send(400, "text/plain", "z= requis"); return; }
+    if (!arenamap::removeZone((uint8_t)r->getParam("z")->value().toInt())) {
+      r->send(400, "text/plain", "groupe inconnu"); return;
+    }
+    arenamap::save();
+    r->send(200, "application/json", arenamap::toJson());
+  });
+
+  // Un pixel, sa luminosite et sa teinte.
+  //   /api/pixel?led=37                 -> ce qu'il porte
+  //   /api/pixel?led=37&trim=180        -> sa luminosite propre (0..255, 255 = neutre)
+  //   /api/pixel?led=37&r=255&g=40&b=0  -> sa teinte
+  //
+  // Les deux ne vont PAS au meme endroit, et c'est deliberé. La luminosite est
+  // ecrite sur le pixel : elle corrige la lampe - dispersion du lot, taille de
+  // l'insert, epaisseur du plastique - et ces causes suivent la LED. La teinte
+  // est ecrite sur l'INSERT : c'est le plastique moule, il reste sur le plateau
+  // quand on refait passer le fil autrement.
+  //
+  // Consequence assumee : demander une teinte pour un pixel qui n'est pas encore
+  // pose n'a nulle part ou aller. On le DIT, avec le geste qui manque. Accepter
+  // en silence rendrait un reglage qui ne se voit jamais.
+  // --- la photo du plateau, et les points dessus ---------------------------
+  //
+  // POST /api/pfimg  (corps = le JPEG brut)  -> /pf.jpg
+  // Le plan prefere /pf.jpg quand il existe et retombe sur le playfield.jpg
+  // livre sinon. Deux fichiers separes, deliberement : une photo televersee est
+  // le travail du proprietaire, et /update?target=fs reecrit toute la partition
+  // - c'est deja ce qui avait fait perdre la cartographie une fois. Le sien
+  // porte un autre nom pour que la prochaine mise a jour de l'interface ne
+  // l'emporte pas avec elle.
+  s_server.on("/api/pfimg", HTTP_POST,
+    [](AsyncWebServerRequest* r) {
+      const bool ok = LittleFS.exists("/pf.jpg") && LittleFS.open("/pf.jpg", "r").size() > 0;
+      r->send(ok ? 200 : 400, "text/plain", ok ? "photo enregistree" : "rien recu");
+    },
+    nullptr,
+    [](AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total) {
+      static File up;
+      if (index == 0) {
+        up = LittleFS.open("/pf.jpg", "w");
+        Serial.printf("[pf] photo entrante, %u octets\n", (unsigned)total);
+      }
+      if (up) up.write(data, len);
+      if (up && index + len >= total) { up.close(); Serial.println("[pf] photo enregistree"); }
+    });
+
+  s_server.on("/api/pfimg", HTTP_DELETE, [](AsyncWebServerRequest* r) {
+    LittleFS.remove("/pf.jpg");
+    r->send(200, "text/plain", "photo retiree - retour au plateau livre");
+  });
+
+  // Poser, deplacer, retirer un point sur la photo. C'est le geste qui rend le
+  // mur possible pour une machine que le depot ne connait pas : pas de table
+  // Visual Pinball, pas de ROM, juste une photo et quelqu'un qui sait ou sont
+  // ses inserts.
+  //   /api/insert/add?x=0.42&y=0.71&n=pop-gauche
+  //   /api/insert/move?i=12&x=0.44&y=0.70
+  //   /api/insert/del?i=12
+  s_server.on("/api/insert/add", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("x") || !r->hasParam("y")) { r->send(400, "text/plain", "x= et y= (0..1) requis"); return; }
+    const int i = arenapf::addInsert(r->getParam("x")->value().toFloat(),
+                                     r->getParam("y")->value().toFloat(),
+                                     r->hasParam("n") ? r->getParam("n")->value().c_str() : nullptr);
+    if (i < 0) { r->send(400, "text/plain", "table pleine"); return; }
+    arenapf::saveInserts();
+    r->send(200, "application/json", "{\"insert\":" + String(i) + "}");
+  });
+  s_server.on("/api/insert/move", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("i") || !r->hasParam("x") || !r->hasParam("y")) {
+      r->send(400, "text/plain", "i=, x= et y= requis"); return;
+    }
+    if (!arenapf::moveInsert((uint8_t)r->getParam("i")->value().toInt(),
+                             r->getParam("x")->value().toFloat(),
+                             r->getParam("y")->value().toFloat())) {
+      r->send(400, "text/plain", "point inconnu"); return;
+    }
+    arenapf::saveInserts();
+    r->send(200, "text/plain", "deplace");
+  });
+  s_server.on("/api/insert/del", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("i")) { r->send(400, "text/plain", "i= requis"); return; }
+    if (!arenapf::removeInsert((uint8_t)r->getParam("i")->value().toInt())) {
+      r->send(400, "text/plain", "point inconnu"); return;
+    }
+    arenapf::saveInserts();
+    arenapf::save();                 // les affectations ont ete recalees
+    r->send(200, "text/plain", "retire");
+  });
+
+  s_server.on("/api/pixel", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("led")) { r->send(400, "text/plain", "led= requis"); return; }
+    const long led = r->getParam("led")->value().toInt();
+    if (led < 0 || led >= LED_MAX) { r->send(400, "text/plain", "led hors chaine"); return; }
+
+    if (r->hasParam("trim")) {
+      long v = r->getParam("trim")->value().toInt();
+      if (v < 0)   v = 0;
+      if (v > 255) v = 255;
+      arenapf::setTrim((uint16_t)led, (uint8_t)v);
+      arenapf::saveTrims();
+    }
+
+    const uint8_t ins = arenapf::ledInsert((uint16_t)led);
+    if (r->hasParam("r") || r->hasParam("g") || r->hasParam("b") || r->hasParam("w")) {
+      if (ins == arenapf::UNASSIGNED) {
+        r->send(409, "text/plain",
+                "ce pixel n'est pose sur aucun insert : la teinte est une propriete "
+                "de l'insert (le plastique), pas du fil. Placer le pixel d'abord "
+                "(assistant de cartographie), puis recommencer.");
+        return;
+      }
+      arenapf::Colour c = arenapf::colourOf(ins);
+      if (r->hasParam("r")) c.r = (uint8_t)r->getParam("r")->value().toInt();
+      if (r->hasParam("g")) c.g = (uint8_t)r->getParam("g")->value().toInt();
+      if (r->hasParam("b")) c.b = (uint8_t)r->getParam("b")->value().toInt();
+      if (r->hasParam("w")) c.w = (uint8_t)r->getParam("w")->value().toInt();
+      arenapf::setColour(ins, c);
+      arenapf::saveColours();
+    }
+
+    const arenapf::Colour c = arenapf::colourOfLed((uint16_t)led);
+    String j = "{\"led\":" + String(led);
+    j += ",\"trim\":" + String(arenapf::trimOf((uint16_t)led));
+    j += ",\"insert\":" + String(ins == arenapf::UNASSIGNED ? -1 : (int)ins);
+    j += ",\"zone\":"   + String(arenamap::zoneOfLed((uint16_t)led));
+    j += ",\"r\":" + String(c.r) + ",\"g\":" + String(c.g) +
+         ",\"b\":" + String(c.b) + ",\"w\":" + String(c.w) + "}";
+    r->send(200, "application/json", j);
+  });
+
+  s_server.on("/api/pixel/trims", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (r->hasParam("clear")) { arenapf::clearTrims(); arenapf::saveTrims(); }
+    r->send(200, "application/json", arenapf::trimsJson());
   });
 
   s_server.on("/api/zones", HTTP_GET, [](AsyncWebServerRequest* r) {
@@ -890,6 +1300,75 @@ static void startServer() {
     t += "  Le compteur a monte  -> la carte a redemarre (la cause est ci-dessus).\n";
     t += "  Le compteur inchange -> elle n a PAS redemarre, c est autre chose.\n\n";
 
+    // Un ecran qui s eteint et une carte qui redemarre se ressemblent trop pour
+    // qu on devine. Quand le compteur ci-dessous n est pas a zero, la question
+    // n est plus logicielle : le 3,3 V est descendu sous le seuil du detecteur,
+    // et aucune correction de firmware ne remonte une tension.
+    t += "-- L alimentation --\n";
+    t += "brownouts    : " + String(s_brownouts) + "\n";
+    t += "puissance TX : " + String(s_txq / 4.0f, 2) + " dBm";
+    t += s_txDerated ? "  (baissee d office apres le brownout)\n" : "\n";
+    if (s_brownouts) {
+      t += "  La carte s est deja ETEINTE faute de tension, puis rerentree.\n";
+      t += "  De l exterieur : ecran noir, reglages qui reviennent au depart.\n";
+      t += "  Ce n est ni l ecran, ni les boutons, ni la veille.\n";
+      t += "  Dans l ordre, du plus frequent au plus rare :\n";
+      t += "   1. Le cable USB. Un cable de charge fin chute d un demi-volt sous\n";
+      t += "      charge. Un cable court et epais, marque DATA, regle le cas le\n";
+      t += "      plus courant a lui seul.\n";
+      t += "   2. Le port. Un hub non alimente ou un port clavier ne tient pas\n";
+      t += "      les pointes. Essayer un port arriere du PC, ou un chargeur\n";
+      t += "      mural de 2 A et plus.\n";
+      t += "   3. Les rafales WiFi. ~350 mA pendant quelques centaines de us.\n";
+      t += "      Pour tester sans rien debrancher : /api/set?txpwr=8\n";
+      t += "      Plus de brownouts a 8 dBm mais toujours a 20 -> c est la marge\n";
+      t += "      d alimentation, pas le firmware.\n";
+      t += "   4. Un condensateur de 470 a 1000 uF aux bornes du 5 V absorbe les\n";
+      t += "      pointes que le cable ne sait pas fournir.\n";
+      t += "  Si les LED sont cablees, les alimenter par leur propre 5 V, jamais\n";
+      t += "  a travers l USB de la carte.\n\n";
+    } else {
+      t += "  Aucun effondrement d alimentation enregistre.\n";
+      t += "  Un ecran noir ou des reglages perdus viennent d ailleurs.\n\n";
+    }
+
+    // Une OTA qui echoue a moitie laisse une carte muette, et le proprietaire
+    // n a alors plus de page pour lire pourquoi. Donc on le dit AVANT.
+    // Un defaut materiel CONNU, ecrit dans le BOM depuis la conception. Sans
+    // cette section, chaque proprietaire le redecouvre a ses frais - et le
+    // cherche dans le firmware, ou il n'est pas.
+    t += "-- Le temoin de statut (D2) --\n";
+    t += "allume       : " + String(s_statOn ? "oui" : "non") +
+         "   luminosite " + String(s_statBright) + "/255\n";
+    t += "  D2 est un WS2812B-2020. La carte l alimente en 3,3 V alors que sa\n";
+    t += "  fiche demande 3,5 a 5,3 V : il tourne SOUS son minimum. C est ecrit\n";
+    t += "  dans hardware/BOM_PCB.csv depuis la conception, avec la raison - le\n";
+    t += "  couloir vers la zone +5 V etait sature au routage, et rouvrir une\n";
+    t += "  region qui marche pour un temoin ne valait pas le risque.\n";
+    t += "  Un exemplaire hors spec ne s eteint pas : il lit mal sa donnee et\n";
+    t += "  sort du BLANC PLEIN, insensible a la couleur ET a la luminosite\n";
+    t += "  qu on lui envoie. Aucun reglage ici n y changera quoi que ce soit.\n";
+    t += "  Le rattrapage est prevu, dix minutes au fer : un fil de quelques mm\n";
+    t += "  entre +5 V et la broche 4 de D2, avec une 1N4148 en l air (cathode\n";
+    t += "  vers D2). VDD passe a ~4,3 V, dans la plage.\n";
+    t += "  statusled=0 cesse de lui ecrire - il RESTE alors fige sur sa\n"
+           "  derniere couleur. Rien en logiciel ne l eteint : lui parler\n"
+           "  arrete la chaine LED. Seul le fil le remet dans sa plage.\n\n";
+
+    t += "-- La flash --\n";
+    t += "puce         : " + String(s_flashPhys >> 20) + " Mo (identifiant JEDEC)\n";
+    t += "table        : jusqu a " + String(s_partEnd >> 20) + " Mo\n";
+    if (s_flashBad) {
+      t += "  ATTENTION : la table depasse la puce. Les partitions du haut -\n";
+      t += "  OTA et fichiers - pointent dans le vide. Une OTA s ecrirait\n";
+      t += "  par-dessus elle-meme. Corriger board_build.partitions dans\n";
+      t += "  platformio.ini et reflasher par cable AVANT toute OTA.\n\n";
+    } else if (!s_flashPhys) {
+      t += "  Taille physique illisible : verifier a la main avant une OTA.\n\n";
+    } else {
+      t += "  La table tient dans la puce.\n\n";
+    }
+
     t += "-- Les LED --\n";
     t += "broche data  : GPIO" + String(arenaled::pin()) +
          "   (essayer une autre sans reflasher : /api/set?pin=N)\n";
@@ -918,9 +1397,16 @@ static void startServer() {
       bool bu = false, bo = false, bd = false;
       uint32_t nu = 0, no = 0, nd = 0;
       arenaoled::btnRaw(bu, bo, bd, nu, no, nd);
-      t += "gauche GPIO" + String(PIN_ARENA_BTN_UP)   + " : " + (bu ? "BAS (enfonce !)" : "haut") + "   declenche " + String(nu) + "x\n";
-      t += "OK     GPIO" + String(PIN_ARENA_BTN_OK)   + " : " + (bo ? "BAS (enfonce !)" : "haut") + "   declenche " + String(no) + "x\n";
-      t += "droite GPIO" + String(PIN_ARENA_BTN_DOWN) + " : " + (bd ? "BAS (enfonce !)" : "haut") + "   declenche " + String(nd) + "x\n";
+      uint8_t pu, pd, po;
+      arenaoled::buttons(pu, pd, po);
+      t += "gauche GPIO" + String(pu) + " : " + (bu ? "BAS (enfonce !)" : "haut") + "   declenche " + String(nu) + "x\n";
+      t += "OK     GPIO" + String(po) + " : " + (bo ? "BAS (enfonce !)" : "haut") + "   declenche " + String(no) + "x\n";
+      t += "droite GPIO" + String(pd) + " : " + (bd ? "BAS (enfonce !)" : "haut") + "   declenche " + String(nd) + "x\n";
+      t += "  Un poussoir qui repond mais dans le mauvais sens n'est pas un bug :\n";
+      t += "  la netlist nomme des nets, pas des positions. Remapper sans\n";
+      t += "  reflasher : /api/set?btnup=<gauche>&btndown=<droite>&btnok=<ok>\n";
+      t += "  Sans lire un seul numero de broche : /api/set?btnrot=1 decale les\n";
+      t += "  trois roles d'un cran. Au pire deux fois, et c'est dans le bon sens.\n";
       if (bu || bo || bd)
         t += "  !! Une entree est BASSE sans que tu touches rien. Cette broche n est\n"
              "     pas cablee a ce poussoir, ou il est colle. Un OK bloque bas part en\n"
@@ -1076,11 +1562,44 @@ void begin() {
   // --- WiFi: NVS credentials (set from the UI) override the compile-time ones ---
   s_prefs.begin("arenanet", false);
   s_statPin = s_prefs.getUChar("statpin", ARENA_STATUS_PIN);
+  s_statOn  = s_prefs.getUChar("staten", 1) != 0;
+  s_statBright = s_prefs.getUChar("statbr", 60);
   s_reset = resetReasonName(esp_reset_reason());
   s_boots = s_prefs.getUInt("boots", 0) + 1;
   s_prefs.putUInt("boots", s_boots);
+  s_brownouts = s_prefs.getUInt("brown", 0);
+  s_txq = s_prefs.getUChar("txq", ARENA_WIFI_TXPWR_QDBM);
+  if (esp_reset_reason() == ESP_RST_BROWNOUT) {
+    s_brownouts++;
+    s_prefs.putUInt("brown", s_brownouts);
+    // Revenir a pleine puissance dans une alimentation qui vient de ceder, c est
+    // rejouer la meme scene. On baisse pour CETTE session seulement : un blip
+    // isole ne doit pas amputer la portee du mur pour toujours, et un reflash
+    // ou une coupure propre rend la valeur enregistree.
+    if (s_txq > ARENA_WIFI_TXPWR_SAFE_QDBM) {
+      s_txq = ARENA_WIFI_TXPWR_SAFE_QDBM;
+      s_txDerated = true;
+    }
+  }
   Serial.printf("[dev] demarrage #%lu - cause du dernier reset : %s\n",
                 (unsigned long)s_boots, s_reset.c_str());
+  if (s_brownouts) {
+    Serial.printf("[dev] %lu brownout(s) au total : le 3,3 V s effondre. Ce n est\n"
+                  "      PAS un bug logiciel - cable USB, port ou regulateur.\n",
+                  (unsigned long)s_brownouts);
+  }
+  s_flashPhys = physicalFlashBytes();
+  s_partEnd   = partitionEndBytes();
+  s_flashBad  = (s_flashPhys && s_partEnd > s_flashPhys);
+  Serial.printf("[dev] flash %lu Mo (puce) / table de partitions jusqu a %lu Mo\n",
+                (unsigned long)(s_flashPhys >> 20), (unsigned long)(s_partEnd >> 20));
+  if (s_flashBad) {
+    Serial.printf("[dev] ATTENTION : la table depasse la flash de %lu Ko. Les\n"
+                  "      partitions du haut - OTA et fichiers - pointent dans le\n"
+                  "      vide. Corriger board_build.partitions dans platformio.ini\n"
+                  "      AVANT toute OTA.\n",
+                  (unsigned long)((s_partEnd - s_flashPhys) >> 10));
+  }
   {
     uint8_t m[6] = {0};
     esp_read_mac(m, ESP_MAC_WIFI_STA);
@@ -1144,6 +1663,7 @@ void begin() {
     s_ip = WiFi.softAPIP().toString();
     Serial.printf("[net] SoftAP '%s' ip=%s\n", s_name.c_str(), s_ip.c_str());
   }
+  applyTxPower();
   // Nom d'hote propre a la carte : sans ca, quatre murs se disputent arena.local
   // et mDNS en renomme trois en arena-2, arena-3... au petit bonheur.
   {
@@ -1169,20 +1689,42 @@ void begin() {
 //   vert   = associe a un reseau         rouge = defaut signale par le limiteur
 static void statusTick() {
 #if ARENA_STATUS_LED_ENABLE
+  // Un WS2812 CONSERVE sa derniere valeur : cesser de lui ecrire ne l'eteint
+  // pas, il reste fige sur ce qu'il affichait. Il faut lui envoyer du noir une
+  // fois, au moment ou on l'eteint - sans quoi statusled=0 ne fait rien de
+  // visible, ce qui est precisement ce qu'on reprochait aux diagnostics.
+  // D2 AU REPOS : quand il est eteint, on ne lui ecrit PLUS JAMAIS - ni au
+  // demarrage, ni a la transition. Mesure sur la carte : neopixelWrite lie le
+  // RMT a la premiere broche appelee, et UNE seule ecriture sur GPIO48 arrete
+  // la chaine sur GPIO16 - rmtframes se fige, rmtfail monte a la cadence des
+  // trames, et l'extinction ne rend pas le canal.
+  // Consequence assumee : un temoin deja allume reste fige sur sa couleur. Un
+  // WS2812 conserve sa derniere valeur, et rien en logiciel ne l'eteint sans
+  // lui parler. Seul le fil vers +5 V le remet dans sa plage.
+  if (!s_statOn) return;
   static uint32_t last = 0;
   const uint32_t now = millis();
-  if (now - last < 40) return;                 // 25 Hz suffit pour une respiration
+  if (now - last < 200) return;                // 5 Hz : on ne fait que comparer
   last = now;
 
-  uint8_t r = 40, g = 20, b = 0;               // ambre par defaut
-  if (arenaled::ledFault())      { r = 60; g = 0;  b = 0;  }
-  else if (s_mode == "STA")      { r = 0;  g = 45; b = 0;  }
-  else if (s_mode == "SoftAP")   { r = 0;  g = 15; b = 50; }
+  uint8_t r = 255, g = 128, b = 0;             // ambre par defaut, pleine echelle
+  if (arenaled::ledFault())      { r = 255; g = 0;   b = 0;   }
+  else if (s_mode == "STA")      { r = 0;   g = 255; b = 0;   }
+  else if (s_mode == "SoftAP")   { r = 0;   g = 70;  b = 255; }
 
-  // Respiration : ~2 s par cycle, jamais eteint completement - un temoin qui
-  // s'eteint par moments se lit comme un temoin en panne.
-  const float k = 0.25f + 0.75f * (0.5f + 0.5f * sinf((float)now / 320.0f));
-  neopixelWrite(s_statPin, (uint8_t)(r * k), (uint8_t)(g * k), (uint8_t)(b * k));
+  // La couleur porte l'etat, la luminosite est un reglage : les teintes restent
+  // a pleine echelle et l'echelle s'applique A LA FIN, sinon baisser le temoin
+  // le ferait deraper vers son canal le plus fort au lieu de l'assombrir.
+  const float k = s_statBright / 255.0f;
+  const uint8_t rr = (uint8_t)(r * k), gg = (uint8_t)(g * k), bb = (uint8_t)(b * k);
+
+  // Ecrire seulement quand ca change : quelques trames par minute au lieu de
+  // vingt-cinq par seconde, et le partage du RMT redevient sans consequence.
+  static uint8_t  lr = 1, lg = 1, lb = 1;
+  static uint32_t lastPush = 0;
+  if (rr == lr && gg == lg && bb == lb && now - lastPush < 5000) return;
+  lr = rr; lg = gg; lb = bb; lastPush = now;
+  neopixelWrite(s_statPin, rr, gg, bb);
 #endif
 }
 
@@ -1262,6 +1804,14 @@ void loop() {
     j += "]";
     s_scanJson = j;
     s_scanAt = millis();
+    if (scanErr == ESP_OK) {
+      uint16_t seen = 0;
+      esp_wifi_scan_get_ap_num(&seen);
+      // "Nothing found" sur la page et rien du tout au journal, c'est une panne
+      // sans temoin : impossible de distinguer un balayage refuse d'un balayage
+      // qui a bien tourne dans un endroit vide.
+      Serial.printf("[net] balayage : %u reseau(x) vus\n", (unsigned)seen);
+    }
     if (scanErr != ESP_OK) s_scanJson = "[]";
   }
 

@@ -18,6 +18,7 @@
 #include <WiFi.h>            // RSSI, affiche par l'entree Network
 #include <Adafruit_GFX.h>
 #include <Adafruit_SSD1306.h>
+#include <Preferences.h>
 #include "arena_oled.h"
 #include "arenaled.h"
 #include "arena_net.h"
@@ -29,6 +30,47 @@ namespace arenaoled {
 static Adafruit_SSD1306 s_d(ARENA_OLED_W, ARENA_OLED_H, &Wire, -1);
 static bool     s_found = false;
 static bool     s_awake = false;
+
+// Quel poussoir porte quel role : un fait de MONTAGE, pas de firmware.
+// NETLIST.md dit BTN_LEFT=IO15, BTN_RIGHT=IO17, BTN_OK=IO7 - et sur la carte du
+// banc, le poussoir physiquement a gauche repond sur IO7. Le document decrit des
+// nets, pas des positions ; rien ne garantit que S1 soit le plus a gauche, et
+// une carte du commerce ne promet rien du tout. En constante de compilation, le
+// proprietaire d'une carte differente doit reflasher pour que sa fleche droite
+// aille a droite - ce qui n'est pas un reglage, c'est une impasse.
+// Regle a chaud, garde en NVS, defaut = ce que dit la netlist.
+static Preferences s_bprefs;
+static uint8_t  s_pinUp   = PIN_ARENA_BTN_UP;
+static uint8_t  s_pinDown = PIN_ARENA_BTN_DOWN;
+static uint8_t  s_pinOk   = PIN_ARENA_BTN_OK;
+
+// Remappage depuis le reseau. Reecrit les broches, les remet en entree tiree au
+// haut, et le dit - trois roles pour trois poussoirs, aucun ne peut rester muet.
+void setButtons(uint8_t up, uint8_t down, uint8_t ok) {
+  if (up > 48 || down > 48 || ok > 48) return;
+  if (up == down || up == ok || down == ok) return;   // un poussoir, un role
+  s_pinUp = up; s_pinDown = down; s_pinOk = ok;
+  pinMode(s_pinUp,   INPUT_PULLUP);
+  pinMode(s_pinDown, INPUT_PULLUP);
+  pinMode(s_pinOk,   INPUT_PULLUP);
+  s_bprefs.putUChar("up", up);
+  s_bprefs.putUChar("down", down);
+  s_bprefs.putUChar("ok", ok);
+  Serial.printf("[btn] remappage : gauche=GPIO%u droite=GPIO%u ok=GPIO%u\n",
+                up, down, ok);
+}
+
+// Faire tourner les trois roles d'un cran. Trois poussoirs mal ranges, c'est au
+// pire deux clics - et surtout, cela ne demande de connaitre AUCUN numero de
+// broche. Demander a quelqu'un de lire une netlist pour que sa fleche droite
+// aille a droite, c'est lui demander de faire notre travail.
+void rotateButtons() {
+  setButtons(s_pinOk, s_pinUp, s_pinDown);
+}
+
+void buttons(uint8_t& up, uint8_t& down, uint8_t& ok) {
+  up = s_pinUp; down = s_pinDown; ok = s_pinOk;
+}
 static uint32_t s_lastIn = 0;
 static uint32_t s_nUp = 0, s_nOk = 0, s_nDown = 0;   // declenchements depuis le boot
 
@@ -222,15 +264,31 @@ static void drawQr() {
   if (ARENA_OLED_H < 64) {
     s_d.ssd1306_command(SSD1306_SETCONTRAST);
     s_d.ssd1306_command(0xCF);
-    s_d.setTextSize(1);
-    s_d.setCursor(0, 0);
-    // Le nom du mur en tete, pas un titre : quand on appaire le troisieme d'une
-    // serie, il faut voir sans ambiguite devant lequel on se trouve - les
-    // murs partagent tous le meme code d'appairage.
-    s_d.print(arenanet::wallName());
+    // Trente-deux pixels, et il faut y tenir onze chiffres LISIBLES.
+    //
+    // L'ancienne disposition n'y tenait pas : le nom en corps 1 sur la rangee 0,
+    // puis deux lignes de corps 2 posees a y=10 et y=26. Or un caractere de
+    // corps 2 fait SEIZE pixels de haut : la seconde ligne courait de 26 a 42
+    // sur un panneau qui s'arrete a 32. Les dix derniers pixels de "2332"
+    // n'existaient pas - et un code d'appairage ampute est un code inutilisable.
+    //
+    // Ici les deux lignes occupent exactement les deux moities : 0..15 et 16..31,
+    // rien ne deborde. Le nom du mur reste - quand on appaire le troisieme d'une
+    // serie, il faut voir devant lequel on se trouve, les murs partageant tous
+    // le meme code - mais reduit a son suffixe, glisse dans la place libre a
+    // droite de la seconde ligne. C'est le suffixe qui distingue, pas le
+    // "Playfield-" que les quatre murs ont en commun.
     s_d.setTextSize(2);
-    s_d.setCursor(4, 10);  s_d.print(F("3497-011"));
-    s_d.setCursor(28, 26); s_d.print(F("2332"));
+    s_d.setCursor(4,  0);  s_d.print(F("3497-011"));
+    s_d.setCursor(4, 16);  s_d.print(F("2332"));
+
+    String tag = arenanet::wallName();
+    const int dash = tag.lastIndexOf('-');
+    if (dash >= 0) tag = tag.substring(dash + 1);
+    if (tag.length() > 8) tag = tag.substring(tag.length() - 8);
+    s_d.setTextSize(1);
+    s_d.setCursor(ARENA_OLED_W - 6 * (int16_t)tag.length(), 22);
+    s_d.print(tag);
     s_d.display();
     return;
   }
@@ -454,14 +512,31 @@ static void sleepNowImpl() {
 
 void btnRaw(bool& up, bool& okd, bool& down,
             uint32_t& nUp, uint32_t& nOk, uint32_t& nDown) {
-  up   = digitalRead(PIN_ARENA_BTN_UP)   == LOW;
-  okd  = digitalRead(PIN_ARENA_BTN_OK)   == LOW;
-  down = digitalRead(PIN_ARENA_BTN_DOWN) == LOW;
+  up   = digitalRead(s_pinUp)   == LOW;
+  okd  = digitalRead(s_pinOk)   == LOW;
+  down = digitalRead(s_pinDown) == LOW;
   nUp = s_nUp; nOk = s_nOk; nDown = s_nDown;
 }
 
+// poke() est appele depuis DEUX taches : la boucle Arduino (boutons) et la
+// tache du serveur web (/api/wake, et chaque reglage recu). Or il parlait en
+// I2C - DISPLAYON puis draw() - donc deux taches pouvaient piloter le meme bus
+// en meme temps que le draw() periodique de tick(). Un bus I2C partage sans
+// verrou rend un ecran qui se brouille ou se fige, pas une erreur.
+//
+// Desormais poke() ne fait que poser deux mots en memoire ; tout l'I2C est
+// execute par tick(), c est-a-dire toujours dans la meme tache.
+static volatile bool s_wakeReq = false;
+
 void poke() {
-  s_lastIn = millis();
+  s_lastIn  = millis();
+  s_wakeReq = true;
+}
+
+// A n'appeler que depuis tick() (tache de la boucle Arduino).
+static void serviceWake() {
+  if (!s_wakeReq) return;
+  s_wakeReq = false;
   if (s_awake || !s_found) return;
   s_awake = true;
   s_d.ssd1306_command(SSD1306_DISPLAYON);
@@ -648,9 +723,13 @@ void begin() {
             s_d.begin(SSD1306_SWITCHCAPVCC, ARENA_OLED_ADDR);
   if (!s_found) { Serial.println("[oled] no panel - screen disabled"); return; }
 
-  pinMode(PIN_ARENA_BTN_UP,   INPUT_PULLUP);
-  pinMode(PIN_ARENA_BTN_DOWN, INPUT_PULLUP);
-  pinMode(PIN_ARENA_BTN_OK,   INPUT_PULLUP);
+  s_bprefs.begin("arenabtn", false);
+  s_pinUp   = s_bprefs.getUChar("up",   PIN_ARENA_BTN_UP);
+  s_pinDown = s_bprefs.getUChar("down", PIN_ARENA_BTN_DOWN);
+  s_pinOk   = s_bprefs.getUChar("ok",   PIN_ARENA_BTN_OK);
+  pinMode(s_pinUp,   INPUT_PULLUP);
+  pinMode(s_pinDown, INPUT_PULLUP);
+  pinMode(s_pinOk,   INPUT_PULLUP);
 
 #if ARENA_ENC_ENABLE
   pinMode(PIN_ARENA_ENC_A, INPUT_PULLUP);
@@ -663,7 +742,7 @@ void begin() {
   s_d.setRotation(0);
   Serial.printf("[oled] SSD1306 %dx%d SDA%d/SCL%d - up=%d down=%d ok=%d%s\n",
                 ARENA_OLED_W, ARENA_OLED_H, PIN_ARENA_OLED_SDA, PIN_ARENA_OLED_SCL,
-                PIN_ARENA_BTN_UP, PIN_ARENA_BTN_DOWN, PIN_ARENA_BTN_OK,
+                s_pinUp, s_pinDown, s_pinOk,
                 ARENA_ENC_ENABLE ? " (+ encodeur)" : "");
   if (ARENA_OLED_BOOT_QR) showQr();
   else                    poke();
@@ -692,6 +771,7 @@ static bool pollRepeat(Btn& b, uint32_t now) {
 
 void tick() {
   if (!s_found) return;
+  serviceWake();
   const uint32_t now = millis();
 
   // Pendant une confirmation, les boutons ne veulent plus dire la meme chose :
@@ -701,11 +781,11 @@ void tick() {
   if (s_confirm) {
     s_lastIn = now;                            // ne pas s'endormir en pleine decision
     encTake();
-    if (digitalRead(PIN_ARENA_BTN_UP) == LOW || digitalRead(PIN_ARENA_BTN_DOWN) == LOW) {
+    if (digitalRead(s_pinUp) == LOW || digitalRead(s_pinDown) == LOW) {
       s_confirm = 0; s_holdFrom = 0; draw();
       return;
     }
-    if (digitalRead(PIN_ARENA_BTN_OK) == LOW) {
+    if (digitalRead(s_pinOk) == LOW) {
       if (!s_holdFrom) s_holdFrom = now;
       if (now - s_holdFrom >= CONFIRM_MS) { runReset(s_confirm); return; }
       drawConfirm(now - s_holdFrom);
@@ -719,11 +799,16 @@ void tick() {
 
   const int8_t d = encTake();
 
-  static Btn up   = { PIN_ARENA_BTN_UP,   0, 0, false };
-  static Btn down = { PIN_ARENA_BTN_DOWN, 0, 0, false };
+  // Les deux etats de repetition sont statiques : ils retiennent la broche du
+  // PREMIER passage. Comme le brochage se regle a chaud, on la reecrit a chaque
+  // tour, sinon un remappage ne prendrait qu'au redemarrage suivant.
+  static Btn up   = { s_pinUp,   0, 0, false };
+  static Btn down = { s_pinDown, 0, 0, false };
+  up.pin   = s_pinUp;
+  down.pin = s_pinDown;
   const bool upFire   = pollRepeat(up,   now);
   const bool downFire = pollRepeat(down, now);
-  const bool ok       = digitalRead(PIN_ARENA_BTN_OK) == LOW;
+  const bool ok       = digitalRead(s_pinOk) == LOW;
 
   // TOUTE entree repousse la veille, les fleches comprises.
   //
@@ -734,6 +819,7 @@ void tick() {
   if (d || upFire || downFire || ok) {
     const bool wasAsleep = !s_awake;
     poke();
+    serviceWake();                     // l'allumage doit se voir dans CE tick
     // Ecran eteint : le premier appui ne fait que rallumer. Sinon le menu se
     // deplace dans le noir et on decouvre un autre element en le rallumant -
     // ce qui se lit comme un bouton qui saute une ligne.
@@ -745,13 +831,13 @@ void tick() {
   // Trace de brochage : un appui dit quelle GPIO a repondu et quel role elle
   // porte. Sans elle, un poussoir mal nommee ne se diagnostique qu'a tatons,
   // parce que le seul retour est un menu qui bouge dans le mauvais sens.
-  if (upFire)   { s_nUp++;   Serial.printf("[btn] GPIO%d -> UP/gauche\n",  PIN_ARENA_BTN_UP);   onStep(-1); }
-  if (downFire) { s_nDown++; Serial.printf("[btn] GPIO%d -> DOWN/droite\n", PIN_ARENA_BTN_DOWN); onStep(+1); }
+  if (upFire)   { s_nUp++;   Serial.printf("[btn] GPIO%d -> UP/gauche\n",  s_pinUp);   onStep(-1); }
+  if (downFire) { s_nDown++; Serial.printf("[btn] GPIO%d -> DOWN/droite\n", s_pinDown); onStep(+1); }
 
   // OK, anti-rebond, avec un appui long pour "revenir en arriere".
   static uint32_t okAt  = 0;
   static bool     okLong = false;
-  if (ok && !okAt) { okAt = now; okLong = false; s_nOk++; Serial.printf("[btn] GPIO%d -> OK\n", PIN_ARENA_BTN_OK); }
+  if (ok && !okAt) { okAt = now; okLong = false; s_nOk++; Serial.printf("[btn] GPIO%d -> OK\n", s_pinOk); }
   else if (ok && !okLong && now - okAt > OK_LONG_MS) { onOk(true); okLong = true; }
   else if (!ok && okAt) {
     if (!okLong && now - okAt > 25) onOk(false);
@@ -773,9 +859,20 @@ void tick() {
   // CHAQUE appui, et se rallumait au suivant pour s'eteindre aussitot. C'est le
   // "je clique et je perds l'ecran" du banc, et le log le montrait en boucle.
   // La difference signee rend un nombre NEGATIF dans ce cas, donc pas de veille.
-  if (ARENA_OLED_SLEEP_MS &&
-      (int32_t)(millis() - s_lastIn) > (int32_t)ARENA_OLED_SLEEP_MS)
-    sleepNow("delai d inactivite ecoule");
+  //
+  // Et la ligne porte ses propres chiffres. Dire "delai ecoule" sans dire de
+  // combien, c est demander de me croire sur parole - or cette veille a deja
+  // survecu a une correction qui devait la regler. Avec le calcul affiche, le
+  // log tranche tout seul : un delta de 30000 est un vrai delai, un delta de
+  // 15 est un bug, et on n a plus a le deviner.
+  const int32_t idle = (int32_t)(millis() - s_lastIn);
+  if (ARENA_OLED_SLEEP_MS && idle > (int32_t)ARENA_OLED_SLEEP_MS) {
+    char why[72];
+    snprintf(why, sizeof(why), "inactif %ld ms (seuil %lu, lastIn=%lu, now=%lu)",
+             (long)idle, (unsigned long)ARENA_OLED_SLEEP_MS,
+             (unsigned long)s_lastIn, (unsigned long)millis());
+    sleepNow(why);
+  }
 }
 
 }  // namespace arenaoled

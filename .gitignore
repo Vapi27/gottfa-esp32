@@ -15,3 +15,10 @@ __pycache__/
 # build.sh output: release artifacts + MANIFEST.txt. Regenerated from any commit,
 # so it is a build product, not source. Ship the directory, don't commit it.
 dist/
+
+# Binaire hote construit a la demande (capture de l'attract sous PinMAME).
+tools/capture_attract
+
+# Genere avant chaque buildfs par tools/gzip_web.py. Le versionner reviendrait
+# a versionner deux fois la meme page, avec le risque qu'elles divergent.
+data/arena.html.gz

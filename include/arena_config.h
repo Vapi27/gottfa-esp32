@@ -24,6 +24,17 @@
 #define ARENA_AP_SSID        "Arena-LED"
 #define ARENA_AP_PASS        "pinball87"    // >= 8 chars
 
+// Puissance d emission WiFi, en quarts de dBm (esp_wifi_set_max_tx_power) :
+// 80 = 20 dBm, le maximum de la radio, et le plus gros appel de courant du
+// firmware. Une rafale d emission tire ~350 mA pendant quelques centaines de
+// microsecondes ; sur une alimentation juste, c est elle qui fait plonger le
+// 3,3 V et declenche le detecteur de brownout. La valeur SAFE n est PAS le
+// defaut : elle ne s applique que si le reset precedent etait justement un
+// brownout, pour que la carte revienne plus douce d elle-meme au lieu de
+// boucler sur le meme effondrement. 52 = 13 dBm, soit ~5x moins de puissance.
+#define ARENA_WIFI_TXPWR_QDBM       80
+#define ARENA_WIFI_TXPWR_SAFE_QDBM  52
+
 // ---- LED chain --------------------------------------------------------------
 // One single data chain: ESP32 -> LED1 -> LED2 -> ... -> LEDn (data only; +5V and
 // GND come from the two thick bus wires that thread through each board's slot
@@ -351,6 +362,13 @@
 // default: the background is faithful, but a wall piece that never goes dark is
 // a matter of taste and the owner should meet it turned down rather than up.
 #define ARENA_GI_DEFAULT 90
+
+// Nom du groupe traite comme "les champignons" : un troisieme etage permanent,
+// a cote du fond, avec son propre niveau. C'est un groupe ordinaire de arenamap
+// - on lui affecte des pixels avec l'outil de groupes habituel - et non une
+// notion cablee dans le rendu. S'il n'existe pas, le reglage n'a simplement
+// aucun membre et ne fait rien.
+#define ARENA_CHAMP_ZONE "champignons"
 // Filament warmth at boot: 0 = spectral (orange), 255 = white-forward. 217 is
 // the 0.85 white share the bench settled on before this became a setting.
 #define ARENA_WARM_DEFAULT 217
