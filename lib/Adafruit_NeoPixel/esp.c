@@ -39,6 +39,8 @@ volatile uint32_t espShowRmtFail   = 0;  // echecs de rmtInit()
 volatile uint32_t espShowFrames    = 0;  // trames reellement envoyees au RMT
 volatile uint32_t espShowLockMiss  = 0;  // timeouts du mutex (50 ms chacun)
 volatile int32_t  espShowBusType   = -1; // perimanGetPinBusType() au 1er echec
+volatile uint32_t espShowInstalls  = 0;  // installations du pilote RMT (doit rester ~1/broche)
+volatile uint32_t espShowNoIram    = 0;  // installations retombees hors IRAM (degradees)
 
 #if defined(ESP_IDF_VERSION)
 #if ESP_IDF_VERSION >= ESP_IDF_VERSION_VAL(4, 0, 0)
@@ -214,26 +216,78 @@ static void IRAM_ATTR ws2812_rmt_adapter(const void *src, rmt_item32_t *dest, si
     *item_num = num;
 }
 
+// --- Canal RMT garde d'une trame a l'autre (correction Arena) ---------------
+//
+// Le pilote d'origine faisait, A CHAQUE TRAME : rmt_config, rmt_driver_install
+// (qui ALLOUE une interruption), rmt_translator_init, ecriture, puis
+// rmt_driver_uninstall (qui la libere). Trente a soixante fois par seconde.
+//
+// Trois consequences mesurees sur la carte, toutes visibles comme "des LED qui
+// decrochent en bout de chaine quand on rafraichit la page web" :
+//
+//  1. Allouer/liberer une interruption prend un verrou global et masque
+//     brievement les interruptions. C'est de la gigue ajoutee a chaque trame.
+//  2. mem_block_num = 1, soit 48 symboles : le materiel joue 60 us puis reclame
+//     un reapprovisionnement par interruption. Une trame de 75 pixels RGBW en
+//     demande une cinquantaine. On passe a 2 blocs : deux fois moins souvent,
+//     et deux canaux restent disponibles pour un second ruban.
+//  3. intr_alloc_flags = 0 : l'interruption n'etait PAS en IRAM. Or lire
+//     LittleFS lit la flash SPI, ce qui suspend le cache d'instructions - une
+//     interruption hors IRAM ne peut alors pas s'executer. Servir une page
+//     revient donc a suspendre le reapprovisionnement du RMT : la sortie reste
+//     au repos plus de 50 us, les WS2812 y lisent une fin de trame, et tout ce
+//     qui suit dans la chaine recoit la suite comme une nouvelle trame. Le
+//     traducteur ws2812_rmt_adapter etait deja IRAM_ATTR ; il manquait de le
+//     demander a l'installation.
+//
+// On retombe volontairement sur une installation SANS IRAM si celle avec IRAM
+// echoue : un mur qui scintille reste preferable a un mur eteint. espShowNoIram
+// compte ce cas, et espShowInstalls doit rester de l'ordre d'une installation
+// par broche - s'il grimpe a la cadence des trames, la garde ne fonctionne pas.
+#define ARENA_RMT_MEM_BLOCKS 2
+
+typedef struct {
+    int8_t        pin;         // -1 = entree libre
+    rmt_channel_t channel;
+} arena_rmt_slot_t;
+
+static arena_rmt_slot_t arena_rmt_slots[2] = { { -1, 0 }, { -1, 0 } };
+
 void espShow(uint8_t pin, uint8_t *pixels, uint32_t numBytes, boolean is800KHz) {
-    // Reserve channel
     rmt_channel_t channel = ADAFRUIT_RMT_CHANNEL_MAX;
-    for (size_t i = 0; i < ADAFRUIT_RMT_CHANNEL_MAX; i++) {
-        if (!rmt_reserved_channels[i]) {
-            rmt_reserved_channels[i] = true;
-            channel = i;
-            break;
+    int slot = -1;
+
+    for (int i = 0; i < 2; i++) {
+        if (arena_rmt_slots[i].pin == (int8_t)pin) { slot = i; channel = arena_rmt_slots[i].channel; break; }
+    }
+
+    if (slot < 0) {
+        for (int i = 0; i < 2; i++) if (arena_rmt_slots[i].pin < 0) { slot = i; break; }
+        if (slot < 0) {
+            // Plus de deux broches : on garde le comportement d'origine plutot
+            // que d'inventer une politique d'eviction pour un cas qui n'existe pas.
+            espShowRmtFail++;
+            if (espShowBusType < 0) espShowBusType = ARENA_PIN_BUS(pin);
+            return;
         }
-    }
-    if (channel == ADAFRUIT_RMT_CHANNEL_MAX) {
-        // Ran out of channels!
-        espShowRmtFail++;
-        if (espShowBusType < 0) espShowBusType = ARENA_PIN_BUS(pin);
-        return;
-    }
+        for (size_t i = 0; i < ADAFRUIT_RMT_CHANNEL_MAX; i++) {
+            if (!rmt_reserved_channels[i]) {
+                rmt_reserved_channels[i] = true;
+                channel = i;
+                break;
+            }
+        }
+        if (channel == ADAFRUIT_RMT_CHANNEL_MAX) {
+            // Ran out of channels!
+            espShowRmtFail++;
+            if (espShowBusType < 0) espShowBusType = ARENA_PIN_BUS(pin);
+            return;
+        }
 
 #if defined(HAS_ESP_IDF_4)
     rmt_config_t config = RMT_DEFAULT_CONFIG_TX(pin, channel);
     config.clk_div = 2;
+    config.mem_block_num = ARENA_RMT_MEM_BLOCKS;
 #else
     // Match default TX config from ESP-IDF version 3.4
     rmt_config_t config = {
@@ -241,7 +295,7 @@ void espShow(uint8_t pin, uint8_t *pixels, uint32_t numBytes, boolean is800KHz) 
         .channel = channel,
         .gpio_num = pin,
         .clk_div = 2,
-        .mem_block_num = 1,
+        .mem_block_num = ARENA_RMT_MEM_BLOCKS,
         .tx_config = {
             .carrier_freq_hz = 38000,
             .carrier_level = RMT_CARRIER_LEVEL_HIGH,
@@ -254,7 +308,15 @@ void espShow(uint8_t pin, uint8_t *pixels, uint32_t numBytes, boolean is800KHz) 
     };
 #endif
     rmt_config(&config);
-    if (rmt_driver_install(config.channel, 0, 0) != ESP_OK) {
+    // ESP_INTR_FLAG_IRAM : c'est ce qui permet au reapprovisionnement du RMT de
+    // continuer pendant une lecture flash (donc pendant qu'on sert une page).
+    // Repli sans le drapeau si le pilote le refuse - degrade, mais pas eteint.
+    esp_err_t rc = rmt_driver_install(config.channel, 0, ESP_INTR_FLAG_IRAM);
+    if (rc != ESP_OK) {
+        espShowNoIram++;
+        rc = rmt_driver_install(config.channel, 0, 0);
+    }
+    if (rc != ESP_OK) {
         // Le pilote refuse le canal - typiquement parce qu'un autre code le
         // tient deja. Sans ce compteur, l'echec ne laissait AUCUNE trace : les
         // trois compteurs de /api/state restaient a zero, ce qui se lit comme
@@ -264,6 +326,7 @@ void espShow(uint8_t pin, uint8_t *pixels, uint32_t numBytes, boolean is800KHz) 
         rmt_reserved_channels[channel] = false;
         return;
     }
+    espShowInstalls++;
 
     // Convert NS timings to ticks
     uint32_t counter_clk_hz = 0;
@@ -301,16 +364,18 @@ void espShow(uint8_t pin, uint8_t *pixels, uint32_t numBytes, boolean is800KHz) 
     // Initialize automatic timing translator
     rmt_translator_init(config.channel, ws2812_rmt_adapter);
 
+    arena_rmt_slots[slot].pin     = (int8_t)pin;
+    arena_rmt_slots[slot].channel = channel;
+    }   // fin de l'installation : tout ce qui precede ne se fait qu'une fois par broche
+
     // Write and wait to finish
-    rmt_write_sample(config.channel, pixels, (size_t)numBytes, true);
-    rmt_wait_tx_done(config.channel, pdMS_TO_TICKS(100));
+    rmt_write_sample(channel, pixels, (size_t)numBytes, true);
+    rmt_wait_tx_done(channel, pdMS_TO_TICKS(100));
     espShowFrames++;
 
-    // Free channel again
-    rmt_driver_uninstall(config.channel);
-    rmt_reserved_channels[channel] = false;
-
-    gpio_set_direction(pin, GPIO_MODE_OUTPUT);
+    // Le canal N'EST PLUS libere ici : il reste installe pour la trame suivante.
+    // C'est tout l'objet de la correction. La liberation d'origine impliquait de
+    // reallouer une interruption a chaque trame.
 }
 
 #endif // ifndef IDF5
