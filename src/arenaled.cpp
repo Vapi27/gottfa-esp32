@@ -432,9 +432,21 @@ static void fxRomAttract(Rgbw* buf) {
     return (pk > 0.004f) ? scale(f, k / pk) : Rgbw{ 0, 0, 0, 0 };
   };
   const Rgbw giC = glow(s_gi);       // le fond
-  const Rgbw chC = glow(s_champ);    // les champignons
-  // Hauteur du plancher des champignons, 0..1. Elle sert a laisser de la place
-  // AU-DESSUS : voir plus bas pourquoi un simple maximum ne suffit pas.
+  // ⚠️ Le plancher des champignons est PLAFONNE, et ce n'est pas un detail de
+  // reglage : c'est ce qui garantit qu'ils clignotent encore.
+  //
+  // Comprimer la lampe de la ROM dans la place restant au-dessus du plancher ne
+  // suffit pas si le plancher peut monter jusqu'au plein : a champignons = 255 il
+  // ne reste rien au-dessus, et le clignotement disparait exactement la ou le
+  // proprietaire pousse le curseur. Signale deux fois - "les champignons
+  // s'allument mais ne clignotent plus quand tu montes la puissance", puis
+  // "champignons tu as toujours pas regle le probleme".
+  //
+  // Un champignon qui brille en permanence a fond n'a plus rien pour clignoter :
+  // le curseur promettrait quelque chose d'impossible. On lui reserve donc un
+  // quart de la dynamique, toujours. Le curseur va de 0 a 75 % de plancher, et
+  // les 25 % du haut appartiennent a la ROM.
+  const Rgbw chC = scale(glow(s_champ), ARENA_CHAMP_FLOOR_MAX);
   const float chK = (float)max(max(chC.r, chC.g), max(chC.b, chC.w)) / 255.0f;
 
   // Le groupe est resolu une fois par trame, pas par pixel : c'est un groupe
@@ -593,9 +605,17 @@ static void musicSampleMic() {
   const float span = max(256.0f, min(dc, 4095.0f - dc));
   const float rms  = sqrtf(sumSq / 160.0f)   / span;
   const float bass = sqrtf(sumLpSq / 160.0f) / span;
-  // Adaptive scale: track the recent peak so quiet rooms still modulate.
-  s_musPeak = max(rms, s_musPeak * 0.998f);
-  if (s_musPeak < 0.02f) {                    // no mic wired: rail noise only
+  // Reglage automatique du gain : le mur doit reagir pareil que la musique soit
+  // forte ou faible. On suit la crete recente et on normalise dessus.
+  //
+  // La montee est INSTANTANEE (on ne rate pas un morceau qui demarre fort) et la
+  // descente lente. Elle etait a 0,998 par TRAME, donc dependante de la cadence
+  // de rendu : a 60 Hz la crete mettait ~6 s a diminuer de moitie, a 30 Hz le
+  // double. Formule en secondes, la cadence n'entre plus en compte, et 4 s de
+  // demi-vie laissent le temps de baisser le volume sans que le mur se rallume
+  // brutalement.
+  s_musPeak = max(rms, s_musPeak * expf(-0.1733f * ARENA_MIC_DT));
+  if (s_musPeak < 0.012f) {                   // aucun micro cable : bruit d'alim
     s_musE = s_musB = s_musT = 0;
     return;
   }
@@ -652,6 +672,13 @@ static void refreshLedHeights() {
 
 static void fxMusic(Rgbw* buf) {
   const uint32_t now = millis();
+  // Pas de temps reel : les constantes d'attaque et de retombee ci-dessous sont
+  // en secondes, elles ne doivent pas dependre de la cadence de rendu (reglable
+  // de 1 a 120 Hz).
+  static uint32_t musLast = 0;
+  float dt = (musLast ? (now - musLast) : 16) / 1000.0f;
+  musLast = now;
+  if (dt > 0.2f) dt = 0.2f;
 #if ARENA_MIC_ENABLE
   if (now - s_musExtMs > 2000) musicSampleMic();
 #else
@@ -672,19 +699,44 @@ static void fxMusic(Rgbw* buf) {
   refreshLedHeights();
 
   // Un fond faible partout : sans lui, un passage calme eteint le mur au lieu de
-  // le faire respirer, ce qui se lit comme une panne.
-  fill(buf, scale(s_color, 0.04f));
+  // le faire respirer. Il suit le curseur Background - a zero il disparait, pour
+  // qui veut un noir franc entre deux notes.
+  fill(buf, scale(s_color, 0.10f * (float)s_gi / 255.0f));
 
-  // Graves : une colonne qui monte du bas, comme l'aiguille d'un vumetre. Le
-  // bord est adouci sur 0,12 de hauteur, sinon la limite est une ligne dure qui
-  // saute d'un pixel a l'autre au lieu de monter.
-  const float lvl = 0.10f + 0.95f * s_musB * s_musB;
+  // Graves : une colonne qui monte du bas, avec ATTAQUE RAPIDE ET RETOMBEE LENTE.
+  //
+  // Elle suivait l'enveloppe brute. Mesure au micro sur de la vraie musique :
+  // les graves oscillent entre 0,23 et 0,86 avec un ecart-type de 0,149, donc
+  // la colonne sautait sur plus de 65 % de la hauteur du mur d'un instant a
+  // l'autre. Elle ne montait pas, elle sautillait - "ca clignote a moitie".
+  //
+  // Un vumetre ne suit pas le signal, il le SUIT VITE EN MONTANT et retombe
+  // lentement : c'est ce qui donne la frappe sans la nervosite. 25 ms a la
+  // montee (on ne rate pas un coup de grosse caisse), 320 ms a la descente.
+  static float lvl = 0;
+  {
+    const float target = 0.08f + 0.92f * s_musB * s_musB;
+    const float tau = (target > lvl) ? 0.025f : 0.320f;
+    lvl += (target - lvl) * (1.0f - expf(-dt / tau));
+  }
+
+  // Temoin de crete : il monte avec la colonne et redescend seul, lentement.
+  // C'est ce qui fait lire le mouvement comme voulu plutot que comme un defaut,
+  // et ca donne un repere fixe quand la musique est dense.
+  static float pk = 0;
+  pk -= dt * 0.30f;
+  if (lvl > pk) pk = lvl;
+  if (pk < 0) pk = 0;
+
   for (uint16_t i = 0; i < s_count; i++) {
     const float h = s_ledH[i];
     float k = (lvl - h) / 0.12f;
-    if (k <= 0.0f) continue;
     if (k > 1.0f) k = 1.0f;
-    buf[i] = addSat(buf[i], scale(s_color, k * 0.55f));
+    if (k > 0.0f) buf[i] = addSat(buf[i], scale(s_color, k * 0.55f));
+    // La crete, en trait fin au-dessus de la colonne.
+    const float dpk = fabsf(h - pk);
+    if (dpk < 0.035f)
+      buf[i] = addSat(buf[i], scale(s_color, (1.0f - dpk / 0.035f) * 0.85f));
   }
 
   // Battement : une bande qui quitte les flippers et monte. Elle depasse 1.0
@@ -705,11 +757,20 @@ static void fxMusic(Rgbw* buf) {
   // sommet, elles se lisent comme l'ecume poussee par la colonne. On tire dans
   // la zone libre, avec une garde : si les graves saturent, il n'y a plus de
   // zone libre et on ne veut pas boucler indefiniment.
-  const uint8_t decay = 26;
+  // Le seuil des aigus etait FIXE a 0,15. Mesure sur cette piece : les aigus
+  // plafonnent a 0,24 et tournent autour de 0,16 - le seuil tombait donc au
+  // milieu du signal, et les etincelles apparaissaient une fois sur deux au
+  // hasard. On suit la crete recente : la piste peut etre sourde ou brillante,
+  // le mur reagit pareil.
+  static float tpk = 0.05f;
+  tpk = max(s_musT, tpk * 0.995f);
+  const float trel = (tpk > 0.01f) ? (s_musT / tpk) : 0.0f;
+
+  const uint8_t decay = 22;
   for (uint16_t i = 0; i < s_count; i++)
     s_spark[i] = (s_spark[i] > decay) ? s_spark[i] - decay : 0;
-  if (s_musT > 0.15f) {
-    const int n = 1 + (int)(s_musT * 3.0f);
+  if (trel > 0.55f) {
+    const int n = 1 + (int)((trel - 0.55f) * 6.0f);
     for (int k = 0; k < n; k++) {
       for (int tries = 0; tries < 8; tries++) {
         const uint16_t c = esp_random() % s_count;
@@ -727,9 +788,25 @@ static void fxMusic(Rgbw* buf) {
 // not about the cable. Two waves at right angles: one climbing from the flippers
 // to the back panel, one sweeping across, plus a ripple leaving the middle.
 static void fxArenaGeo(Rgbw* buf) {
-  const Rgbw amber = { ARENA_AMBER_R, ARENA_AMBER_G, ARENA_AMBER_B, ARENA_AMBER_W };
-  const Rgbw gold  = { ARENA_GOLD_R,  ARENA_GOLD_G,  ARENA_GOLD_B,  ARENA_GOLD_W  };
-  fill(buf, scale(s_color, 0.14f));
+  // Les vagues suivent le panneau Couleur.
+  //
+  // Elles etaient codees en dur en ambre et en or : seul le fond de 14 % suivait
+  // s_color, donc tourner les curseurs ne changeait rien de ce qu'on regarde et
+  // le mode passait pour casse - "wave mode colors don't work". Meme regle que
+  // sous l'attract de la ROM : blanc pur (r=g=b=0) = la teinte d'origine, une
+  // couleur = c'est elle qui passe. Rien ne change pour qui n'a jamais touche au
+  // panneau.
+  const bool tinted = (s_color.r | s_color.g | s_color.b) != 0;
+  const Rgbw amber = tinted ? s_color : Rgbw{ ARENA_AMBER_R, ARENA_AMBER_G, ARENA_AMBER_B, ARENA_AMBER_W };
+  const Rgbw gold  = tinted ? s_color : Rgbw{ ARENA_GOLD_R,  ARENA_GOLD_G,  ARENA_GOLD_B,  ARENA_GOLD_W  };
+
+  // Le fond permanent devient reglable au lieu d'etre impose.
+  //
+  // Il valait 14 % en dur : le mur ne s'eteignait jamais completement dans ce
+  // mode, sans qu'aucun reglage ne permette d'y toucher - "always a bit of light
+  // in background". Il suit maintenant le curseur Background, qui porte deja ce
+  // role sous l'attract. A zero, le fond est vraiment noir.
+  fill(buf, scale(s_color, 0.20f * (float)s_gi / 255.0f));
 
   const float up    = phase(1.0, 1.0);          // 0..1, climbing the playfield
   const float ripT  = phase(1.0, 6.0) / 6.0f;   // ripple every 6 s
@@ -1245,6 +1322,14 @@ float    lastAmps()   { return s_amps; }
 bool     limited()    { return s_limited; }
 uint32_t frameCount() { return s_frames; }
 uint16_t fps()        { return s_fps; }
+// Ce que le mode music entend REELLEMENT. Sans ces valeurs, un mur qui respire
+// lentement est indiscernable d'un mur qui reagit mal : dans un cas le micro
+// n'entend rien, dans l'autre l'effet est trop mou. Deux causes opposees, un
+// seul symptome.
+float musEnergy() { return s_musE; }
+float musBass()   { return s_musB; }
+float musTreble() { return s_musT; }
+float musPeak()   { return s_musPeak; }
 // Bornee a 1..120 : zero arreterait le rendu sans que rien ne le dise, et
 // au-dela de 120 la trame ne tient plus sur le fil (150 px RGBW = 4,8 ms).
 void setFrameHz(uint8_t h) { s_frameHz = h < 1 ? 1 : (h > 120 ? 120 : h); markDirty(); }

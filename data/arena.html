@@ -263,7 +263,10 @@ header h1 img{filter:saturate(.9)}
 
     <!-- etat "repos" -->
     <div id="wz-idle">
-      <p class="hint" id="wz-idle-say">Tap an insert to name it or colour it.</p>
+      <p class="hint" id="wz-idle-say">Tap an insert to name it or colour it.
+         <b>Map the pixels</b> walks the chain and asks which insert each one sits under;
+         <b>Groups</b> gathers pixels under a name &mdash; that is where the
+         <i>champignons</i> group is made, and it is not inside the mapping wizard.</p>
       <div class="modes">
         <button id="wz-start" onclick="wzStart()">Map the pixels</button>
         <button onclick="grStart()">Groups</button>
@@ -280,6 +283,7 @@ header h1 img{filter:saturate(.9)}
       </div>
       <div class="modes" id="wz-placebar">
         <button onclick="wzSkip()">It lights the playfield</button>
+        <button onclick="wzFinish(); grStart()">Groups</button>
         <button onclick="wzGo(wz.at-1)">&#9664; Back</button>
         <button onclick="wzGo(wz.at+1)">Skip &#9654;</button>
         <button onclick="wzFinish()">Stop</button>
@@ -1483,7 +1487,11 @@ async function fwUpload(inp) {
 const APPLIES = {
   bright : null,                                            // partout
   speed  : ['attract','arena','rainbow','night','music'],   // pas classic : il est fixe
-  gi     : ['attract'],                                     // les ampoules de fond de la ROM
+  // Verifie effet par effet dans arenaled.cpp, pas suppose : s_gi est lu par
+  // fxRomAttract, par fxArenaGeo (le fond du mode Wave) et par fxMusic. Il etait
+  // annonce comme reserve a l'attract, donc le curseur restait cache la ou il
+  // commandait pourtant quelque chose.
+  gi     : ['attract','arena','music'],                     // le fond permanent
   insb   : ['attract'],                                     // ce que la ROM allume
   champ  : ['attract'],                                     // le groupe "champignons"
   lockbtn: ['attract'],                                     // le lien entre champignons et fond
@@ -1491,10 +1499,10 @@ const APPLIES = {
   gib    : ['attract'], giw : ['attract'],
   density: ['night'],
   warm   : ['classic','attract','night'],                   // + simulation d'ampoule active
-  r      : ['classic','attract','arena','night'],
-  g      : ['classic','attract','arena','night'],
-  b      : ['classic','attract','arena','night'],
-  w      : ['classic','attract','arena','night'],
+  r      : ['classic','attract','arena','night','music'],
+  g      : ['classic','attract','arena','night','music'],
+  b      : ['classic','attract','arena','night','music'],
+  w      : ['classic','attract','arena','night','music'],
   incbtn : ['classic','attract','night'],
 };
 function applies(k, s) {

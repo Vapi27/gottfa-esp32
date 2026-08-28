@@ -404,6 +404,10 @@ static String stateJson() {
     if (LittleFS.exists("/attract.mp3")) { File f = LittleFS.open("/attract.mp3", "r"); sz = f.size(); f.close(); }
     j += ",\"snd\":" + String((uint32_t)sz); }
   j += ",\"framehz\":" + String(arenaled::frameHz());
+  j += ",\"musE\":" + String(arenaled::musEnergy(), 3);
+  j += ",\"musB\":" + String(arenaled::musBass(), 3);
+  j += ",\"musT\":" + String(arenaled::musTreble(), 3);
+  j += ",\"musPk\":" + String(arenaled::musPeak(), 4);
   // Le plafond materiel, pour que l interface cesse d accepter des valeurs
   // qu elle fait ensuite ecreter en silence.
   j += ",\"budgetmax\":" + String((uint32_t)LED_POWER_BUDGET_MAX);

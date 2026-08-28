@@ -417,6 +417,19 @@ _Static_assert(LED_POWER_BUDGET_MA <= LED_POWER_BUDGET_MAX,
 // Expressed as a filament temperature, not a brightness fraction: the GI bulbs
 // are incandescent too, so they should sit on the same physical curve as the
 // inserts rather than be a dimmed copy of whatever colour is selected.
+// Part maximale de la dynamique qu'un champignon peut prendre en lueur
+// permanente. Le quart restant est reserve a la lampe de la ROM : sans cette
+// reserve, pousser le curseur a fond eteint le clignotement, ce qui est
+// exactement ce qu'on ne veut pas d'un champignon.
+// Periode d'echantillonnage du micro, en secondes. musicSampleMic() est appelee
+// une fois par trame de rendu ; a 60 Hz cela fait 16,7 ms. Sert a exprimer la
+// descente du gain automatique en SECONDES plutot qu'en trames - sinon changer
+// la cadence de rendu change la reactivite du mode music, ce que personne
+// n'attend en touchant a "Refresh rate".
+#define ARENA_MIC_DT (1.0f / (float)LED_FRAME_HZ)
+
+#define ARENA_CHAMP_FLOOR_MAX 0.75f
+
 #define ARENA_GI_T 0.62f
 // Boot value of the GI slider, 0..255 (0 = no background at all). Modest by
 // default: the background is faithful, but a wall piece that never goes dark is
