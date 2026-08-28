@@ -887,3 +887,35 @@ composant. Un composant qui a besoin d'un rail particulier doit être placé
 même empreinte le remplace — mais **vérifier son brochage** : le
 XL-2020RGBC-2812B (`C5349955`), candidat évident, est en empreinte `-BR` au lieu
 de `-TL`, brochage inversé, et mettrait `+3V3` sur la sortie de données.
+
+## Consommation réelle, mesurée au wattmètre (2026-08-27)
+
+Mesures du propriétaire **au secteur**, mur de 75 LED SK6812 RGBW :
+
+| état | secteur | estimation firmware (`ma`) |
+|---|---|---|
+| all on, plein blanc | **10 W** | 1395 mA = 6,97 W en 5 V |
+| attract, à fond | **7 W** | dépend des trois niveaux, ~380 mA aux réglages du jour |
+| attract, un cran plus bas | **5 W** | |
+| attract, deux crans | **3 W** | |
+
+**L'estimateur est juste.** Les 3 W d'écart en « all on » ne sont pas une erreur :
+en reconstruisant à 80 % de rendement d'alimentation, 10 W au secteur donnent 8,0 W
+en 5 V, moins ~0,75 W pour l'ESP32 et l'OLED, soit **1450 mA pour les LED contre
+1395 mA estimés — +4 %**. À 85 % de rendement l'écart monte à +11 %, ce qui borne
+l'incertitude sans la contredire.
+
+Conséquences chiffrées :
+
+- Plein blanc = **73 % du budget** (1395 sur 1900 mA). Le limiteur logiciel n'a
+  aucune raison d'intervenir en usage normal, et c'est cohérent avec `limited=false`
+  observé en continu.
+- Le budget couvre les **LED seules**. Le contrôleur tire 100–250 mA de la même
+  alimentation et du même fusible sans jamais apparaître dans l'estimation :
+  dimensionner le fusible sur **budget + 300 mA**, pas sur le budget.
+- Une alimentation 5 V / 2 A suffit avec de la marge ; 10 W au secteur en pointe,
+  soit moins de 3 W en usage courant (attract baissé).
+
+Méthode : la valeur `ma` de `/api/state` est une estimation par sommation des canaux,
+pas une mesure. Elle n'avait jamais été confrontée à un instrument avant ce jour ;
+elle l'est maintenant, et elle tient.
