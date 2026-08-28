@@ -398,7 +398,6 @@ static String stateJson() {
     const arenamap::Zone* z = (cz >= 0) ? arenamap::zone((uint8_t)cz) : nullptr;
     j += ",\"champn\":" + String(z ? (int)z->count : -1);
   }
-  j += ",\"lock\":"   + String(arenaled::levelLock() ? 1 : 0);
   j += ",\"mapsrc\":\"" + String(arenamap::source()) + "\"";
   { size_t sz = 0;
     if (LittleFS.exists("/attract.mp3")) { File f = LittleFS.open("/attract.mp3", "r"); sz = f.size(); f.close(); }
@@ -573,15 +572,6 @@ static String stateJson() {
 // quand on monte ou descend l'ensemble. Le rapport n'est pas defini quand la
 // source part de zero : dans ce seul cas on reporte l'ECART, faute de quoi un
 // fond descendu a 0 y resterait pour toujours et le verrou aurait l'air casse.
-static uint8_t followLevel(int from, int to, int other) {
-  if (from == to) return (uint8_t)other;
-  long v = (from > 0) ? lroundf((float)other * (float)to / (float)from)
-                      : (long)other + (to - from);
-  if (v < 0) v = 0;
-  if (v > 255) v = 255;
-  return (uint8_t)v;
-}
-
 static uint8_t param8(AsyncWebServerRequest* r, const char* k, uint8_t cur) {
   if (!r->hasParam(k)) return cur;
   long v = r->getParam(k)->value().toInt();
@@ -628,29 +618,16 @@ static void startServer() {
     }
     if (r->hasParam("bright")) arenaled::setBrightness(param8(r, "bright", arenaled::brightness()));
     if (r->hasParam("speed"))  arenaled::setSpeed(param8(r, "speed", arenaled::speed()));
-    if (r->hasParam("lock")) arenaled::setLevelLock(r->getParam("lock")->value().toInt() != 0);
     if (r->hasParam("framehz")) arenaled::setFrameHz(param8(r, "framehz", arenaled::frameHz()));
     if (r->hasParam("insb")) arenaled::setInsBright(param8(r, "insb", arenaled::insBright()));
     // Les deux etages permanents, traites ensemble parce que le verrou fait
     // dependre l'un de l'autre. Bouger les DEUX dans la meme requete est un
     // reglage explicite : le verrou ne s'en mele pas, sans quoi on ne pourrait
     // plus jamais refixer l'equilibre une fois verrouille.
-    if (r->hasParam("gi") || r->hasParam("champ")) {
-      const uint8_t oldG = arenaled::gi(), oldC = arenaled::champ();
-      uint8_t newG = param8(r, "gi", oldG), newC = param8(r, "champ", oldC);
-      if (arenaled::levelLock()) {
-        // Le suiveur se deduit du couple de REFERENCE, pas de la valeur courante
-        // - sinon un ecretage a 255 se propage dans le rapport et l'aller-retour
-        // ne redonne plus la valeur de depart.
-        const uint8_t rg = arenaled::levelRefGi(), rc = arenaled::levelRefChamp();
-        if (r->hasParam("gi") && !r->hasParam("champ"))      newC = followLevel(rg, newG, rc);
-        else if (r->hasParam("champ") && !r->hasParam("gi")) newG = followLevel(rc, newC, rg);
-      }
-      arenaled::setGi(newG);
-      arenaled::setChamp(newC);
-      // Poser les deux ensemble redefinit l'equilibre.
-      if (r->hasParam("gi") && r->hasParam("champ")) arenaled::setLevelRef(newG, newC);
-    }
+    // Deux reglages independants depuis que les champignons sont un gain et non
+    // un niveau : plus de verrou, plus de rapport a conserver.
+    if (r->hasParam("gi"))    arenaled::setGi(param8(r, "gi", arenaled::gi()));
+    if (r->hasParam("champ")) arenaled::setChamp(param8(r, "champ", arenaled::champ()));
     if (r->hasParam("density")) arenaled::setDensity(param8(r, "density", arenaled::density()));
     if (r->hasParam("warm"))   arenaled::setWarm(param8(r, "warm", arenaled::warm()));
     if (r->hasParam("inc"))    arenaled::setIncandescent(r->getParam("inc")->value().toInt() != 0);

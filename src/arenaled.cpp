@@ -28,22 +28,12 @@ static uint8_t  s_bright    = ARENA_BRIGHT_DEFAULT;
 static uint8_t  s_gi        = ARENA_GI_DEFAULT;   // GI level under ROM attract, 0 = off
 static Rgbw     s_giColor   = { 0, 0, 0, 0 };     // GI tint; all-zero = follow the Colour panel
 static uint8_t  s_insBright = 255;                // inserts, separately from the GI behind them
-static uint8_t  s_champ     = 255;                // "champignons": a second permanent layer
-static bool     s_lvlLock   = false;              // move one level, the other keeps the ratio
-// Couple de REFERENCE, fige au moment ou l'on verrouille.
-//
-// Le suiveur etait calcule a partir de la valeur COURANTE de l'autre etage, puis
-// ecrete a 255. Un aller-retour detruisait donc l'equilibre sans retour possible :
-// avec fond=90 et champignons=255, monter le fond a 255 demandait 722 pour les
-// champignons -> ecrete a 255, sans rien de visible ; redescendre le fond a 90
-// recalculait alors 255*90/255 = 90 au lieu de 255. L'interface promet "le
-// rapport que tu as regle est conserve" ; il ne l'etait pas.
-//
-// En gardant le couple de depart, le rapport ne derive plus : l'ecretage
-// n'affecte que la valeur emise, jamais la reference. L'aller-retour redonne
-// exactement la valeur de depart.
-static uint8_t  s_lockGi    = 0;
-static uint8_t  s_lockChamp = 0;
+static uint8_t  s_champ     = ARENA_CHAMP_NEUTRAL;  // gain du groupe "champignons", 128 = neutre
+// Le verrou qui liait "champignons" et "fond" a ete RETIRE le 2026-08-27. Il
+// tenait tant que les deux etaient des niveaux de lumiere permanente. Les
+// champignons sont devenus un GAIN sur un groupe de pixels : lier un gain a un
+// niveau de fond ne veut plus rien dire, et un reglage qui ne veut rien dire est
+// pire qu'un reglage absent.
 static uint8_t  s_density   = 110;   // mode lucioles : combien vivent a la fois
 // Ce que la carte fait quand le courant revient. Une piece murale qui reste
 // noire apres une coupure passe pour cassee : le proprietaire ne va pas
@@ -432,27 +422,6 @@ static void fxRomAttract(Rgbw* buf) {
     return (pk > 0.004f) ? scale(f, k / pk) : Rgbw{ 0, 0, 0, 0 };
   };
   const Rgbw giC = glow(s_gi);       // le fond
-  // ⚠️ Le plancher des champignons est PLAFONNE, et ce n'est pas un detail de
-  // reglage : c'est ce qui garantit qu'ils clignotent encore.
-  //
-  // Comprimer la lampe de la ROM dans la place restant au-dessus du plancher ne
-  // suffit pas si le plancher peut monter jusqu'au plein : a champignons = 255 il
-  // ne reste rien au-dessus, et le clignotement disparait exactement la ou le
-  // proprietaire pousse le curseur. Signale deux fois - "les champignons
-  // s'allument mais ne clignotent plus quand tu montes la puissance", puis
-  // "champignons tu as toujours pas regle le probleme".
-  //
-  // Un champignon qui brille en permanence a fond n'a plus rien pour clignoter :
-  // le curseur promettrait quelque chose d'impossible. On lui reserve donc un
-  // quart de la dynamique, toujours. Le curseur va de 0 a 75 % de plancher, et
-  // les 25 % du haut appartiennent a la ROM.
-  const Rgbw chC = scale(glow(s_champ), ARENA_CHAMP_FLOOR_MAX);
-  const float chK = (float)max(max(chC.r, chC.g), max(chC.b, chC.w)) / 255.0f;
-
-  // Le groupe est resolu une fois par trame, pas par pixel : c'est un groupe
-  // arenamap ordinaire, donc il peut etre renomme, vide, ou absent.
-  const int champZ = arenamap::indexOf(ARENA_CHAMP_ZONE);
-
   // Les inserts et le fond sont deux etages separes. Le mur porte les deux en
   // meme temps - ce que la ROM allume, et l'eclairage permanent derriere - et
   // l'equilibre entre les deux est un choix de gout qui ne devrait pas dependre
@@ -462,8 +431,6 @@ static void fxRomAttract(Rgbw* buf) {
   for (uint16_t i = 0; i < s_count; i++) {
     const int lamp = arenapf::lampOfLed(i);
     const bool on  = (lamp >= 0) && ((mask >> lamp) & 1ULL);
-    const bool isChamp = (champZ >= 0 && arenamap::zoneOfLed(i) == champZ);
-
     // "Background" ne porte que le FOND : les pixels qui ne sont sur aucun
     // insert. Il s'appliquait a tout le monde, insert compris, donc le monter
     // rallumait les 52 lampes que la ROM laisse eteintes - rapporte tel quel :
@@ -472,22 +439,8 @@ static void fxRomAttract(Rgbw* buf) {
     // fait. Les champignons, eux, gardent leur plancher meme s'ils portent un
     // insert : c'est un groupe pose a la main, il commande ce qu'on lui a dit
     // de commander.
-    const Rgbw base  = isChamp ? chC : giC;
-    const Rgbw floorC = isChamp ? chC : Rgbw{ 0, 0, 0, 0 };
-    // Le plancher prend le BAS de la dynamique, la ROM garde la tete.
-    //
-    // Un simple maximum ne marche pas : des que la lueur permanente depasse la
-    // lampe de la ROM, elle l'avale et le pixel cesse de clignoter. Rapporte
-    // tel quel - "les champignons s'allument mais ne clignotent plus quand tu
-    // montes la puissance". Le clignotement est justement ce qui fait qu'un
-    // champignon est un champignon et pas une veilleuse.
-    //
-    // En comprimant la lampe dans la place qui RESTE au-dessus du plancher, le
-    // clignotement survit a n'importe quel niveau tant que le plancher n'est pas
-    // au maximum : monter la lueur reduit le contraste progressivement au lieu
-    // de le supprimer d'un coup. Vaut 1 pour les pixels sans plancher, donc rien
-    // ne change pour eux.
-    const float head = isChamp ? (1.0f - chK) : 1.0f;
+    const Rgbw base   = giC;
+    const Rgbw floorC = Rgbw{ 0, 0, 0, 0 };
 
     // With the simulation off this is a plain switch: no thermal lag, no colour
     // ramp. Worth having, because an insert that carries its own colour is
@@ -503,13 +456,13 @@ static void fxRomAttract(Rgbw* buf) {
       // ramp is invisible on a real bulb too, so nothing of value is lost.
       const Rgbw f = filament(T[i]);
       if ((s_color.r | s_color.g | s_color.b) == 0) {
-        buf[i] = addSat(floorC, scale(f, ib * head));
+        buf[i] = addSat(floorC, scale(f, ib));
       } else {
         const float lvl = (float)max(max(f.r, f.g), max(f.b, f.w)) / 255.0f;
-        buf[i] = addSat(floorC, scale(s_color, lvl * ib * head));
+        buf[i] = addSat(floorC, scale(s_color, lvl * ib));
       }
     } else {
-      buf[i] = addSat(floorC, scale(s_color, T[i] * ib * head));
+      buf[i] = addSat(floorC, scale(s_color, T[i] * ib));
     }
   }
   // Insert colours are applied globally in tick(), not here: the plastic
@@ -577,7 +530,14 @@ static void micBegin() {
   Serial.printf("[led] micro sur GPIO%d (ADC1)\n", PIN_ARENA_MIC);
 }
 
-static void musicSampleMic() {
+// dt en SECONDES, fourni par l'appelant. Il ne peut pas etre deduit ici :
+// ARENA_MIC_DT valait 1/LED_FRAME_HZ, la constante de COMPILATION (60), alors que
+// la cadence de rendu est s_frameHz, reglable a chaud de 1 a 120 Hz et persistee.
+// La dependance a la cadence que le commentaire pretendait avoir supprimee etait
+// donc intacte : a 20 Hz - le reglage que la doc conseille justement pour une
+// chaine limite - la demi-vie du gain passait de 4 a 12 s, et un couplet calme
+// laissait le mur presque eteint trois fois trop longtemps.
+static void musicSampleMic(float dt) {
   // 160 reads ~ 1.6 ms per frame. Mean-removed RMS = energy; a one-pole
   // low-pass splits a bass proxy from the rest. Crude next to an FFT, and
   // enough: lighting needs an envelope, not a spectrum.
@@ -614,7 +574,7 @@ static void musicSampleMic() {
   // double. Formule en secondes, la cadence n'entre plus en compte, et 4 s de
   // demi-vie laissent le temps de baisser le volume sans que le mur se rallume
   // brutalement.
-  s_musPeak = max(rms, s_musPeak * expf(-0.1733f * ARENA_MIC_DT));
+  s_musPeak = max(rms, s_musPeak * expf(-0.1733f * dt));   // demi-vie 4 s, quelle que soit la cadence
   if (s_musPeak < 0.012f) {                   // aucun micro cable : bruit d'alim
     s_musE = s_musB = s_musT = 0;
     return;
@@ -680,7 +640,7 @@ static void fxMusic(Rgbw* buf) {
   musLast = now;
   if (dt > 0.2f) dt = 0.2f;
 #if ARENA_MIC_ENABLE
-  if (now - s_musExtMs > 2000) musicSampleMic();
+  if (now - s_musExtMs > 2000) musicSampleMic(dt);
 #else
   if (now - s_musExtMs > 2000) { s_musE = s_musB = s_musT = 0; }  // idle breathe
 #endif
@@ -762,8 +722,12 @@ static void fxMusic(Rgbw* buf) {
   // milieu du signal, et les etincelles apparaissaient une fois sur deux au
   // hasard. On suit la crete recente : la piste peut etre sourde ou brillante,
   // le mur reagit pareil.
+  // Meme piege que le gain automatique, et introduit dans le meme commit : une
+  // decroissance par TRAME rend le seuil dependant de la cadence de rendu. Ici
+  // 2,3 s de demi-vie a 60 Hz devenaient 14 s a 10 Hz, et les etincelles
+  // restaient eteintes une demi-minute apres une cymbale.
   static float tpk = 0.05f;
-  tpk = max(s_musT, tpk * 0.995f);
+  tpk = max(s_musT, tpk * expf(-dt / 3.3f));
   const float trel = (tpk > 0.01f) ? (s_musT / tpk) : 0.0f;
 
   const uint8_t decay = 22;
@@ -837,7 +801,11 @@ static void fxArena(Rgbw* buf) {
   if (arenapf::anyAssigned()) { fxArenaGeo(buf); return; }
 
   const Rgbw amber = { ARENA_AMBER_R, ARENA_AMBER_G, ARENA_AMBER_B, ARENA_AMBER_W };
-  fill(buf, scale(s_color, 0.14f));
+  // Ce repli sert quand AUCUN pixel n'est place sur le plateau. Son fond etait
+  // reste code en dur a 0,14 alors que fxArenaGeo, lui, suit desormais le curseur
+  // Background : sur un mur non cartographie, l'interface montrait donc un
+  // curseur qui ne commandait rien. Meme loi des deux cotes.
+  fill(buf, scale(s_color, 0.20f * (float)s_gi / 255.0f));
 
   uint8_t nz = arenamap::count();
   if (nz) {
@@ -1147,17 +1115,6 @@ void setInsBright(uint8_t b) { s_insBright = b; markDirty(); }
 void setChamp(uint8_t b) { s_champ = b; markDirty(); }
 uint8_t champ() { return s_champ; }
 uint8_t insBright() { return s_insBright; }
-void setLevelLock(bool on) {
-  if (on && !s_lvlLock) { s_lockGi = s_gi; s_lockChamp = s_champ; }
-  s_lvlLock = on;
-  markDirty();
-}
-// Refixer l'equilibre : appele quand les deux etages sont poses dans la meme
-// requete, ce qui est un reglage explicite et non un suivi.
-void setLevelRef(uint8_t g, uint8_t c) { s_lockGi = g; s_lockChamp = c; }
-uint8_t levelRefGi()    { return s_lockGi; }
-uint8_t levelRefChamp() { return s_lockChamp; }
-bool levelLock() { return s_lvlLock; }
 uint16_t count() { return s_count; }
 uint16_t budgetMa() { return s_budget; }
 void     setBudgetShare(uint8_t n) { s_share = n ? n : 1; }
@@ -1345,10 +1302,8 @@ void resetLook() {
   s_gi      = ARENA_GI_DEFAULT;
   s_giColor = { 0, 0, 0, 0 };
   s_insBright = 255;
-  s_champ = 255;
+  s_champ = ARENA_CHAMP_NEUTRAL;
   s_frameHz = LED_FRAME_HZ;
-  s_lvlLock = false;
-  s_lockGi = s_gi; s_lockChamp = s_champ;
   s_warm    = ARENA_WARM_DEFAULT;
   s_density = 110;
   s_inc     = true;
@@ -1393,11 +1348,8 @@ void save() {
   s_prefs.putBytes("color", &s_color, sizeof(s_color));
   s_prefs.putBytes("gicol", &s_giColor, sizeof(s_giColor));
   s_prefs.putUChar("insb", s_insBright);
-  s_prefs.putUChar("champ", s_champ);
+  s_prefs.putUChar("champg", s_champ);
   s_prefs.putUChar("framehz", s_frameHz);
-  s_prefs.putUChar("lvllock", s_lvlLock ? 1 : 0);
-  s_prefs.putUChar("lockgi",  s_lockGi);
-  s_prefs.putUChar("lockch",  s_lockChamp);
   s_prefs.putString("order", s_order);
   if (s_dirtyAt == dirtyAtEntry) s_dirtyAt = 0;
 }
@@ -1448,12 +1400,14 @@ void begin() {
   if (s_prefs.getBytesLength("gicol") == sizeof(s_giColor))
     s_prefs.getBytes("gicol", &s_giColor, sizeof(s_giColor));
   s_insBright = s_prefs.getUChar("insb", 255);
-  s_champ     = s_prefs.getUChar("champ", 255);
+  // Le sens de ce reglage a CHANGE : c'etait un niveau de lueur permanente, c'est
+  // devenu un gain dont le neutre est 128. Une valeur enregistree sous l'ancien
+  // sens n'a plus de signification, d'ou la cle differente : les cartes deja en
+  // service repartent du neutre au lieu d'heriter d'un x2 qu'elles n'ont pas
+  // demande.
+  s_champ     = s_prefs.getUChar("champg", ARENA_CHAMP_NEUTRAL);
   s_frameHz   = s_prefs.getUChar("framehz", LED_FRAME_HZ);
   if (s_frameHz < 1 || s_frameHz > 120) s_frameHz = LED_FRAME_HZ;
-  s_lvlLock   = s_prefs.getUChar("lvllock", 0) != 0;
-  s_lockGi    = s_prefs.getUChar("lockgi",  s_gi);
-  s_lockChamp = s_prefs.getUChar("lockch",  s_champ);
   String ord = s_prefs.getString("order", ARENA_ORDER_DEFAULT);
   strncpy(s_order, ord.c_str(), sizeof(s_order) - 1);
   s_order[sizeof(s_order) - 1] = '\0';
@@ -1557,6 +1511,7 @@ void tick() {
     if (t != 255) s_frame[i] = scale(s_frame[i], (float)t / 255.0f);
   }
 
+
   // Mapping wizard overlay — works on top of any mode, auto-expires.
   if (s_idUntil) {
     if ((int32_t)(now - s_idUntil) >= 0) clearIdentify();
@@ -1605,6 +1560,36 @@ void tick() {
   }
 #endif
   applyGainGamma(s_frame, gain);
+
+  // Gain du groupe "champignons" — APRES la luminosite globale, et c'est le
+  // point qui compte.
+  //
+  // Le besoin, tel qu'il a fini par etre dit : "le but etait juste d'augmenter
+  // leur luminosite car le plastique est epais et ils ont l'air pales
+  // contrairement au reste". Ce n'est donc pas une lueur permanente - mon erreur,
+  // qui a coute trois corrections successives d'un plancher qui saturait puis
+  // avalait le clignotement. C'est un GAIN sur un groupe de pixels.
+  //
+  // Pose AVANT applyGainGamma, il ne servait a rien : mesure sur la carte,
+  // x1 -> x2 donnait +1 mA en mode "all on". La trame y sort deja a pleine
+  // echelle, donc multiplier saturait aussitot. C'est l'inverse de la correction
+  // par pixel juste au-dessus, qui elle REDUIT et doit rester en amont pour ne
+  // pas etre ecrasee : un gain qui augmente n'a de place que la ou il en reste,
+  // c'est-a-dire une fois le mur ramene a sa luminosite reelle.
+  //
+  // Consequence a assumer et a dire dans l'interface : a luminosite maximale il
+  // n'y a plus de marge nulle part, et le gain ne peut rien. C'est une propriete
+  // du materiel, pas un defaut - on ne pousse pas une LED au-dela de son plein.
+  //
+  // 128 = neutre, 255 = double. L'ecretage est le comportement voulu.
+  if (s_champ != ARENA_CHAMP_NEUTRAL) {
+    const int cz = arenamap::indexOf(ARENA_CHAMP_ZONE);
+    if (cz >= 0) {
+      const float g = (float)s_champ / (float)ARENA_CHAMP_NEUTRAL;
+      for (uint16_t i = 0; i < s_count; i++)
+        if (arenamap::zoneOfLed(i) == cz) s_frame[i] = scale(s_frame[i], g);
+    }
+  }
   s_amps = meterAndLimit(s_frame);
   push(s_frame);
 

@@ -101,11 +101,6 @@ void    setInsBright(uint8_t b);           // inserts only, independent of the G
 uint8_t insBright();
 void    setChamp(uint8_t b);               // "champignons" group: a second permanent layer
 uint8_t champ();
-void    setLevelLock(bool on);             // tie insert + GI levels: one moves, the ratio holds
-bool    levelLock();
-void    setLevelRef(uint8_t gi, uint8_t champ);  // refixe l'equilibre du verrou
-uint8_t levelRefGi();
-uint8_t levelRefChamp();
 void    setCount(uint16_t n);              // live LED count (1..LED_MAX)
 uint16_t count();
 void    setBudgetMa(uint16_t ma);          // power ceiling for the whole chain

@@ -145,21 +145,21 @@ header h1 img{filter:saturate(.9)}
 
   <section>
     <h2>Background glow (GI)</h2>
-    <p class="hint">Everything the ROM attract lights, in one place. The attract drives only the
-       inserts the ROM itself drives; <b>champignons</b> are a group you assign by hand, and the
-       <b>background</b> is every pixel that carries no insert at all. It does not touch the
-       inserts: one the ROM leaves dark stays dark, so the wall keeps showing what the machine
-       is actually doing.</p>
+    <p class="hint" id="gi-intro"></p>
     <div class="row"><label>Inserts</label>
       <input type="range" id="insb" min="0" max="255"><output id="o-insb"></output></div>
     <div class="row"><label>Champignons</label>
       <input type="range" id="champ" min="0" max="255"><output id="o-champ"></output></div>
+    <p class="hint" id="champgain" style="margin-top:-4px"></p>
     <div class="row"><label>Background</label>
       <input type="range" id="gi" min="0" max="255"><output id="o-gi"></output></div>
-    <div class="row"><label>Lock</label>
-      <button id="lockbtn" class="tog" onclick="push('lock=' + (st.lock ? 0 : 1))">&ndash;</button>
-      <span class="hint" id="lockhint" style="margin:0"></span></div>
     <p class="hint" id="champhint"></p>
+    <!-- La couleur du fond n'existe que sous l'attract de la ROM : seul
+         fxRomAttract lit s_giColor. Le titre, le texte et les prereglages ne sont
+         pas des .row, donc showRelevant ne les voyait pas et ils restaient
+         affiches en Wave et en Music, ou ils ne commandent rien. Un conteneur,
+         masque d'un bloc. -->
+    <div id="gi-colour">
     <h3 style="margin:14px 0 6px;font-size:.95em;opacity:.75">Background colour</h3>
     <p class="hint" style="margin-top:0">Leave all four at zero and the background follows the
        Colour panel below. Set a tint and it becomes its own thing &mdash; an amber wash under
@@ -176,6 +176,7 @@ header h1 img{filter:saturate(.9)}
     <div class="row"><label>Blue</label>  <input type="range" id="gib" min="0" max="255"><output id="o-gib"></output></div>
     <div class="row"><label>White</label> <input type="range" id="giw" min="0" max="255"><output id="o-giw"></output></div>
     <p class="hint" id="gi-mode"></p>
+    </div>
   </section>
 
   <section>
@@ -858,21 +859,30 @@ function render(s) {
   }
   $('incbtn').textContent = s.inc ? 'bulb simulation: on' : 'bulb simulation: off';
   $('incbtn').classList.toggle('on', !!s.inc);
-  if ($('lockbtn') && s.lock !== undefined) {
-    $('lockbtn').textContent = s.lock ? 'levels tied' : 'levels free';
-    $('lockbtn').classList.toggle('on', !!s.lock);
-    $('lockhint').textContent = s.lock
-      ? 'Champignons and Background move together — the ratio you set is kept. Move both in one go to re-balance.'
-      : 'Champignons and Background move on their own.';
+  // Le gain des champignons se lit en facteur, pas en 0..255 : un curseur qui
+  // affiche "128" ne dit pas qu'il ne fait rien, alors que "x1.00" si.
+  if ($('champgain') && s.champ !== undefined) {
+    const g = s.champ / 128;
+    // Le gain s'applique APRES la luminosite globale : a fond, il n'y a plus de
+    // marge nulle part et il ne peut rien. Mesure sur la carte : x1 -> x2 donne
+    // +21 mA a 160 de luminosite, et 0 a 255. Autant le dire que laisser croire
+    // a un curseur casse.
+    const sature = s.bright >= 250;
+    $('champgain').innerHTML = Math.abs(g - 1) < 0.01
+      ? '&times;1.00 &mdash; rendered exactly like the rest of the wall.'
+      : (g > 1
+          ? '&times;' + g.toFixed(2) + ' &mdash; pushed above the rest, to make up for a thick cap.' +
+            (sature ? ' <b>But brightness is at maximum, so there is no headroom left and this does nothing.</b> Lower Brightness first.' : '')
+          : '&times;' + g.toFixed(2) + ' &mdash; held below the rest.');
   }
   if ($('champhint') && s.champn !== undefined) {
     // Un curseur qui ne commande rien doit le DIRE. Sans ce message, un groupe
     // vide se lit comme une panne du reglage.
-    $('champhint').textContent = s.champn < 0
-      ? 'No "champignons" group yet — open <b>Groups</b> under Playfield, name it champignons, and tap the pads over the bumper caps &mdash; until then this slider has nothing to drive.'
+    $('champhint').innerHTML = s.champn < 0
+      ? 'No <b>champignons</b> group yet &mdash; open <b>Groups</b> under Playfield, name it champignons, and tap the pads over the bumper caps. Until then this slider has nothing to drive.'
       : s.champn === 0
-        ? 'The "champignons" group exists but has no LED assigned — this slider drives nothing yet.'
-        : 'Champignons: ' + s.champn + ' LED' + (s.champn > 1 ? 's' : '') + ' in the group.';
+        ? 'The <b>champignons</b> group exists but has no pixel assigned &mdash; this slider drives nothing yet.'
+        : s.champn + ' pixel' + (s.champn > 1 ? 's' : '') + ' in the group. Thick bumper caps swallow light, so those read pale next to the rest &mdash; this pushes just them, in every mode.';
   }
   set('r', s.r); set('g', s.g); set('b', s.b); set('w', s.w);
   if (document.activeElement !== $('count'))  $('count').value  = s.count;
@@ -1493,8 +1503,9 @@ const APPLIES = {
   // commandait pourtant quelque chose.
   gi     : ['attract','arena','music'],                     // le fond permanent
   insb   : ['attract'],                                     // ce que la ROM allume
-  champ  : ['attract'],                                     // le groupe "champignons"
-  lockbtn: ['attract'],                                     // le lien entre champignons et fond
+  // Un capuchon epais l'est dans TOUS les modes : le gain n'appartient pas a
+  // l'attract, il appartient a la lampe. Verifie dans tick(), pas suppose.
+  champ  : null,                                            // gain du groupe "champignons"
   gir    : ['attract'], gig : ['attract'],                  // teinte de ces memes ampoules
   gib    : ['attract'], giw : ['attract'],
   density: ['night'],
@@ -1528,6 +1539,20 @@ function showRelevant(s) {
   // curseurs qu'il commente sont masques, et se retrouvait colle sous
   // Brightness - une phrase qui parle d'un reglage absent de l'ecran.
   if ($('champhint')) $('champhint').style.display = applies('champ', s) ? '' : 'none';
+  // Le sous-bloc couleur ne vaut que la ou gir vaut : sous l'attract de la ROM.
+  if ($('gi-colour')) $('gi-colour').style.display = applies('gir', s) ? '' : 'none';
+  // Et le texte d'accueil decrit ce que la section fait DANS CE MODE, au lieu de
+  // parler de l'attract partout.
+  const gin = $('gi-intro');
+  if (gin) gin.innerHTML = applies('champ', s)
+    ? 'Everything the ROM attract lights, in one place. The attract drives only the inserts the ' +
+      'ROM itself drives; <b>champignons</b> are a group you assign by hand, and the ' +
+      '<b>background</b> is every pixel that carries no insert at all. It does not touch the ' +
+      'inserts: one the ROM leaves dark stays dark, so the wall keeps showing what the machine ' +
+      'is actually doing.'
+    : 'Here <b>Background</b> is the permanent wash this mode paints under everything else. At ' +
+      'zero the wall really goes dark between the moving parts. The other levels belong to the ' +
+      'ROM attract and stay hidden while you are not in it.';
 }
 
 // Balayage lance par la carte, pas par le telephone : ce qui compte est ce que
