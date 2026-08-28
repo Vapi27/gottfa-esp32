@@ -327,7 +327,67 @@
 // a pleine charge legitime, en bout de tolerance, U5 se declenchait. A 1900 la
 // marge remonte a ~244 mA. Correctif a cout materiel nul -- l'alternative etait
 // de rechanger R4, deja passee de 10 k a 11 k lors du remplacement AP2552.
-#define LED_POWER_BUDGET_MAX  1900
+// ---- Le limiteur U5, et le plafond qui en decoule ---------------------------
+//
+// UN SEUL endroit decrit le materiel. Le plafond n'est plus un nombre ecrit a la
+// main : il se calcule. Passer la carte a un courant plus eleve, c'est changer
+// les quatre lignes ci-dessous et rien d'autre - le reste du firmware suit, et
+// le controle de coherence en fin de bloc refuse une combinaison impossible.
+//
+// Les deux bornes sont INDEPENDANTES et il faut retenir la plus basse :
+//   - ce que la PIECE supporte en continu (rating de la fiche) ;
+//   - ou se declenche le LIMITEUR au pire cas, fixe par R4.
+#define ARENA_LIMITER_NAME        "AP22652"
+#define ARENA_LIMITER_RLIM_KOHM   11      // R4, 1 %
+#define ARENA_LIMITER_CONT_MA     2100    // courant continu garanti, -40..+85 (DS41186 Rev 5-2)
+#define ARENA_LIMITER_TRIP_MIN_MA 2174    // ILIMIT le plus defavorable a R4 = 11 k
+// Marge sous la borne retenue. 200 mA reproduit exactement le plafond de 1900 mA
+// etabli le 2026-08-10, apres qu'un plafond a 2100 se soit revele fictif : il ne
+// laissait que 0,2 a 2 % sous le point de declenchement le plus defavorable, et
+// U5 partait en defaut a pleine charge legitime.
+#define ARENA_LIMITER_MARGIN_MA   200
+
+#define ARENA_LIMITER_FLOOR_MA \
+  (ARENA_LIMITER_TRIP_MIN_MA < ARENA_LIMITER_CONT_MA \
+     ? ARENA_LIMITER_TRIP_MIN_MA : ARENA_LIMITER_CONT_MA)
+
+#define LED_POWER_BUDGET_MAX  (ARENA_LIMITER_FLOOR_MA - ARENA_LIMITER_MARGIN_MA)
+
+// ---- Viser 3 A : ce qu'il faut changer, et ce que ca entraine ---------------
+//
+// ⚠️ Ce n'est PAS un changement logiciel. Monter ce plafond seul ne donne pas
+// 3 A : au-dela de sa fenetre, ce n'est plus le firmware qui assombrit la trame,
+// c'est U5 qui ecrete et leve son drapeau de defaut. Le mur clignoterait et se
+// declarerait en panne, sans que rien dans l'interface n'explique pourquoi.
+//
+// Quatre choses doivent bouger ensemble :
+//
+//  1. LA PIECE. L'AP22652 est donne pour 2,1 A CONTINU. Aucune valeur de R4 ne
+//     le fait tenir 3 A : R4 deplace le seuil de declenchement, pas le rating
+//     thermique. Il faut un limiteur donne pour >= 3,5 A continu.
+//  2. R4. La fiche AP22652 donne ILIMIT_typ[mA] = 30321 / R[kOhm]^1,055 avec une
+//     fenetre de +/-10 %. Pour un declenchement TYPIQUE a 3,3 A il faudrait
+//     R ~ 8,1 k, dont le minimum tomberait vers 3,0 A - soit zero marge a 3 A.
+//     Toute piece de remplacement a sa propre equation : la relire, ne pas
+//     reutiliser celle-ci.
+//  3. LE CUIVRE. Mesure consignee dans hardware/PCB_HARDWARE.md : 0,24 mm de
+//     large a 2,1 A donnent deja 0,43 V de chute et 0,9 W dissipes. A 3 A la
+//     meme piste perdrait 0,61 V et dissiperait 1,9 W. Il faut l'elargir.
+//  4. L'ALIMENTATION ET LE FUSIBLE. Le budget ne couvre que les LED ; le
+//     controleur tire 100-250 mA de la meme source. Un budget de 3 A demande une
+//     alimentation 5 V / 4 A et un fusible dimensionne sur 3,3 A.
+//
+// Une fois le materiel change, il suffit de mettre a jour les quatre defines
+// ci-dessus : le plafond, l'ecretage de setBudgetMa() et la borne relue en NVS
+// suivent tout seuls. Exemple pour une piece 3,5 A continu avec un R4 donnant
+// 3,4 A au pire cas :
+//     #define ARENA_LIMITER_CONT_MA     3500
+//     #define ARENA_LIMITER_TRIP_MIN_MA 3400
+//     -> plafond = 3200 mA, donc 3 A utilisables avec 200 mA de marge.
+_Static_assert(LED_POWER_BUDGET_MAX > 0,
+               "plafond negatif : la marge depasse ce que le limiteur autorise");
+_Static_assert(LED_POWER_BUDGET_MA <= LED_POWER_BUDGET_MAX,
+               "le budget par defaut depasse ce que le limiteur autorise");
 // The budget covers the LEDs ONLY. The controller draws 100-250 mA (peaks higher
 // on WiFi transmit) from the same supply and the same fuse, and never appears in
 // the estimate. Size a fuse against budget + 300 mA, not against the budget.

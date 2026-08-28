@@ -404,6 +404,10 @@ static String stateJson() {
     if (LittleFS.exists("/attract.mp3")) { File f = LittleFS.open("/attract.mp3", "r"); sz = f.size(); f.close(); }
     j += ",\"snd\":" + String((uint32_t)sz); }
   j += ",\"framehz\":" + String(arenaled::frameHz());
+  // Le plafond materiel, pour que l interface cesse d accepter des valeurs
+  // qu elle fait ensuite ecreter en silence.
+  j += ",\"budgetmax\":" + String((uint32_t)LED_POWER_BUDGET_MAX);
+  j += ",\"limiter\":\"" ARENA_LIMITER_NAME "\"";
   {
     // Teinte du fond, publiee a part des r/g/b/w des inserts : tout a zero
     // veut dire "suit le panneau Couleur", ce que l'interface affiche comme

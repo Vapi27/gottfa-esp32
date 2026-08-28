@@ -204,7 +204,8 @@ header h1 img{filter:saturate(.9)}
       <div><label class="hint">LEDs in the chain</label>
         <input type="number" id="count" min="1" max="150"></div>
       <div><label class="hint">Power budget (mA)</label>
-        <input type="number" id="budget" min="500" max="15000" step="100"></div>
+        <input type="number" id="budget" min="500" max="15000" step="100">
+        <span class="hint" id="budget-say" style="margin:0"></span></div>
       <div><label class="hint">Refresh rate (Hz)</label>
         <input type="number" id="framehz" min="1" max="120" step="1"
                onchange="push('framehz=' + this.value)"></div>
@@ -822,6 +823,14 @@ function render(s) {
   // demandes est indiscernable d'un mur regle bas si on n'affiche que le mesure.
   if (s.framehz !== undefined && $('framehz') && document.activeElement !== $('framehz'))
     $('framehz').value = s.framehz;
+  // Le champ acceptait 15 000 mA et la carte ecretait sans un mot. Le plafond est
+  // materiel : au-dela, ce n'est plus le firmware qui assombrit la trame, c'est le
+  // limiteur qui ecrete et leve son drapeau de defaut.
+  if (s.budgetmax && $('budget')) {
+    $('budget').max = s.budgetmax;
+    const e = $('budget-say');
+    if (e) e.textContent = 'max ' + s.budgetmax + ' mA (' + (s.limiter || 'limiteur') + ')';
+  }
   sndUi();
   showRelevant(s);
   if ($('nw-ssid')) $('nw-ssid').textContent = s.net === 'Matter' ? (s.ip || '–') : (s.net || '–');
