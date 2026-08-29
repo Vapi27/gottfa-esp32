@@ -59,6 +59,38 @@
   .shead{display:flex;align-items:center;gap:1rem;margin:0 0 1rem}
   .shead button{font-size:.72rem;letter-spacing:.14em}
   section.tabhide{display:none !important}
+
+  /* ⚠️ TELEPHONE. La chasse fixe et l'interlettrage large de FA·CONTROL sont
+     faits pour un ecran d'atelier ; sur 375 px ils cassent tout.
+     Constate en pilotant la page en 375x812 : le titre passait sur deux lignes
+     enormes sous le bouton d'arret, et surtout le texte d'aide loge DANS une
+     rangee se retrouvait dans une colonne de dix caracteres qui descendait sur
+     douze lignes. La cause : .row est un flex avec une etiquette de 96 px fixes,
+     et il ne reste rien au texte.
+     On empile plutot que de comprimer - c'est la seule chose qui tienne quand la
+     largeur manque. */
+  @media (max-width:620px){
+    h1{font-size:1rem;letter-spacing:.16em}
+    header{gap:8px;padding:10px 12px}
+    .stat{font-size:10px;gap:8px}
+    main{padding:10px}
+    section{padding:10px}
+    h2{font-size:.8rem;letter-spacing:.18em}
+    .menu{grid-template-columns:1fr;gap:.4rem}
+    .tile{padding:.7rem}
+    /* Une rangee devient deux lignes : l'etiquette au-dessus, la commande en
+       dessous, et tout texte d'aide sur toute la largeur. */
+    /* Etiquette, commande et valeur restent sur UNE ligne - trois lignes par
+       reglage rendaient la page interminable. Seul le texte d'aide passe
+       dessous, sur toute la largeur : c'est lui qui ne tenait pas. */
+    .row{flex-wrap:wrap;gap:8px;margin:12px 0}
+    .row label{width:auto;min-width:74px;max-width:38%;flex:none;font-size:12px}
+    .row output{width:auto;min-width:34px;flex:none;font-size:12px}
+    .row .hint{flex-basis:100%;order:99;margin:2px 0 0}
+    .row input[type=range]{flex:1 1 90px;min-width:80px}
+    .grid2{grid-template-columns:1fr}
+    .modes{grid-template-columns:repeat(auto-fit,minmax(130px,1fr))}
+  }
   section{background:var(--panel);border:1px solid var(--line-2);border-radius:0;
           padding:14px;margin-bottom:14px}
   h2{margin:0 0 10px;font-size:.95rem;letter-spacing:.28em;text-transform:uppercase;color:var(--cu-dk);font-weight:700}
@@ -142,6 +174,15 @@ header h1 img{filter:saturate(.9)}
   <section>
     <h2>Lighting mode</h2>
     <div class="modes" id="modes"></div>
+
+    <h3 style="margin:16px 0 6px;font-size:.8rem;letter-spacing:.18em;opacity:.75">Rotate</h3>
+    <p class="hint" id="rot-say" style="margin-top:0"></p>
+    <div class="modes" id="rot-picks" style="margin-bottom:8px"></div>
+    <div class="row"><label>Every</label>
+      <input type="number" id="rotsec" min="5" max="3600" step="5"
+             onchange="push('rotsec=' + this.value)">
+      <span class="hint" style="margin:0">seconds</span>
+      <button id="rotbtn" onclick="rotToggle()">&ndash;</button></div>
       <p class="hint" style="margin-top:10px">
       <button id="bootbtn" class="tog" onclick="toggleBoot()">&ndash;</button>
       <span class="hint">What the wall does when mains power comes back.</span>
@@ -810,6 +851,46 @@ function menuBuild() {
   if (want && secs.some(s => secTitle(s) === want)) secShow(want); else menuShow();
 }
 
+// --- Rotation entre modes ---------------------------------------------------
+//
+// On coche ce qu'on veut voir passer, le mur tire au sort parmi ces modes-la.
+// Le masque est un bit par mode, dans l'ordre de l'enumeration du firmware -
+// verifie identique a MODE_NAMES dans arenaled.cpp. Ne JAMAIS reordonner l'un
+// sans l'autre : le masque est enregistre en NVS, un decalage rejouerait des
+// modes que personne n'a coches.
+const ROT_ORDER = ['off','classic','attract','arena','night','rainbow','music','test'];
+function rotBit(m) { const i = ROT_ORDER.indexOf(m); return i < 0 ? 0 : (1 << i); }
+function rotToggle() { push('rot=' + (st.rot ? 0 : 1)); }
+function rotPick(m) {
+  const b = rotBit(m), cur = st.rotmask || 0;
+  push('rotmask=' + ((cur & b) ? (cur & ~b) : (cur | b)));
+}
+function rotUi() {
+  const box = $('rot-picks');
+  if (box) {
+    // Ni "off", ni le test de cablage : personne ne veut voir surgir un test de
+    // cablage un soir.
+    box.innerHTML = MODES.filter(m => m !== 'off' && m !== 'test').map(m =>
+      '<button class="tog' + (((st.rotmask || 0) & rotBit(m)) ? ' on' : '') +
+      '" onclick="rotPick(\'' + m + '\')">' + label(m) + '</button>').join('');
+  }
+  const b = $('rotbtn');
+  if (b) { b.textContent = st.rot ? 'rotating' : 'rotate: off'; b.classList.toggle('on', !!st.rot); }
+  if (st.rotsec !== undefined && $('rotsec') && document.activeElement !== $('rotsec'))
+    $('rotsec').value = st.rotsec;
+  const e = $('rot-say');
+  if (!e) return;
+  let n = 0;
+  MODES.forEach(m => { if ((st.rotmask || 0) & rotBit(m)) n++; });
+  e.innerHTML = !n
+    ? 'Tick the modes you want to see, then switch <b>rotate</b> on.'
+    : st.rot
+      ? 'Rotating at random among <b>' + n + '</b> mode' + (n > 1 ? 's' : '') +
+        '. Picking a mode by hand stops it &mdash; a wall that wanders off on its own ' +
+        'right after you chose something looks like a button that did not work.'
+      : '<b>' + n + '</b> mode' + (n > 1 ? 's' : '') + ' ticked. Switch <b>rotate</b> on to start.';
+}
+
 const toast = m => {
   let e = $('msg');
   if (!e) {
@@ -980,6 +1061,7 @@ function render(s) {
     if (e) e.textContent = 'max ' + s.budgetmax + ' mA (' + (s.limiter || 'limiteur') + ')';
   }
   sndUi();
+  rotUi();
   // Un mur protege doit pouvoir le DIRE : sinon il est indiscernable d'un mur
   // ouvert, et le proprietaire ne sait jamais ou il en est.
   const pws = $('pw-say');

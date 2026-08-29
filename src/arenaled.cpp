@@ -602,6 +602,7 @@ static void musicSampleMic(float dt) {
 // 75 pixels, le calcul est negligeable, et une invalidation oubliee donnerait un
 // mouvement faux que rien ne signalerait. h = 0 en bas (flippers), 1 en haut.
 static float s_ledH[LED_MAX];
+static float s_ledX[LED_MAX];
 static uint32_t s_ledHMs = 0;
 
 static void refreshLedHeights() {
@@ -611,23 +612,27 @@ static void refreshLedHeights() {
 
   float x, y;
   int   lo = -1;                       // dernier pixel place rencontre
-  float loH = 0.5f;
+  float loH = 0.5f, loX = 0.5f;
   for (uint16_t i = 0; i < s_count; i++) {
     if (arenapf::xy(i, x, y)) {
       const float h = 1.0f - y;        // y=1 aux flippers -> h=0 en bas
       s_ledH[i] = h;
+      s_ledX[i] = x;
       for (int k = lo + 1; k < (int)i; k++) {
         const float f = (float)(k - lo) / (float)(i - lo);
         s_ledH[k] = loH + f * (h - loH);
+        s_ledX[k] = loX + f * (x - loX);
       }
-      lo = i; loH = h;
+      lo = i; loH = h; loX = x;
     }
   }
-  // Queue de chaine sans aucun insert : on prolonge la derniere hauteur connue
+  // Queue de chaine sans aucun insert : on prolonge la derniere position connue
   // plutot que d'inventer une pente.
-  for (int k = lo + 1; k < (int)s_count; k++) s_ledH[k] = loH;
-  if (lo < 0) for (uint16_t i = 0; i < s_count; i++)   // aucun pixel place du tout
+  for (int k = lo + 1; k < (int)s_count; k++) { s_ledH[k] = loH; s_ledX[k] = loX; }
+  if (lo < 0) for (uint16_t i = 0; i < s_count; i++) {  // aucun pixel place du tout
     s_ledH[i] = s_count > 1 ? 1.0f - (float)i / (float)(s_count - 1) : 0.5f;
+    s_ledX[i] = 0.5f;
+  }
 }
 
 static void fxMusic(Rgbw* buf) {
@@ -652,95 +657,79 @@ static void fxMusic(Rgbw* buf) {
     return;
   }
 
-  // Le mode monte des flippers vers le fronton. Il remplissait le champ
-  // uniformement et faisait partir le battement du CENTRE, donc rien n'avait de
-  // direction : demande explicite du proprietaire d'en faire un mouvement de bas
-  // en haut. Les trois etages vont maintenant dans le meme sens.
+  // Le mode monte des flippers vers le fronton, et il doit surtout etre BEAU.
+  //
+  // La version precedente empilait trois couches indépendantes - colonne, bande
+  // de battement, etincelles - qui se marchaient dessus : un trait de crete d'un
+  // pixel de large sur un plateau ou les pixels sont disperses tombait au hasard,
+  // et le tout se lisait comme du bruit. Rapporte "music is just bad looking".
+  //
+  // Ici les couches se completent au lieu de se superposer : un DEGRADE continu
+  // qui monte, une CRETE large qui le coiffe, un ECLAT franc sur le battement, et
+  // des etincelles au-dessus. Chacune a son role et sa place.
   refreshLedHeights();
 
-  // Un fond faible partout : sans lui, un passage calme eteint le mur au lieu de
-  // le faire respirer. Il suit le curseur Background - a zero il disparait, pour
-  // qui veut un noir franc entre deux notes.
-  fill(buf, scale(s_color, 0.10f * (float)s_gi / 255.0f));
-
-  // Graves : une colonne qui monte du bas, avec ATTAQUE RAPIDE ET RETOMBEE LENTE.
-  //
-  // Elle suivait l'enveloppe brute. Mesure au micro sur de la vraie musique :
-  // les graves oscillent entre 0,23 et 0,86 avec un ecart-type de 0,149, donc
-  // la colonne sautait sur plus de 65 % de la hauteur du mur d'un instant a
-  // l'autre. Elle ne montait pas, elle sautillait - "ca clignote a moitie".
-  //
-  // Un vumetre ne suit pas le signal, il le SUIT VITE EN MONTANT et retombe
-  // lentement : c'est ce qui donne la frappe sans la nervosite. 25 ms a la
-  // montee (on ne rate pas un coup de grosse caisse), 320 ms a la descente.
+  // Niveau : attaque vive, retombee lente. C'est ce qui donne la frappe sans la
+  // nervosite - mesure a l'appui, les graves oscillent de 0,23 a 0,86 d'un
+  // instant a l'autre et suivre l'enveloppe brute faisait sautiller la colonne.
   static float lvl = 0;
   {
-    const float target = 0.08f + 0.92f * s_musB * s_musB;
-    const float tau = (target > lvl) ? 0.025f : 0.320f;
-    lvl += (target - lvl) * (1.0f - expf(-dt / tau));
+    const float cible = 0.10f + 0.90f * s_musB * s_musB;
+    const float tau = (cible > lvl) ? 0.030f : 0.360f;
+    lvl += (cible - lvl) * (1.0f - expf(-dt / tau));
   }
-
-  // Temoin de crete : il monte avec la colonne et redescend seul, lentement.
-  // C'est ce qui fait lire le mouvement comme voulu plutot que comme un defaut,
-  // et ca donne un repere fixe quand la musique est dense.
   static float pk = 0;
-  pk -= dt * 0.30f;
+  pk -= dt * 0.26f;
   if (lvl > pk) pk = lvl;
   if (pk < 0) pk = 0;
 
+  // Eclat de battement : tout le mur monte d'un coup et retombe en 0,25 s. C'est
+  // la couche qui se VOIT, celle qui fait que le mur bat avec la musique.
+  const float tb = (now - s_musBeatMs) / 1000.0f;
+  const float flash = (tb < 0.25f) ? (1.0f - tb / 0.25f) * 0.45f : 0.0f;
+
   for (uint16_t i = 0; i < s_count; i++) {
     const float h = s_ledH[i];
-    float k = (lvl - h) / 0.12f;
+
+    // Degrade continu : plein en bas, il s'eteint en approchant du niveau. Le
+    // bord fait 0,22 de haut - assez large pour qu'un plateau ou les pixels sont
+    // disperses montre un fondu, et non un escalier.
+    float k = (lvl - h) / 0.22f;
     if (k > 1.0f) k = 1.0f;
-    if (k > 0.0f) buf[i] = addSat(buf[i], scale(s_color, k * 0.55f));
-    // La crete, en trait fin au-dessus de la colonne.
+    if (k < 0.0f) k = 0.0f;
+    // Racine : l'oeil n'est pas lineaire, et sans elle le degrade parait ecrase
+    // en bas et absent en haut.
+    float v = sqrtf(k) * 0.62f;
+
+    // Crete : une bande large et lumineuse qui coiffe la colonne. Elle etait un
+    // trait de 0,035 - sur 75 pixels disperses, elle ne tombait sur aucun la
+    // moitie du temps et clignotait sans raison apparente.
     const float dpk = fabsf(h - pk);
-    if (dpk < 0.035f)
-      buf[i] = addSat(buf[i], scale(s_color, (1.0f - dpk / 0.035f) * 0.85f));
+    if (dpk < 0.09f) v += (1.0f - dpk / 0.09f) * 0.55f;
+
+    v += flash;
+    if (v > 1.0f) v = 1.0f;
+    if (v > 0.0f) buf[i] = addSat(buf[i], scale(s_color, v));
   }
 
-  // Battement : une bande qui quitte les flippers et monte. Elle depasse 1.0
-  // pour sortir par le haut au lieu de s'eteindre sur place.
-  const float tb = (now - s_musBeatMs) / 1000.0f;
-  if (tb < 0.6f) {
-    const Rgbw gold = { ARENA_GOLD_R, ARENA_GOLD_G, ARENA_GOLD_B, ARENA_GOLD_W };
-    const float front = tb * 2.1f;              // 0 -> 1.26 en 0,6 s
-    for (uint16_t i = 0; i < s_count; i++) {
-      const float d = fabsf(s_ledH[i] - front);
-      if (d < 0.14f)
-        buf[i] = addSat(buf[i], scale(gold, (1.0f - d / 0.14f) * (1.0f - tb / 0.6f)));
-    }
-  }
-
-  // Aigus : des etincelles, mais AU-DESSUS de la colonne des graves. Tirees au
-  // hasard sur toute la chaine elles annulaient la direction; cantonnees au
-  // sommet, elles se lisent comme l'ecume poussee par la colonne. On tire dans
-  // la zone libre, avec une garde : si les graves saturent, il n'y a plus de
-  // zone libre et on ne veut pas boucler indefiniment.
-  // Le seuil des aigus etait FIXE a 0,15. Mesure sur cette piece : les aigus
-  // plafonnent a 0,24 et tournent autour de 0,16 - le seuil tombait donc au
-  // milieu du signal, et les etincelles apparaissaient une fois sur deux au
-  // hasard. On suit la crete recente : la piste peut etre sourde ou brillante,
-  // le mur reagit pareil.
-  // Meme piege que le gain automatique, et introduit dans le meme commit : une
-  // decroissance par TRAME rend le seuil dependant de la cadence de rendu. Ici
-  // 2,3 s de demi-vie a 60 Hz devenaient 14 s a 10 Hz, et les etincelles
-  // restaient eteintes une demi-minute apres une cymbale.
+  // Aigus : le seuil etait FIXE a 0,15 alors que les aigus mesures plafonnent a
+  // 0,24 et tournent autour de 0,16 - il tombait au milieu du signal et les
+  // etincelles apparaissaient une fois sur deux au hasard. On suit la crete
+  // recente : une piste sourde ou brillante donne le meme rendu.
   static float tpk = 0.05f;
   tpk = max(s_musT, tpk * expf(-dt / 3.3f));
   const float trel = (tpk > 0.01f) ? (s_musT / tpk) : 0.0f;
 
-  const uint8_t decay = 22;
+  const uint8_t decay = 20;
   for (uint16_t i = 0; i < s_count; i++)
     s_spark[i] = (s_spark[i] > decay) ? s_spark[i] - decay : 0;
   if (trel > 0.55f) {
     const int n = 1 + (int)((trel - 0.55f) * 6.0f);
-    for (int k = 0; k < n; k++) {
-      for (int tries = 0; tries < 8; tries++) {
+    for (int k = 0; k < n; k++)
+      for (int essai = 0; essai < 8; essai++) {
         const uint16_t c = esp_random() % s_count;
         if (s_ledH[c] > lvl) { s_spark[c] = 255; break; }
       }
-    }
   }
   for (uint16_t i = 0; i < s_count; i++)
     if (s_spark[i]) buf[i] = addSat(buf[i], scale(s_color, s_spark[i] / 255.0f * 0.8f));
@@ -752,45 +741,53 @@ static void fxMusic(Rgbw* buf) {
 // not about the cable. Two waves at right angles: one climbing from the flippers
 // to the back panel, one sweeping across, plus a ripple leaving the middle.
 static void fxArenaGeo(Rgbw* buf) {
-  // Les vagues suivent le panneau Couleur.
+  // ⚠️ TOUS les pixels ondulent, y compris ceux qu'aucun insert ne place.
   //
-  // Elles etaient codees en dur en ambre et en or : seul le fond de 14 % suivait
-  // s_color, donc tourner les curseurs ne changeait rien de ce qu'on regarde et
-  // le mode passait pour casse - "wave mode colors don't work". Meme regle que
-  // sous l'attract de la ROM : blanc pur (r=g=b=0) = la teinte d'origine, une
-  // couleur = c'est elle qui passe. Rien ne change pour qui n'a jamais touche au
-  // panneau.
-  const bool tinted = (s_color.r | s_color.g | s_color.b) != 0;
-  const Rgbw amber = tinted ? s_color : Rgbw{ ARENA_AMBER_R, ARENA_AMBER_G, ARENA_AMBER_B, ARENA_AMBER_W };
-  const Rgbw gold  = tinted ? s_color : Rgbw{ ARENA_GOLD_R,  ARENA_GOLD_G,  ARENA_GOLD_B,  ARENA_GOLD_W  };
+  // Le code faisait `if (!arenapf::xy(i, x, y)) continue;` : sur ce mur, 23 des
+  // 75 pixels n'ont pas d'insert et restaient donc INERTES pendant que les 52
+  // autres ondulaient. Un tiers du mur fige au milieu du mouvement, ce qui se lit
+  // comme une zone allumee en permanence plutot que comme une vague - rapporte
+  // "wave have color and always glow issue".
+  //
+  // Un ruban est continu : un pixel sans insert est entre ses voisins qui en ont
+  // un, et sa position s'interpole. C'est deja ce que fait le mode Music.
+  refreshLedHeights();
 
-  // Le fond permanent devient reglable au lieu d'etre impose.
+  // La couleur suit le panneau EN ENTIER, canal blanc compris.
   //
-  // Il valait 14 % en dur : le mur ne s'eteignait jamais completement dans ce
-  // mode, sans qu'aucun reglage ne permette d'y toucher - "always a bit of light
-  // in background". Il suit maintenant le curseur Background, qui porte deja ce
-  // role sous l'attract. A zero, le fond est vraiment noir.
+  // Le test etait (r|g|b) != 0 : choisir du blanc pur - le reglage par defaut,
+  // et le seul que beaucoup toucheront - laissait la vague en ambre code en dur.
+  // Le curseur Blanc ne faisait donc rien de visible. Un canal a zero sur les
+  // quatre veut dire "n'y touche pas" ; des qu'un seul est pose, c'est la teinte
+  // choisie qui passe.
+  const bool tinted = (s_color.r | s_color.g | s_color.b | s_color.w) != 0;
+  const Rgbw teinte = tinted ? s_color
+                             : Rgbw{ ARENA_AMBER_R, ARENA_AMBER_G, ARENA_AMBER_B, ARENA_AMBER_W };
+  const Rgbw creteC = tinted ? s_color
+                             : Rgbw{ ARENA_GOLD_R,  ARENA_GOLD_G,  ARENA_GOLD_B,  ARENA_GOLD_W  };
+
+  // Fond permanent, regle par le curseur Background. A zero, c'est noir.
   fill(buf, scale(s_color, 0.20f * (float)s_gi / 255.0f));
 
-  const float up    = phase(1.0, 1.0);          // 0..1, climbing the playfield
-  const float ripT  = phase(1.0, 6.0) / 6.0f;   // ripple every 6 s
-  const float rip   = ripT * 1.15f;             // radius, overshoots so it leaves
+  const float up   = phase(1.0, 1.0);           // 0..1, monte le plateau
+  const float ripT = phase(1.0, 6.0) / 6.0f;    // une onde toutes les 6 s
+  const float rip  = ripT * 1.15f;              // rayon, deborde pour sortir
 
   for (uint16_t i = 0; i < s_count; i++) {
-    float x, y;
-    if (!arenapf::xy(i, x, y)) continue;        // pixel not placed: leave it on the wash
+    const float h = s_ledH[i], x = s_ledX[i];
 
-    // Wave climbing from the flippers (y=1) to the back panel (y=0).
-    float d = fabsf((1.0f - y) - up);
-    if (d > 0.5f) d = 1.0f - d;                 // wrap: the wave is continuous
-    buf[i] = addSat(buf[i], scale(amber, expf(-d * d * 90.0f)));
+    // Vague qui monte des flippers vers le fronton. Le profil est resserre
+    // (140 au lieu de 90) : la trainee d'avant laissait un fond lumineux entre
+    // deux passages, ce qui empechait le mur de s'eteindre vraiment.
+    float d = fabsf(h - up);
+    if (d > 0.5f) d = 1.0f - d;                 // enroulement : la vague est continue
+    buf[i] = addSat(buf[i], scale(teinte, expf(-d * d * 140.0f)));
 
-    // Ripple leaving the middle of the playfield.
-    const float dx = x - 0.5f, dy = y - 0.55f;
-    const float r  = sqrtf(dx * dx + dy * dy);
-    const float dr = fabsf(r - rip);
+    // Onde circulaire quittant le milieu du plateau.
+    const float dx = x - 0.5f, dy = (1.0f - h) - 0.55f;
+    const float dr = fabsf(sqrtf(dx * dx + dy * dy) - rip);
     if (dr < 0.12f)
-      buf[i] = addSat(buf[i], scale(gold, (1.0f - dr / 0.12f) * (1.0f - ripT) * 0.9f));
+      buf[i] = addSat(buf[i], scale(creteC, (1.0f - dr / 0.12f) * (1.0f - ripT) * 0.9f));
   }
 }
 
@@ -1081,6 +1078,60 @@ void setMode(Mode m) {
 }
 
 Mode mode() { return s_mode; }
+
+// --- Rotation entre les modes CHOISIS ---------------------------------------
+//
+// Le mur tourne tout seul entre les modes que le proprietaire a coches, en
+// tirant au sort a chaque changement. Trois choix :
+//
+//  - un MASQUE et non une liste : on coche ce qu'on veut voir passer, le reste
+//    n'apparait jamais. Personne ne veut voir "Wiring test" surgir un soir.
+//  - le TIRAGE evite de reprendre le mode courant tant qu'un autre est coche :
+//    sinon un masque a deux modes rejoue le meme une fois sur deux et la
+//    rotation a l'air en panne.
+//  - choisir un mode a la main SUSPEND la rotation. Un reglage qu'on subit est
+//    pire qu'un reglage absent : si on touche, c'est qu'on veut regarder.
+static bool     s_rotOn   = false;
+static uint16_t s_rotMask = 0;
+static uint16_t s_rotSec  = 60;
+static uint32_t s_rotAt   = 0;
+
+bool     rotate()      { return s_rotOn; }
+uint16_t rotateMask()  { return s_rotMask; }
+uint16_t rotateSec()   { return s_rotSec; }
+void setRotateMask(uint16_t m) { s_rotMask = m; markDirty(); }
+void setRotateSec(uint16_t s)  { s_rotSec = s < 5 ? 5 : (s > 3600 ? 3600 : s); markDirty(); }
+void setRotate(bool on) {
+  s_rotOn = on;
+  s_rotAt = millis();                 // le premier changement vient apres un tour plein
+  markDirty();
+}
+
+// Combien de modes sont coches, et lequel est le n-ieme.
+static uint8_t rotCount() {
+  uint8_t n = 0;
+  for (uint8_t m = 0; m < MODE_COUNT; m++) if (s_rotMask & (1u << m)) n++;
+  return n;
+}
+
+static void rotateTick() {
+  if (!s_rotOn) return;
+  const uint8_t n = rotCount();
+  if (n == 0) return;                 // rien de coche : la rotation ne fait rien
+  const uint32_t now = millis();
+  if (s_rotAt && now - s_rotAt < (uint32_t)s_rotSec * 1000UL) return;
+  s_rotAt = now;
+
+  // Tirage parmi les modes coches, en excluant le courant s'il en reste d'autres.
+  const bool excl = (n > 1) && (s_rotMask & (1u << s_mode));
+  const uint8_t cible = (uint8_t)(esp_random() % (excl ? (n - 1) : n));
+  uint8_t vu = 0;
+  for (uint8_t m = 0; m < MODE_COUNT; m++) {
+    if (!(s_rotMask & (1u << m))) continue;
+    if (excl && m == s_mode) continue;
+    if (vu++ == cible) { setMode((Mode)m); return; }
+  }
+}
 bool bootOn()          { return s_bootOn; }
 void setBootOn(bool b) { s_bootOn = b; markDirty(); }
 
@@ -1317,6 +1368,7 @@ void resetLook() {
   s_insBright = 255;
   s_champ = ARENA_CHAMP_NEUTRAL;
   s_frameHz = LED_FRAME_HZ;
+  s_rotOn = false; s_rotMask = 0; s_rotSec = 60;
   s_warm    = ARENA_WARM_DEFAULT;
   s_density = 110;
   s_inc     = true;
@@ -1363,6 +1415,9 @@ void save() {
   s_prefs.putUChar("insb", s_insBright);
   s_prefs.putUChar("champg", s_champ);
   s_prefs.putUChar("framehz", s_frameHz);
+  s_prefs.putUChar("roton",   s_rotOn ? 1 : 0);
+  s_prefs.putUShort("rotmask", s_rotMask);
+  s_prefs.putUShort("rotsec",  s_rotSec);
   s_prefs.putString("order", s_order);
   if (s_dirtyAt == dirtyAtEntry) s_dirtyAt = 0;
 }
@@ -1420,6 +1475,10 @@ void begin() {
   // demande.
   s_champ     = s_prefs.getUChar("champg", ARENA_CHAMP_NEUTRAL);
   s_frameHz   = s_prefs.getUChar("framehz", LED_FRAME_HZ);
+  s_rotOn     = s_prefs.getUChar("roton", 0) != 0;
+  s_rotMask   = s_prefs.getUShort("rotmask", 0);
+  s_rotSec    = s_prefs.getUShort("rotsec", 60);
+  if (s_rotSec < 5 || s_rotSec > 3600) s_rotSec = 60;
   if (s_frameHz < 1 || s_frameHz > 120) s_frameHz = LED_FRAME_HZ;
   String ord = s_prefs.getString("order", ARENA_ORDER_DEFAULT);
   strncpy(s_order, ord.c_str(), sizeof(s_order) - 1);
@@ -1482,6 +1541,7 @@ void tick() {
   if (now - s_lastFrame < (uint32_t)(1000 / (s_frameHz ? s_frameHz : 1))) return;
   s_lastFrame = now;
 
+  rotateTick();         // la rotation change de mode avant qu'on ne rende la trame
   applyPending();       // strip length changes land here, not in an HTTP handler
 
   uint32_t us = micros();

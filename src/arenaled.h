@@ -47,6 +47,14 @@ void        setBootOn(bool b);
 const char* modeName(Mode m);   // identifiant : NVS + API
 const char* modeLabel(Mode m);  // libelle client, libre de changer
 Mode        modeFromName(const char* s);   // MODE_COUNT if unknown
+
+// Rotation automatique entre les modes coches par le proprietaire.
+bool     rotate();
+uint16_t rotateMask();                     // un bit par Mode
+uint16_t rotateSec();                      // duree d'un mode, 5..3600 s
+void     setRotate(bool on);
+void     setRotateMask(uint16_t mask);
+void     setRotateSec(uint16_t sec);
 void        nextMode();                    // front-panel button: cycle usable modes
 
 void    setBrightness(uint8_t b);

@@ -451,6 +451,9 @@ static String stateJson() {
     if (LittleFS.exists("/attract.mp3")) { File f = LittleFS.open("/attract.mp3", "r"); sz = f.size(); f.close(); }
     j += ",\"snd\":" + String((uint32_t)sz); }
   j += ",\"framehz\":" + String(arenaled::frameHz());
+  j += ",\"rot\":"     + String(arenaled::rotate() ? 1 : 0);
+  j += ",\"rotmask\":" + String((uint32_t)arenaled::rotateMask());
+  j += ",\"rotsec\":"  + String((uint32_t)arenaled::rotateSec());
   j += ",\"musE\":" + String(arenaled::musEnergy(), 3);
   j += ",\"musB\":" + String(arenaled::musBass(), 3);
   j += ",\"musT\":" + String(arenaled::musTreble(), 3);
@@ -673,11 +676,20 @@ static void startServer() {
     if (r->hasParam("mode")) {
       arenaled::Mode m = arenaled::modeFromName(r->getParam("mode")->value().c_str());
       if (m == arenaled::MODE_COUNT) { r->send(400, "text/plain", "bad mode"); return; }
+      // Choisir un mode a la main SUSPEND la rotation. Un mur qui repart de
+      // lui-meme trente secondes apres qu'on a choisi quelque chose donne
+      // l'impression que le bouton n'a pas marche.
+      if (arenaled::rotate()) arenaled::setRotate(false);
       arenaled::setMode(m);
     }
     if (r->hasParam("bright")) arenaled::setBrightness(param8(r, "bright", arenaled::brightness()));
     if (r->hasParam("speed"))  arenaled::setSpeed(param8(r, "speed", arenaled::speed()));
     if (r->hasParam("framehz")) arenaled::setFrameHz(param8(r, "framehz", arenaled::frameHz()));
+    if (r->hasParam("rotmask")) arenaled::setRotateMask((uint16_t)r->getParam("rotmask")->value().toInt());
+    if (r->hasParam("rotsec"))  arenaled::setRotateSec((uint16_t)r->getParam("rotsec")->value().toInt());
+    // `rot` apres le masque : poser les deux d'un coup doit demarrer la rotation
+    // avec le masque qu'on vient d'envoyer, pas avec l'ancien.
+    if (r->hasParam("rot"))     arenaled::setRotate(r->getParam("rot")->value().toInt() != 0);
     if (r->hasParam("insb")) arenaled::setInsBright(param8(r, "insb", arenaled::insBright()));
     // Les deux etages permanents, traites ensemble parce que le verrou fait
     // dependre l'un de l'autre. Bouger les DEUX dans la meme requete est un
