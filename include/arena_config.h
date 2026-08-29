@@ -21,7 +21,13 @@
 #define ARENA_STA_SSID       ""
 #define ARENA_STA_PASS       ""
 #define ARENA_STA_TIMEOUT_MS 12000
-#define ARENA_AP_SSID        "Arena-LED"
+// ⚠️ Le point d'acces de secours ne porte PAS de nom fixe : arena_net.cpp diffuse
+// s_name, qui vaut par defaut "Playfield-<2 derniers octets de la MAC>". C'est
+// voulu - deux murs dans la meme maison ne se marchent pas dessus, et l'adresse
+// mDNS en decoule. Un #define ARENA_AP_SSID "Arena-LED" trainait ici sans etre
+// utilise nulle part, et les deux notices client l'ont recopie : le client
+// cherchait au deballage un reseau qui n'existe pas. Supprime plutot que corrige,
+// pour qu'il ne puisse plus induire personne en erreur.
 #define ARENA_AP_PASS        "pinball87"    // >= 8 chars
 
 // Puissance d emission WiFi, en quarts de dBm (esp_wifi_set_max_tx_power) :

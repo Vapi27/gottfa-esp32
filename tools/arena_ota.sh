@@ -102,7 +102,27 @@ Un autre serveur repond peut-etre sur $MYIP:$PORT." ;;
   [ "$TARGET" = "fs" ] && QS="$QS&target=fs"
   echo "cible: $([ "$TARGET" = fs ] && echo "interface web" || echo firmware) -> la carte telecharge depuis http://$MYIP:$PORT/fw.bin"
   RESP=$(curl -s -m 15 "http://$IP/api/otapull?$QS" || true)
-  case "$RESP" in
+  # ⚠️ Ne rien envoyer a une carte qui n'est pas STABLE.
+#
+# Enchainer deux envois - firmware puis systeme de fichiers - sans attendre que
+# le premier ait redemarre ET repris une adresse a mis un mur hors ligne. On
+# exige donc trois lectures d'etat consecutives reussies avant d'ecrire quoi que
+# ce soit dans une partition.
+echo "  verification que la carte est stable..."
+STABLE=0
+for _ in $(seq 1 30); do
+  if [ -n "$(state)" ]; then
+    STABLE=$((STABLE + 1))
+    [ "$STABLE" -ge 3 ] && break
+  else
+    STABLE=0
+  fi
+  sleep 2
+done
+[ "$STABLE" -ge 3 ] || die "la carte ne repond pas de facon stable - rien n'a ete envoye.
+Attends qu'elle soit revenue sur le reseau, ou coupe et rebranche son alimentation."
+
+case "$RESP" in
     *lance*) : ;;
     "")      die "aucune reponse de /api/otapull" ;;
     *)       die "refus de /api/otapull: $RESP
@@ -110,16 +130,41 @@ Firmware trop ancien pour le mode pull ? Utilise l'envoi pousse bride:
   ARENA_OTA_RATE=10k curl --limit-rate 10k -F update=@$IMG http://$IP/update" ;;
   esac
 
+# Le suivi ne doit JAMAIS faire tomber le script.
+#
+# Il lisait /api/state en supposant un objet JSON. Pendant un redemarrage la
+# carte peut rendre autre chose - une reponse tronquee, un entier, du vide - et
+# json.load() rendait alors un int : "AttributeError: 'int' object has no
+# attribute 'get'". Le script mourait AU MILIEU de l'envoi, sans dire ou il en
+# etait, et l'operateur enchainait un second envoi sur une carte en train de
+# redemarrer. C'est exactement ce qui a mis un mur hors ligne le 2026-08-27.
+#
+# Un affichage de progression n'est pas une raison d'echouer : tout ce qui n'est
+# pas un objet exploitable est ignore, et l'erreur ECHEC reste detectee.
+ota_field() {                                  # $1 = champ, lit $S, "" si illisible
+  printf '%s' "$S" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    d = None
+print(d.get(sys.argv[1], "") if isinstance(d, dict) else "")' "$1" 2>/dev/null || true
+}
+
 for _ in $(seq 1 60); do
   sleep 2
   S=$(state) || true
-    [ -n "$S" ] || break                       # muet = redemarrage, c'est la suite
-    printf '%s' "$S" | python3 -c 'import json,sys
-d=json.load(sys.stdin); t=d.get("otatot",0); f=d.get("otadone",0)
-print("  %-16s %d%%" % (d.get("otast",""), (100*f//t) if t else 0))'
-    case "$(printf '%s' "$S" | python3 -c 'import json,sys;print(json.load(sys.stdin).get("otast",""))')" in
-      echec*) die "la carte rapporte: $(printf '%s' "$S" | python3 -c 'import json,sys;print(json.load(sys.stdin)["otast"])')" ;;
-    esac
+  [ -n "$S" ] || break                         # muet = redemarrage, c'est la suite
+  ST=$(ota_field otast)
+  TOT=$(ota_field otatot); DONE=$(ota_field otadone)
+  if [ -n "$ST" ]; then
+    PCT=0
+    [ -n "$TOT" ] && [ "$TOT" -gt 0 ] 2>/dev/null && PCT=$(( 100 * ${DONE:-0} / TOT ))
+    printf '  %-16s %d%%\n' "$ST" "$PCT"
+  fi
+  case "$ST" in
+    echec*) die "la carte rapporte: $ST" ;;
+  esac
 done
 
 # --- verdict ---------------------------------------------------------------

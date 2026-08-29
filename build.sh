@@ -29,7 +29,16 @@
 set -euo pipefail
 
 cd "$(dirname "$0")"
+# ⚠️ DEUX produits sortent de ce depot, et ce script n'en construisait qu'un.
+#
+#   esp32s3        le compagnon GottFA (carte dans le flipper)
+#   arenaled_s3usb LE MUR, celui qui est vendu
+#
+# ENV_MAIN valait esp32s3 : aucune commande du depot ne produisait le firmware du
+# mur, alors que son interface invite le client a telecharger un .bin. Les deux
+# sont desormais construits, et dist/ les distingue par leur nom.
 ENV_MAIN=esp32s3
+ENV_WALL=arenaled_s3usb
 BUILD=.pio/build/$ENV_MAIN
 DIST=dist
 ALL=0
@@ -79,6 +88,12 @@ echo "==> firmware  ($ENV_MAIN)"
 pio run -e $ENV_MAIN
 echo "==> filesystem image  (data/ -> littlefs)"
 pio run -e $ENV_MAIN -t buildfs
+
+echo "==> firmware du mur ($ENV_WALL)"
+pio run -e "$ENV_WALL"
+pio run -e "$ENV_WALL" -t buildfs
+cp ".pio/build/$ENV_WALL/firmware.bin" "$DIST/mur-firmware.bin"
+cp ".pio/build/$ENV_WALL/littlefs.bin" "$DIST/mur-interface.bin"
 
 if [ "$ALL" = 1 ]; then
   echo "==> compile-check the EXPERIMENTAL esp32c3 target (not shipped — see platformio.ini)"

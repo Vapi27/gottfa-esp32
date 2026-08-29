@@ -1,5 +1,29 @@
 // Implements the RMT peripheral on Espressif SoCs
 // Copyright (c) 2020 Lucian Copeland for Adafruit Industries
+//
+// ---------------------------------------------------------------------------
+// FICHIER MODIFIE — mention exigee par la LGPL-3 (section 4d / GPL section 5a).
+//
+// Copie derivee d'Adafruit_NeoPixel. Ce fichier DIFFERE de l'amont. Modifications
+// apportees pour ce produit, toutes datees et motivees dans les commentaires du
+// code aux endroits concernes :
+//
+//   2026-08  espShow() rendait la main sur le chemin d'erreur de rmtInit() sans
+//            liberer show_mutex : une panne ponctuelle devenait un blocage
+//            permanent. Le mutex est desormais rendu.
+//   2026-08  Compteurs de diagnostic ajoutes (espShowRmtFail, espShowFrames,
+//            espShowLockMiss, espShowBusType, espShowInstalls, espShowNoIram),
+//            lus par l'interface de la carte.
+//   2026-08  Le canal RMT est conserve d'une trame a l'autre au lieu d'etre
+//            installe puis desinstalle a chaque trame.
+//   2026-08  rmt_driver_install() demande ESP_INTR_FLAG_IRAM, avec repli sans le
+//            drapeau, pour que le reapprovisionnement survive aux lectures flash.
+//   2026-08  mem_block_num porte de 1 a 2.
+//
+// L'original non modifie reste disponible chez Adafruit :
+//   https://github.com/adafruit/Adafruit_NeoPixel
+// Licence d'origine conservee : voir COPYING dans ce dossier (LGPL-3.0).
+// ---------------------------------------------------------------------------
 
 /* Uses code from Espressif RGB LED Strip demo and drivers
  * Copyright 2015-2020 Espressif Systems (Shanghai) PTE LTD

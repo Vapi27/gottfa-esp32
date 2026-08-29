@@ -28,8 +28,13 @@ Une carte sous chaque insert à éclairer, LED vers le plastique.
 
 Branchez avec ~10 cartes raccordées, pas tout d'un coup :
 
-1. WiFi **`Arena-LED`** (mot de passe **`pinball87`**) → **`http://192.168.4.1`**
-   → renseignez votre WiFi. Ensuite : **`http://arena.local/`**
+1. Cherchez sur votre téléphone un réseau WiFi dont le nom **commence par
+   `Playfield-`** — les quatre caractères qui suivent sont propres à votre carte,
+   ils viennent de son numéro de série. Mot de passe **`pinball87`**.
+   Connectez-vous, ouvrez **`http://192.168.4.1`**, renseignez votre WiFi.
+   Ensuite le plateau est joignable à **`http://playfield-XXXX.local/`**, où
+   `XXXX` est ce même suffixe. Si vous renommez le mur, l'adresse suit son nom :
+   « Alien Poker » donne `http://alien-poker.local/`.
 2. Mode **`test`** : chaque LED cycle rouge → vert → bleu → blanc, avec un
    pixel blanc qui parcourt la chaîne. Là où il s'arrête, le raccord suivant
    est en cause.
@@ -69,6 +74,8 @@ rejouer les vraies séquences de la machine.
 
 - **Une LED reste noire et tout ce qui suit aussi** : c'est la première LED
   noire qui est en cause (alimentation ou raccord), pas les suivantes.
-- **Page introuvable** : le plateau rouvre le WiFi `Arena-LED` de lui-même
-  quand il ne trouve plus votre réseau → refaites l'étape 3.1.
+- **Page introuvable** : le plateau rouvre son propre WiFi `Playfield-…` de
+  lui-même quand il ne retrouve plus votre réseau → refaites l'étape 3.1.
+  L'adresse en `.local` dépend du nom du mur ; en cas de doute, passez par
+  l'adresse IP que votre box attribue au plateau.
 - **Support** : formulaire de contact sur **pinballs.store**
