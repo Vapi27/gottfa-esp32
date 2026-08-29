@@ -96,7 +96,13 @@ header h1 img{filter:saturate(.9)}
     <span id="s-lim" class="warn"></span>
   </div>
   </div>
-  <button id="pwr" onclick="togglePower()" title="on / off" aria-label="on / off">&#9211;</button>
+  <!-- ⚠️ PAS de caractere pour ce symbole. U+23FB (&#9211;) est dans le bloc
+       "Miscellaneous Technical" et les polices par defaut d'Android ne le
+       contiennent pas : le bouton sortait VIDE sur telephone Android, sans
+       rien pour dire ce qu'il fait. Un dessin vectoriel ne depend d'aucune
+       police et s'affiche partout pareil. currentColor pour qu'il suive la
+       couleur du bouton comme le faisait le caractere. -->
+  <button id="pwr" onclick="togglePower()" title="on / off" aria-label="on / off"><svg viewBox="0 0 24 24" width="1.1em" height="1.1em" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" focusable="false" style="vertical-align:-.15em"><path d="M12 3.5v8"/><path d="M7.1 6.3a7 7 0 1 0 9.8 0"/></svg></button>
 </header>
 
 <main>
@@ -375,6 +381,16 @@ header h1 img{filter:saturate(.9)}
     <div class="modes">
       <button onclick="wifiScan()">Scan from the wall</button>
     </div>
+
+    <h3 style="margin:16px 0 6px;font-size:.95em;opacity:.75">Password</h3>
+    <p class="hint" id="pw-say" style="margin-top:0"></p>
+    <div class="row"><label>Password</label>
+      <input type="password" id="pw" placeholder="leave empty to remove" autocomplete="new-password">
+      <button onclick="pwSet()">Apply</button></div>
+    <p class="hint">Anyone on your network can otherwise change this wall, update its firmware
+       or wipe it. Setting a password closes <b>everything</b>, including this page. Forgotten
+       it? Hold the <b>three buttons on the board for five seconds</b> &mdash; the wall reddens
+       as you hold, blinks three times, and comes back factory-fresh.</p>
     <div id="nw-list" class="hint" style="margin-top:8px"></div>
 
     <!-- Le formulaire de jonction. saveWifi() lisait deja #ssid et #pass, mais
@@ -669,6 +685,17 @@ function sndUpload(inp) {
     .catch(e => toast('echec : ' + e.message));
   inp.value = '';
 }
+function pwSet() {
+  const v = $('pw').value;
+  if (v.length && v.length < 4) { toast('4 characters minimum'); return; }
+  if (!v.length && !confirm('Remove the password? Anyone on your network will be able to change this wall.')) return;
+  // La requete passe par le garde comme les autres : si un mot de passe est deja
+  // pose, le navigateur le redemande ici meme - ce qui est exactement voulu.
+  fetch('/api/pass?p=' + encodeURIComponent(v))
+    .then(r => r.text()).then(t => { toast(t); $('pw').value = ''; poll(); })
+    .catch(e => toast('echec : ' + e.message));
+}
+
 function sndDel() {
   fetch('/api/sound', { method: 'DELETE' }).then(r => r.text()).then(t => {
     if (sndAudio) { sndAudio.pause(); sndAudio = null; }
@@ -846,6 +873,12 @@ function render(s) {
     if (e) e.textContent = 'max ' + s.budgetmax + ' mA (' + (s.limiter || 'limiteur') + ')';
   }
   sndUi();
+  // Un mur protege doit pouvoir le DIRE : sinon il est indiscernable d'un mur
+  // ouvert, et le proprietaire ne sait jamais ou il en est.
+  const pws = $('pw-say');
+  if (pws) pws.innerHTML = s.locked
+    ? '&#128274; <b>Protected.</b> Your browser asks once per session &mdash; user <b>pinball</b>.'
+    : '&#128275; <b>Open.</b> Anyone on this network can change the wall.';
   showRelevant(s);
   if ($('nw-ssid')) $('nw-ssid').textContent = s.net === 'Matter' ? (s.ip || '–') : (s.net || '–');
   if ($('nw-fail')) {

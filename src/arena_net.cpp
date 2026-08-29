@@ -90,6 +90,30 @@ static void validateImageWhenHealthy() {
 // Identite de la carte. La MAC est gravee en usine, donc unique sans reglage ni
 // numero de serie a gerer : deux murs sortis de la meme image ne peuvent pas se
 // confondre. Le proprietaire peut ensuite mettre "Volcano" ou "Arena".
+// --- Mot de passe optionnel ------------------------------------------------
+//
+// Il n'y avait AUCUNE authentification sur aucune route : n'importe qui sur le
+// reseau du client pouvait ecrire un firmware, effacer le mur ou changer son
+// WiFi. Sur un objet decoratif chez soi c'est discutable ; sur un produit vendu,
+// ca ne l'est pas.
+//
+// Trois choix assumes :
+//
+//  - VIDE PAR DEFAUT. Un mur qui sort du carton doit pouvoir etre configure sans
+//    connaitre un mot de passe qui ne serait ecrit nulle part. La protection est
+//    quelque chose que le client ACTIVE, pas un obstacle qu'il subit.
+//  - Quand il est pose, il protege TOUT - y compris la route qui permet de le
+//    changer, sans quoi il ne protegerait rien.
+//  - Le recours en cas d'oubli existe et ne passe pas par nous : les trois
+//    boutons de facade maintenus cinq secondes remettent la carte a zero, ecran
+//    ou pas (voir arena_oled.cpp). C'est ce qui rend acceptable de tout fermer.
+//
+// Un middleware plutot que 41 appels a setAuthentication() : un seul endroit a
+// lire pour savoir ce qui est protege, et le mot de passe peut changer a chaud
+// sans redemarrer.
+static String         s_webPass;
+static const char*    ARENA_WEB_USER = "pinball";
+
 static String         s_name;
 static String         s_mac;
 
@@ -404,15 +428,6 @@ static String stateJson() {
     if (LittleFS.exists("/attract.mp3")) { File f = LittleFS.open("/attract.mp3", "r"); sz = f.size(); f.close(); }
     j += ",\"snd\":" + String((uint32_t)sz); }
   j += ",\"framehz\":" + String(arenaled::frameHz());
-  // Matter est compile conditionnellement. La page affichait sa section - QR
-  // d appairage compris - meme quand il ne l est pas : elle promettait au
-  // client une integration Apple Home / Google Home / Alexa qui ne pouvait pas
-  // fonctionner. Elle sait maintenant si la carte le porte vraiment.
-#ifdef ARENA_MATTER
-  j += ",\"matter\":1";
-#else
-  j += ",\"matter\":0";
-#endif
   j += ",\"musE\":" + String(arenaled::musEnergy(), 3);
   j += ",\"musB\":" + String(arenaled::musBass(), 3);
   j += ",\"musT\":" + String(arenaled::musTreble(), 3);
@@ -571,6 +586,9 @@ static String stateJson() {
 #else
   j += ",\"matter\":0";
 #endif
+  // Protection par mot de passe : la page doit pouvoir le DIRE, sinon un mur
+  // protege est indiscernable d'un mur ouvert.
+  j += ",\"locked\":" + String(s_webPass.length() ? 1 : 0);
   j += ",\"up\":"     + String(millis() / 1000);
   j += ",\"heap\":"   + String(ESP.getFreeHeap());
   j += "}";
@@ -945,6 +963,19 @@ static void startServer() {
       if (up) up.write(data, len);
       if (up && index + len >= total) { up.close(); Serial.println("[son] enregistre"); }
     });
+
+  // Poser, changer ou retirer le mot de passe. Protegee comme le reste : une fois
+  // pose, seul qui le connait peut le changer - ou les trois boutons de facade.
+  s_server.on("/api/pass", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("p")) { r->send(400, "text/plain", "p= requis (vide = desactive)"); return; }
+    const String p = r->getParam("p")->value();
+    if (p.length() && p.length() < 4) { r->send(400, "text/plain", "4 caracteres minimum"); return; }
+    s_webPass = p;
+    s_prefs.putString("webpass", p);
+    Serial.printf("[net] mot de passe %s\n", p.length() ? "pose" : "retire");
+    r->send(200, "text/plain", p.length() ? "protege - reconnecte-toi avec l identifiant pinball"
+                                          : "protection retiree");
+  });
 
   s_server.on("/api/sound", HTTP_DELETE, [](AsyncWebServerRequest* r) {
     LittleFS.remove("/attract.mp3");
@@ -1597,6 +1628,14 @@ static void startServer() {
       }
     });
 
+  // Le garde, pose AVANT tout le reste : il vaut pour chaque route, y compris
+  // les fichiers statiques et celles qu'on ajoutera demain.
+  s_server.addMiddleware([](AsyncWebServerRequest* r, ArMiddlewareNext next) {
+    if (!s_webPass.length()) { next(); return; }          // protection desactivee
+    if (r->authenticate(ARENA_WEB_USER, s_webPass.c_str())) { next(); return; }
+    r->requestAuthentication(AsyncAuthType::AUTH_BASIC, "Pinball Playfield Wall");
+  });
+
   s_server.serveStatic("/", LittleFS, "/");
   s_server.onNotFound([](AsyncWebServerRequest* r) { r->send(404, "text/plain", "404"); });
   s_server.begin();
@@ -1667,6 +1706,7 @@ void begin() {
                            m[0], m[1], m[2], m[3], m[4], m[5]);
     s_mac  = mac;
     s_name = s_prefs.getString("name", "");
+    s_webPass = s_prefs.getString("webpass", "");
     if (!s_name.length()) s_name = String("Playfield-") + sfx;
     Serial.printf("[net] mur '%s' (%s)\n", s_name.c_str(), s_mac.c_str());
   }
