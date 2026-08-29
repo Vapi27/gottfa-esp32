@@ -21,6 +21,13 @@
 #define ARENA_STA_SSID       ""
 #define ARENA_STA_PASS       ""
 #define ARENA_STA_TIMEOUT_MS 12000
+// Intervalle entre deux tentatives d'association tant que le reseau n'est pas
+// retrouve. Le budget de 12 s ci-dessus n'est PAS une decision definitive : il
+// borne la premiere tentative pour que le demarrage ne s'eternise pas, et le
+// point d'acces de secours monte ensuite - mais la station reste vivante et
+// reessaie. Trente secondes est ce que fait deja wifiprov.cpp pour le meme
+// probleme, et c'est assez lache pour ne pas encombrer la radio.
+#define ARENA_STA_RETRY_MS   30000
 // ⚠️ Le point d'acces de secours ne porte PAS de nom fixe : arena_net.cpp diffuse
 // s_name, qui vaut par defaut "Playfield-<2 derniers octets de la MAC>". C'est
 // voulu - deux murs dans la meme maison ne se marchent pas dessus, et l'adresse

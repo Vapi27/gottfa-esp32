@@ -111,6 +111,13 @@ static void validateImageWhenHealthy() {
 // Un middleware plutot que 41 appels a setAuthentication() : un seul endroit a
 // lire pour savoir ce qui est protege, et le mot de passe peut changer a chaud
 // sans redemarrer.
+// Reprise de liaison. Tant qu'on est retombe en point d'acces avec un reseau
+// enregistre, on re-arme l'association periodiquement : une box plus lente que la
+// carte au demarrage ne doit pas laisser le mur hors du reseau pour de bon.
+static String         s_staSsid;
+static String         s_staPass;
+static uint32_t       s_lastRetry = 0;
+
 static String         s_webPass;
 static const char*    ARENA_WEB_USER = "pinball";
 
@@ -187,6 +194,18 @@ static bool          s_pullFs = false;   // application ou systeme de fichiers
 static String        s_staReason  = "";
 
 static volatile bool s_scanWanted = false;
+// ⚠️ DEUX drapeaux, et ce n'est pas une redondance.
+//
+// s_scanWanted dit "on m'a DEMANDE un balayage" et retombe des que la boucle le
+// prend en charge - donc AU DEBUT du balayage, alors que WiFi.scanNetworks()
+// bloque encore 2 a 5 s et que s_scanJson porte toujours l'ancienne liste. La
+// page, qui interroge jusqu'a ce que "busy" retombe, se declarait donc satisfaite
+// par les resultats de la campagne PRECEDENTE : au deuxieme balayage d'une meme
+// session, elle affichait l'ancienne liste en croyant afficher la nouvelle.
+//
+// s_scanBusy dit "un balayage est EN COURS" et ne retombe qu'une fois s_scanJson
+// reecrit. C'est lui que la page doit lire.
+static volatile bool s_scanBusy   = false;
 static String        s_scanJson   = "[]";
 // Pourquoi un balayage n'a rien rendu. Une liste vide est ambigue - refus du
 // pilote, ou vraiment aucun reseau - et les deux se soignent differemment.
@@ -1522,7 +1541,7 @@ static void startServer() {
       String j = "{\"fail\":\"" + s_staReason + "\"" +
                  ",\"scanErr\":\"" + s_scanErr + "\"" +
                  ",\"age\":" + String(s_scanAt ? (millis() - s_scanAt) / 1000 : 9999) +
-                 ",\"busy\":" + String(s_scanWanted ? "true" : "false") +
+                 ",\"busy\":" + String((s_scanWanted || s_scanBusy) ? "true" : "false") +
                  ",\"scanN\":" + String((int)s_scanN) +
                  ",\"scanGot\":" + String((int)s_scanGot) +
                  ",\"rssi\":" + String(apInfoOk ? (int)apInfo.rssi : 0) +
@@ -1718,6 +1737,7 @@ void begin() {
   }
   String ssid = s_prefs.getString("ssid", ARENA_STA_SSID);
   String pass = s_prefs.getString("pass", ARENA_STA_PASS);
+  s_staSsid = ssid; s_staPass = pass;    // retenus pour la reprise, voir loop()
 
 #ifdef ARENA_MATTER
   // Matter owns WiFi: commissioning stores the credentials and CHIP drives
@@ -1762,7 +1782,25 @@ void begin() {
     s_ip = WiFi.localIP().toString();
     Serial.printf("[net] STA OK ip=%s\n", s_ip.c_str());
   } else {
-    WiFi.mode(WIFI_AP);
+    // ⚠️ WIFI_AP_STA, PAS WIFI_AP : la station doit RESTER VIVANTE.
+    //
+    // Le repli passait en point d'acces SEUL, ce qui detruit l'interface station.
+    // Combine a l'absence totale de reprise - un seul WiFi.begin() dans tout le
+    // firmware, aucun setAutoReconnect - la carte restait en point d'acces
+    // JUSQU'A UNE COUPURE DE COURANT, meme quand la box etait revenue depuis une
+    // heure. C'est exactement ce qui est arrive le 2026-08-27.
+    //
+    // Le budget de 12 s couvre l'association ET le bail DHCP. Apres une coupure
+    // de courant, box et mur redemarrent ensemble : le mur a fini son demarrage
+    // en trois secondes, une box met quarante a quatre-vingt-dix secondes a
+    // servir du DHCP en 2,4 GHz. Le mur perdait cette course a chaque fois.
+    //
+    // src/wifiprov.cpp, dans CE MEME DEPOT et pour le meme probleme, fait les deux
+    // moities qui manquaient ici : WIFI_AP_STA quand un SSID est enregistre, et
+    // une relance periodique "auto-rejoin when the home network comes back".
+    // WIFI_SETUP.md le promet d'ailleurs au client : "La carte reessaie toute
+    // seule". Le mur ne tenait pas cette promesse.
+    WiFi.mode(ssid.length() ? WIFI_AP_STA : WIFI_AP);
     WiFi.softAP(s_name.c_str(), ARENA_AP_PASS);
     s_mode = "SoftAP";
     s_ip = WiFi.softAPIP().toString();
@@ -1834,6 +1872,37 @@ static void statusTick() {
 }
 
 void loop() {
+  // --- Reprise de liaison ---------------------------------------------------
+  //
+  // Il n'y avait AUCUNE reprise : un seul WiFi.begin() dans tout le firmware, et
+  // rien dans cette boucle pour retenter. Une carte retombee en point d'acces y
+  // restait jusqu'a une coupure de courant.
+  //
+  // On re-arme donc l'association tant qu'on n'a pas d'adresse, et on bascule
+  // proprement quand elle arrive : mode, adresse et mDNS suivent. Sans cette
+  // derniere partie, le mur se rassocierait en silence tout en continuant
+  // d'annoncer SoftAP et 192.168.4.1 - vrai sur le fil, faux a l'ecran.
+  if (s_mode != "STA" && s_staSsid.length()) {
+    const uint32_t now = millis();
+    if (WiFi.status() == WL_CONNECTED) {
+      s_mode = "STA";
+      s_ip = WiFi.localIP().toString();
+      s_staReason = "";
+      Serial.printf("[net] reseau retrouve, ip=%s\n", s_ip.c_str());
+      MDNS.end();
+      String h = hostify(s_name);
+      if (MDNS.begin(h.c_str())) {
+        MDNS.addService("http", "tcp", 80);
+        MDNS.addServiceTxt("http", "tcp", "wall", s_name.c_str());
+      }
+    } else if (now - s_lastRetry > ARENA_STA_RETRY_MS) {
+      s_lastRetry = now;
+      if (WiFi.getMode() == WIFI_AP) WiFi.mode(WIFI_AP_STA);   // ne jamais couper l'AP
+      WiFi.begin(s_staSsid.c_str(), s_staPass.c_str());
+      Serial.printf("[net] nouvelle tentative sur '%s'\n", s_staSsid.c_str());
+    }
+  }
+
   statusTick();
   validateImageWhenHealthy();
 
@@ -1849,6 +1918,7 @@ void loop() {
   // dans un handler HTTP.
   if (s_scanWanted) {
     s_scanWanted = false;
+    s_scanBusy   = true;          // ne retombera qu'une fois s_scanJson reecrit
     // API IDF, pas l'objet Arduino WiFi : sous Matter c'est CHIP qui possede
     // esp_wifi et arenanet::begin() sort avant tout WiFi.mode(), donc le
     // wrapper Arduino n'a aucun etat - il rend 0 reseau, RSSI 0, SSID vide.
@@ -1952,6 +2022,7 @@ void loop() {
     j += "]";
     s_scanJson = j;
     s_scanAt = millis();
+    s_scanBusy = false;           // maintenant seulement le resultat est le bon
     Serial.printf("[net] balayage : %u vus, %u retenus\n",
                   (unsigned)s_scanN, (unsigned)s_scanGot);
     if (scanErr != ESP_OK) s_scanJson = "[]";
