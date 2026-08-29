@@ -35,6 +35,18 @@ cd "$(dirname "$0")/.."
 VPX="${1:?usage: tools/mkgame.sh <table.vpx> <pinmame_name> [seconds]}"
 GAME="${2:?usage: tools/mkgame.sh <table.vpx> <pinmame_name> [seconds]}"
 SECS="${3:-300}"
+
+# Le pack sort dans packs/<jeu>/, PAS dans le systeme de fichiers du mur.
+#
+# Il ecrivait dans data/, et finissait en disant de reconstruire l'image de
+# fichiers puis de la televerser. Deux raisons pour lesquelles ce n'est plus la
+# bonne methode : data/ appartient a l'autre produit du depot depuis la
+# separation du 2026-08-27, et surtout un pack se charge DEPUIS LA PAGE
+# (/api/game), qui le valide avant de l'installer. Reconstruire une image de
+# fichiers pour changer de machine demandait un PC et effacait le travail du
+# proprietaire.
+OUT="packs/$GAME"
+mkdir -p "$OUT"
 CFG="tools/games/$GAME.json"
 PM="${PINMAME_DIR:-../gottfa-upstream/lisy_5_28}"
 
@@ -42,10 +54,10 @@ say() { printf '\n\033[1;33m== %s\033[0m\n' "$*"; }
 
 say "1/3 inserts <- $VPX"
 if [ -f "$CFG" ]; then
-  python3 tools/vpx_inserts.py "$VPX" --config "$CFG" > data/arena_pf.json
+  python3 tools/vpx_inserts.py "$VPX" --config "$CFG" > "$OUT/plateau.json"
 else
   echo "   (no $CFG - raw VP labels, no functions; create one after checking the real playfield)"
-  python3 tools/vpx_inserts.py "$VPX" > data/arena_pf.json
+  python3 tools/vpx_inserts.py "$VPX" > "$OUT/plateau.json"
 fi
 
 say "2/3 attract <- ROM '$GAME' ($SECS emulated seconds)"
@@ -57,6 +69,19 @@ fi
 tools/capture_attract "$GAME" "$SECS" > "/tmp/${GAME}_raw.json"
 
 say "3/3 pack"
-python3 tools/pack_attract.py "/tmp/${GAME}_raw.json" -o data/arena_attract.bin
+python3 tools/pack_attract.py "/tmp/${GAME}_raw.json" -o "$OUT/attract.bin"
 
-say "done - now:  pio run -e arenaled_d1mini32 -t buildfs   then OTA ?target=fs"
+say "pack pret : $OUT"
+ls -l "$OUT" | tail -n +2 | awk '{printf "   %-16s %8d octets\n", $NF, $5}'
+cat <<EOT
+
+Pour l'installer sur un mur, DEPUIS SA PAGE, sans cable ni PC :
+  section « Which machine » -> charger $OUT/plateau.json puis $OUT/attract.bin
+
+La carte verifie les deux avant de les installer : un plan doit contenir un
+tableau « inserts » non vide, un attract un en-tete coherent. Un fichier douteux
+est refuse, jamais installe a moitie.
+
+Pour le partager sur le forum, mettez les deux fichiers dans une archive au nom
+du jeu et de la revision de ROM, par exemple $GAME.zip
+EOT

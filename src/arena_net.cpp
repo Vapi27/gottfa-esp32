@@ -191,6 +191,10 @@ static String        s_scanJson   = "[]";
 // Pourquoi un balayage n'a rien rendu. Une liste vide est ambigue - refus du
 // pilote, ou vraiment aucun reseau - et les deux se soignent differemment.
 static String        s_scanErr    = "";
+// Compte BRUT de reseaux vus par le pilote. Sans lui, "zero reseau" et "zero
+// reseau retenu apres filtrage" sont indiscernables depuis la page.
+static uint16_t      s_scanN      = 0;
+static uint16_t      s_scanGot    = 0;   // nombre REELLEMENT ecrit dans le tampon
 
 // Un ecran noir et une carte qui redemarre se ressemblent de l'exterieur. La
 // difference se lit ici : le compteur monte a chaque demarrage, et la cause du
@@ -1519,6 +1523,8 @@ static void startServer() {
                  ",\"scanErr\":\"" + s_scanErr + "\"" +
                  ",\"age\":" + String(s_scanAt ? (millis() - s_scanAt) / 1000 : 9999) +
                  ",\"busy\":" + String(s_scanWanted ? "true" : "false") +
+                 ",\"scanN\":" + String((int)s_scanN) +
+                 ",\"scanGot\":" + String((int)s_scanGot) +
                  ",\"rssi\":" + String(apInfoOk ? (int)apInfo.rssi : 0) +
                  ",\"ssid\":\"" + String(apInfoOk ? (const char*)apInfo.ssid : "") + "\"" +
                  ",\"nets\":" + s_scanJson + "}";
@@ -1873,22 +1879,29 @@ void loop() {
       esp_wifi_get_mode(&wm);
       Serial.printf("[net] balayage : AP -> mode %d (interface station requise)\n", (int)wm);
     }
+    String j = "[";
+    s_scanErr = "";
+    s_scanN = s_scanGot = 0;
+
+#ifdef ARENA_MATTER
+    // Sous Matter, CHIP possede esp_wifi et le wrapper Arduino n'a aucun etat :
+    // il faut passer par l'IDF.
     wifi_scan_config_t cfg = {};
     cfg.show_hidden = false;
-    String j = "[";
     const esp_err_t scanErr = esp_wifi_scan_start(&cfg, true);
-    s_scanErr = "";
     if (scanErr != ESP_OK) {
       s_scanErr = String(esp_err_to_name(scanErr)) + " (mode " + String((int)wm) + ")";
-      Serial.printf("[net] balayage refuse : %s\n", s_scanErr.c_str());
-    }
-    if (scanErr == ESP_OK) {
+    } else {
       uint16_t n = 0;
       esp_wifi_scan_get_ap_num(&n);
+      s_scanN = n;
       if (n > 20) n = 20;
       if (n) {
         wifi_ap_record_t* ap = (wifi_ap_record_t*)calloc(n, sizeof(wifi_ap_record_t));
-        if (ap && esp_wifi_scan_get_ap_records(&n, ap) == ESP_OK) {
+        const esp_err_t recErr = ap ? esp_wifi_scan_get_ap_records(&n, ap) : ESP_ERR_NO_MEM;
+        s_scanGot = n;
+        if (recErr != ESP_OK) s_scanErr = String("records: ") + esp_err_to_name(recErr);
+        if (recErr == ESP_OK)
           for (uint16_t i = 0; i < n; i++) {
             if (i) j += ',';
             j += "{\"s\":\"" + String((const char*)ap[i].ssid) +
@@ -1896,21 +1909,51 @@ void loop() {
                  ",\"c\":" + String((int)ap[i].primary) +
                  ",\"e\":" + String(ap[i].authmode == WIFI_AUTH_OPEN ? 0 : 1) + "}";
           }
-        }
         free(ap);
       }
     }
+#else
+    // ⚠️ HORS MATTER, C'EST LE WRAPPER ARDUINO QUI POSSEDE LA RADIO - et le
+    // balayage doit passer par lui.
+    //
+    // Le code appelait esp_wifi_scan_start() puis esp_wifi_scan_get_ap_records()
+    // directement. Mesure sur la carte, connectee a son reseau : le pilote voyait
+    // 6 reseaux (esp_wifi_scan_get_ap_num), la recuperation rendait ESP_OK... et
+    // ecrivait ZERO enregistrement. Ni erreur, ni liste : indiscernable d'un
+    // endroit sans reseau, et le proprietaire concluait que le balayage etait
+    // casse une fois la carte connectee.
+    //
+    // La raison : le gestionnaire d'evenement du wrapper Arduino recupere les
+    // resultats des qu'ils arrivent, ce qui LIBERE la liste interne. Notre appel
+    // passait apres et ne trouvait plus rien. Le commentaire du mode APSTA
+    // ci-dessus disait deja qui possede quoi ; il fallait en tirer la meme
+    // conclusion ici.
+    //
+    // WiFi.scanNetworks() bloque 2 a 5 s - c'est pour cela que tout ce bloc vit
+    // dans la boucle et non dans un gestionnaire HTTP.
+    const int16_t got = WiFi.scanNetworks(false /* bloquant */, false /* pas de caches */);
+    esp_err_t scanErr = ESP_OK;
+    if (got < 0) {
+      scanErr = ESP_FAIL;
+      s_scanErr = String("scanNetworks: ") + String((int)got);
+    } else {
+      s_scanN = s_scanGot = (uint16_t)got;
+      const int16_t lim = got > 20 ? 20 : got;
+      for (int16_t i = 0; i < lim; i++) {
+        if (i) j += ',';
+        j += "{\"s\":\"" + WiFi.SSID(i) +
+             "\",\"r\":" + String((int)WiFi.RSSI(i)) +
+             ",\"c\":" + String((int)WiFi.channel(i)) +
+             ",\"e\":" + String(WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? 0 : 1) + "}";
+      }
+      WiFi.scanDelete();                 // rend la memoire du wrapper
+    }
+#endif
     j += "]";
     s_scanJson = j;
     s_scanAt = millis();
-    if (scanErr == ESP_OK) {
-      uint16_t seen = 0;
-      esp_wifi_scan_get_ap_num(&seen);
-      // "Nothing found" sur la page et rien du tout au journal, c'est une panne
-      // sans temoin : impossible de distinguer un balayage refuse d'un balayage
-      // qui a bien tourne dans un endroit vide.
-      Serial.printf("[net] balayage : %u reseau(x) vus\n", (unsigned)seen);
-    }
+    Serial.printf("[net] balayage : %u vus, %u retenus\n",
+                  (unsigned)s_scanN, (unsigned)s_scanGot);
     if (scanErr != ESP_OK) s_scanJson = "[]";
   }
 
