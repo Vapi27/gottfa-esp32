@@ -496,7 +496,7 @@ static String stateJson() {
   j += ",\"framehz\":" + String(arenaled::frameHz());
   j += ",\"rot\":"     + String(arenaled::rotate() ? 1 : 0);
   j += ",\"rotmask\":" + String((uint32_t)arenaled::rotateMask());
-  j += ",\"rotsec\":"  + String((uint32_t)arenaled::rotateSec());
+  j += ",\"rotmin\":"  + String((uint32_t)arenaled::rotateMin());
   j += ",\"musE\":" + String(arenaled::musEnergy(), 3);
   j += ",\"musB\":" + String(arenaled::musBass(), 3);
   j += ",\"musT\":" + String(arenaled::musTreble(), 3);
@@ -677,6 +677,12 @@ static uint8_t param8(AsyncWebServerRequest* r, const char* k, uint8_t cur) {
   return (uint8_t)v;
 }
 
+// Meme precaution que param8, mais sur 16 bits : on sature dans le domaine
+// SIGNE avant de retrecir. Retrecir d'abord replierait -1 en 65535, et une
+// duree demandee SOUS le minimum ressortirait AU MAXIMUM -- une rotation qui
+// a l'air en panne pendant deux heures.
+static uint16_t satU16(long v) { return v < 0 ? 0 : (v > 65535 ? 65535 : (uint16_t)v); }
+
 static void startServer() {
   // --- UI ---------------------------------------------------------------
   s_server.on("/", HTTP_GET, [](AsyncWebServerRequest* r) {
@@ -729,7 +735,10 @@ static void startServer() {
     if (r->hasParam("speed"))  arenaled::setSpeed(param8(r, "speed", arenaled::speed()));
     if (r->hasParam("framehz")) arenaled::setFrameHz(param8(r, "framehz", arenaled::frameHz()));
     if (r->hasParam("rotmask")) arenaled::setRotateMask((uint16_t)r->getParam("rotmask")->value().toInt());
-    if (r->hasParam("rotsec"))  arenaled::setRotateSec((uint16_t)r->getParam("rotsec")->value().toInt());
+    if (r->hasParam("rotmin"))  arenaled::setRotateMin(satU16(r->getParam("rotmin")->value().toInt()));
+    // Une page servie depuis LittleFS peut dater d'avant le passage aux minutes.
+    else if (r->hasParam("rotsec"))
+      arenaled::setRotateMin(satU16((r->getParam("rotsec")->value().toInt() + 30) / 60));
     // `rot` apres le masque : poser les deux d'un coup doit demarrer la rotation
     // avec le masque qu'on vient d'envoyer, pas avec l'ancien.
     if (r->hasParam("rot"))     arenaled::setRotate(r->getParam("rot")->value().toInt() != 0);

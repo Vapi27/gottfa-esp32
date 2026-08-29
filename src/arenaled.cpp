@@ -1111,14 +1111,14 @@ Mode mode() { return s_mode; }
 //    pire qu'un reglage absent : si on touche, c'est qu'on veut regarder.
 static bool     s_rotOn   = false;
 static uint16_t s_rotMask = 0;
-static uint16_t s_rotSec  = 60;
+static uint16_t s_rotMin  = 1;
 static uint32_t s_rotAt   = 0;
 
 bool     rotate()      { return s_rotOn; }
 uint16_t rotateMask()  { return s_rotMask; }
-uint16_t rotateSec()   { return s_rotSec; }
+uint16_t rotateMin()   { return s_rotMin; }
 void setRotateMask(uint16_t m) { s_rotMask = m; markDirty(); }
-void setRotateSec(uint16_t s)  { s_rotSec = s < 5 ? 5 : (s > 3600 ? 3600 : s); markDirty(); }
+void setRotateMin(uint16_t m)  { s_rotMin = m < 1 ? 1 : (m > 120 ? 120 : m); markDirty(); }
 void setRotate(bool on) {
   s_rotOn = on;
   s_rotAt = millis();                 // le premier changement vient apres un tour plein
@@ -1137,7 +1137,7 @@ static void rotateTick() {
   const uint8_t n = rotCount();
   if (n == 0) return;                 // rien de coche : la rotation ne fait rien
   const uint32_t now = millis();
-  if (s_rotAt && now - s_rotAt < (uint32_t)s_rotSec * 1000UL) return;
+  if (now - s_rotAt < (uint32_t)s_rotMin * 60000UL) return;
   s_rotAt = now;
 
   // Tirage parmi les modes coches, en excluant le courant s'il en reste d'autres.
@@ -1386,7 +1386,7 @@ void resetLook() {
   s_insBright = 255;
   s_champ = ARENA_CHAMP_NEUTRAL;
   s_frameHz = LED_FRAME_HZ;
-  s_rotOn = false; s_rotMask = 0; s_rotSec = 60;
+  s_rotOn = false; s_rotMask = 0; s_rotMin = 1;
   s_warm    = ARENA_WARM_DEFAULT;
   s_density = 110;
   s_inc     = true;
@@ -1435,7 +1435,8 @@ void save() {
   s_prefs.putUChar("framehz", s_frameHz);
   s_prefs.putUChar("roton",   s_rotOn ? 1 : 0);
   s_prefs.putUShort("rotmask", s_rotMask);
-  s_prefs.putUShort("rotsec",  s_rotSec);
+  s_prefs.putUShort("rotmin",  s_rotMin);
+  s_prefs.remove("rotsec");            // l'ancienne cle en secondes ne sert plus
   s_prefs.putString("order", s_order);
   if (s_dirtyAt == dirtyAtEntry) s_dirtyAt = 0;
 }
@@ -1494,9 +1495,21 @@ void begin() {
   s_champ     = s_prefs.getUChar("champg", ARENA_CHAMP_NEUTRAL);
   s_frameHz   = s_prefs.getUChar("framehz", LED_FRAME_HZ);
   s_rotOn     = s_prefs.getUChar("roton", 0) != 0;
+  // Sans cela s_rotAt resterait a 0 et la garde de rotateTick() serait
+  // court-circuitee : une carte qui redemarre avec la rotation active tirerait
+  // un mode au sort des la premiere trame, jetant celui qu'on vient de
+  // restaurer. Le premier changement doit venir apres un tour plein.
+  s_rotAt     = millis();
   s_rotMask   = s_prefs.getUShort("rotmask", 0);
-  s_rotSec    = s_prefs.getUShort("rotsec", 60);
-  if (s_rotSec < 5 || s_rotSec > 3600) s_rotSec = 60;
+  // La duree etait stockee en secondes jusqu'a la version precedente. Relire
+  // telle quelle ferait passer une carte deja en service de 60 s a 60 min sans
+  // que personne ne l'ait demande : on convertit, une fois, au premier chargement.
+  s_rotMin = s_prefs.getUShort("rotmin", 0);
+  if (!s_rotMin) {
+    const uint16_t sec = s_prefs.getUShort("rotsec", 0);
+    s_rotMin = sec ? (uint16_t)((sec + 30) / 60) : 1;   // au plus proche
+  }
+  if (s_rotMin < 1 || s_rotMin > 120) s_rotMin = 1;
   if (s_frameHz < 1 || s_frameHz > 120) s_frameHz = LED_FRAME_HZ;
   String ord = s_prefs.getString("order", ARENA_ORDER_DEFAULT);
   strncpy(s_order, ord.c_str(), sizeof(s_order) - 1);

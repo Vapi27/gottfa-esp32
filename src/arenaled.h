@@ -51,10 +51,10 @@ Mode        modeFromName(const char* s);   // MODE_COUNT if unknown
 // Rotation automatique entre les modes coches par le proprietaire.
 bool     rotate();
 uint16_t rotateMask();                     // un bit par Mode
-uint16_t rotateSec();                      // duree d'un mode, 5..3600 s
+uint16_t rotateMin();                      // duree d'un mode, 1..120 min
 void     setRotate(bool on);
 void     setRotateMask(uint16_t mask);
-void     setRotateSec(uint16_t sec);
+void     setRotateMin(uint16_t min);
 void        nextMode();                    // front-panel button: cycle usable modes
 
 void    setBrightness(uint8_t b);
