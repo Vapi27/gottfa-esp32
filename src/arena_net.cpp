@@ -121,12 +121,55 @@ static uint32_t       s_lastRetry = 0;
 static String         s_webPass;
 static const char*    ARENA_WEB_USER = "pinball";
 
+// ⚠️ Le middleware ne suffit PAS pour les televersements.
+//
+// ESPAsyncWebServer traite le CORPS de la requete avant de lancer la chaine de
+// middlewares : handleBody/handleUpload sont appeles pendant l'analyse
+// (WebRequest.cpp:217 et :757) et _runMiddlewareChain() n'est atteint qu'une fois
+// le corps entierement lu (:230). Un firmware envoye sans identifiants etait donc
+// ECRIT ET RENDU AMORCABLE - Update.end(true) appelle
+// esp_ota_set_boot_partition() - et le 401 partait apres coup, sur une image deja
+// installee. La seule fonction de securite du produit ne couvrait pas le chemin
+// le plus dangereux.
+//
+// Chaque rappel de corps doit donc verifier lui-meme, AVANT d'ecrire quoi que ce
+// soit en flash ou sur le systeme de fichiers.
+static bool bodyAllowed(AsyncWebServerRequest* r) {
+  if (!s_webPass.length()) return true;
+  return r->authenticate(ARENA_WEB_USER, s_webPass.c_str());
+}
 static String         s_name;
 static String         s_mac;
 
 const String& wallName() { return s_name; }
 
 // Un nom d'hote mDNS n'accepte ni espace ni accent ni majuscule.
+// Echappement JSON. Le nom du mur est libre - le proprietaire le tape - et il
+// etait insere tel quel dans /api/state. Un guillemet ou une contre-oblique
+// rendait le JSON illisible, donc TOUTE la page inerte : plus d'etat, plus de
+// boutons, et le nom etant enregistre en NVS, le mur restait dans cet etat apres
+// redemarrage. Un nom mal choisi transformait la carte en objet a reflasher.
+static String jsonEsc(const String& in) {
+  String o;
+  o.reserve(in.length() + 8);
+  for (size_t i = 0; i < in.length(); i++) {
+    const char c = in[i];
+    switch (c) {
+      case '"':  o += "\\\""; break;
+      case '\\': o += "\\\\"; break;
+      case '\n': o += "\\n";  break;
+      case '\r': o += "\\r";  break;
+      case '\t': o += "\\t";  break;
+      default:
+        // Les caracteres de controle doivent etre echappes, sinon le JSON est
+        // invalide meme sans guillemet.
+        if ((uint8_t)c < 0x20) { char b[7]; snprintf(b, sizeof b, "\\u%04x", c); o += b; }
+        else                    o += c;
+    }
+  }
+  return o;
+}
+
 static String hostify(const String& in) {
   String o;
   for (size_t i = 0; i < in.length(); i++) {
@@ -563,11 +606,11 @@ static String stateJson() {
 
   // Qui est ce mur. Indispensable des qu'il y en a plusieurs : c'est ce qui
   // permet de balayer le reseau et de dire lequel est lequel.
-  j += ",\"name\":\"" + s_name + "\"";
-  j += ",\"mac\":\""  + s_mac  + "\"";
+  j += ",\"name\":\"" + jsonEsc(s_name) + "\"";
+  j += ",\"mac\":\""  + jsonEsc(s_mac)  + "\"";
 
   // OTA en mode pull : ou en est le telechargement declenche par /api/otapull.
-  j += ",\"otast\":\""  + s_pullStatus + "\"";
+  j += ",\"otast\":\""  + jsonEsc(s_pullStatus) + "\"";
   j += ",\"otadone\":"  + String(s_pullDone);
   j += ",\"otatot\":"   + String(s_pullTotal);
   j += ",\"fwgot\":"   + String((uint32_t)s_fwGot);
@@ -592,7 +635,7 @@ static String stateJson() {
     j += ",\"build\":\"" + String(sha) + "\"";
   }
   j += ",\"ip\":\""   + s_ip + "\",\"net\":\"" + s_mode + "\"";
-  j += ",\"staFail\":\"" + s_staReason + "\"";
+  j += ",\"staFail\":\"" + jsonEsc(s_staReason) + "\"";
   j += ",\"reset\":\"" + s_reset + "\",\"boots\":" + String(s_boots);
   j += ",\"brownouts\":" + String(s_brownouts);
   j += ",\"txpwr\":" + String(s_txq / 4.0f, 2);
@@ -942,6 +985,7 @@ static void startServer() {
     },
     nullptr,
     [](AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total) {
+      if (!bodyAllowed(r)) return;   // le middleware arrive trop tard : voir bodyAllowed()
       static File up;
       if (index == 0) {
         up = LittleFS.open("/pf.jpg", "w");
@@ -978,6 +1022,7 @@ static void startServer() {
     },
     nullptr,
     [](AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total) {
+      if (!bodyAllowed(r)) return;   // le middleware arrive trop tard : voir bodyAllowed()
       static File up;
       static bool full = false;
       if (index == 0) {
@@ -1132,6 +1177,7 @@ static void startServer() {
     },
     nullptr,
     [](AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total) {
+      if (!bodyAllowed(r)) return;   // le middleware arrive trop tard : voir bodyAllowed()
       if (index == 0) {
         if (r->_tempObject) delete (String*)r->_tempObject;
         String* b = new String();
@@ -1334,6 +1380,7 @@ static void startServer() {
       ESP.restart();
     },
     [](AsyncWebServerRequest* r, String fn, size_t idx, uint8_t* data, size_t len, bool done) {
+      if (!bodyAllowed(r)) return;   // le middleware arrive trop tard : voir bodyAllowed()
       const bool pf = r->hasParam("target") && r->getParam("target")->value() == "pf";
       const char* tmp = pf ? "/arena_pf.new" : "/arena_attract.new";
       if (!idx) { LittleFS.remove(tmp); }
@@ -1551,7 +1598,7 @@ static void startServer() {
       wifi_ap_record_t apInfo = {};
       const bool apInfoOk = (esp_wifi_sta_get_ap_info(&apInfo) == ESP_OK);
       String j = "{\"fail\":\"" + s_staReason + "\"" +
-                 ",\"scanErr\":\"" + s_scanErr + "\"" +
+                 ",\"scanErr\":\"" + jsonEsc(s_scanErr) + "\"" +
                  ",\"age\":" + String(s_scanAt ? (millis() - s_scanAt) / 1000 : 9999) +
                  ",\"busy\":" + String((s_scanWanted || s_scanBusy) ? "true" : "false") +
                  ",\"scanN\":" + String((int)s_scanN) +
@@ -1620,6 +1667,7 @@ static void startServer() {
     // Corps brut du morceau. Ecrit au fil de l'eau : un morceau de 32 ko tient
     // dans les tampons, et l'acquittement ci-dessus ne part qu'une fois ecrit.
     [](AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total) {
+      if (!bodyAllowed(r)) return;   // le middleware arrive trop tard : voir bodyAllowed()
       if (!s_fwHandle || !len) return;
       if (esp_ota_write(s_fwHandle, data, len) != ESP_OK) {
         esp_ota_abort(s_fwHandle); s_fwHandle = 0;
@@ -1648,6 +1696,7 @@ static void startServer() {
       if (ok) { delay(200); ESP.restart(); }
     },
     [](AsyncWebServerRequest* r, String fn, size_t idx, uint8_t* data, size_t len, bool done) {
+      if (!bodyAllowed(r)) return;   // le middleware arrive trop tard : voir bodyAllowed()
       if (!idx) {
         const bool fs = r->hasParam("target") && r->getParam("target")->value() == "fs";
         Serial.printf("[ota] start %s -> %s\n", fn.c_str(), fs ? "filesystem" : "app");
@@ -1986,7 +2035,7 @@ void loop() {
         if (recErr == ESP_OK)
           for (uint16_t i = 0; i < n; i++) {
             if (i) j += ',';
-            j += "{\"s\":\"" + String((const char*)ap[i].ssid) +
+            j += "{\"s\":\"" + jsonEsc(String((const char*)ap[i].ssid)) +
                  "\",\"r\":" + String((int)ap[i].rssi) +
                  ",\"c\":" + String((int)ap[i].primary) +
                  ",\"e\":" + String(ap[i].authmode == WIFI_AUTH_OPEN ? 0 : 1) + "}";
@@ -2023,7 +2072,7 @@ void loop() {
       const int16_t lim = got > 20 ? 20 : got;
       for (int16_t i = 0; i < lim; i++) {
         if (i) j += ',';
-        j += "{\"s\":\"" + WiFi.SSID(i) +
+        j += "{\"s\":\"" + jsonEsc(WiFi.SSID(i)) +
              "\",\"r\":" + String((int)WiFi.RSSI(i)) +
              ",\"c\":" + String((int)WiFi.channel(i)) +
              ",\"e\":" + String(WiFi.encryptionType(i) == WIFI_AUTH_OPEN ? 0 : 1) + "}";

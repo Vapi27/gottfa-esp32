@@ -702,20 +702,34 @@ static void fxMusic(Rgbw* buf) {
   const float tb = (now - s_musBeatMs) / 1000.0f;
   const float flash = (tb < 0.25f) ? (1.0f - tb / 0.25f) * 0.35f : 0.0f;
 
+  // Trois BARRES empilees, chacune remplissant sa propre tranche.
+  //
+  // ⚠️ La version precedente posait le NIVEAU de chaque bande sur toute sa zone :
+  // chaque pixel affichait en permanence le niveau de sa bande, autour de 60 %,
+  // donc plus rien ne s'eteignait jamais. Rapporte tel quel - "la moitie est
+  // toujours on" - et c'est exactement ce que le code produisait.
+  //
+  // Un analyseur ne colore pas une zone, il la REMPLIT : dans sa tranche, chaque
+  // bande monte de son bas jusqu'a son niveau. Musique arretee, tout retombe a
+  // zero ; grave seul, seul le tiers du bas s'allume.
   for (uint16_t i = 0; i < s_count; i++) {
     const float h = s_ledH[i];
 
-    // Melange des trois bandes selon la hauteur, en triangle : chaque bande a son
-    // domaine et les frontieres se fondent, sans marche d'escalier. C'est ce
-    // fondu qui distingue un analyseur d'un empilement de trois barres.
-    const float wB = h < 0.5f ? (1.0f - h * 2.0f) : 0.0f;
-    const float wH = h > 0.5f ? ((h - 0.5f) * 2.0f) : 0.0f;
-    const float wM = 1.0f - wB - wH;
-    float v = bas * wB + mil * wM + hau * wH;
+    // A quelle tranche ce pixel appartient, et ou il se situe DEDANS.
+    float niveau, dans;
+    if (h < 0.333f)      { niveau = bas; dans = h / 0.333f; }
+    else if (h < 0.666f) { niveau = mil; dans = (h - 0.333f) / 0.333f; }
+    else                 { niveau = hau; dans = (h - 0.666f) / 0.334f; }
+
+    // Remplissage avec un bord adouci sur 0,18 de tranche : sans lui la limite
+    // est une ligne dure qui saute d'un pixel a l'autre au lieu de monter.
+    float k = (niveau - dans) / 0.18f;
+    if (k > 1.0f) k = 1.0f;
+    if (k < 0.0f) k = 0.0f;
 
     // Racine : l'oeil n'est pas lineaire. Sans elle le degrade parait ecrase en
     // bas et absent en haut.
-    v = sqrtf(v > 0.0f ? v : 0.0f) * 0.88f + flash;
+    float v = sqrtf(k) * 0.85f + flash;
     if (v > 1.0f) v = 1.0f;
     if (v > 0.0f) buf[i] = addSat(buf[i], scale(s_color, v));
   }
