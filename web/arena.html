@@ -1702,9 +1702,25 @@ function showRelevant(s) {
 function bars(r) { return r > -55 ? '••••' : r > -65 ? '•••·' : r > -75 ? '••··' : '•···'; }
 function wifiScan() {
   $('nw-list').innerHTML = 'scanning… (the wall pauses briefly)';
+  // ⚠️ On INTERROGE JUSQU'A CE QUE CE SOIT PRET, on ne parie pas sur une duree.
+  //
+  // La fonction attendait exactement 5 s puis interrogeait UNE SEULE FOIS. Le
+  // balayage passe par WiFi.scanNetworks(), qui bloque 2 a 5 s et ne demarre
+  // qu'au tour de boucle suivant : tomber juste apres la fenetre affichait
+  // "rien trouve" sur un balayage parfaitement reussi. Rapporte tel quel - "le
+  // scan marche pas" - alors que l'API rendait bien 6 reseaux au meme instant.
+  //
+  // Le firmware publie deja `busy` : on s'en sert, au lieu de deviner.
+  const attendre = (essai) => fetch('/api/wifiscan?results=1').then(r => r.json())
+    .then(d => {
+      const pret = !d.busy && ((d.nets && d.nets.length) || d.scanErr || essai >= 12);
+      if (pret) return d;
+      $('nw-list').textContent = 'scanning… ' + (essai + 1) + '/12';
+      return new Promise(r => setTimeout(r, 1200)).then(() => attendre(essai + 1));
+    });
   api('/api/wifiscan')
-    .then(() => new Promise(r => setTimeout(r, 5000)))
-    .then(() => fetch('/api/wifiscan?results=1')).then(r => r.json())
+    .then(() => new Promise(r => setTimeout(r, 1500)))
+    .then(() => attendre(0))
     .then(d => {
       // 0 dBm serait un signal parfait : c'est en realite "pas d'association".
       // L'afficher tel quel se lit comme une mesure, et c'est un mensonge.
