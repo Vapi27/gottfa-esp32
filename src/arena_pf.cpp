@@ -223,7 +223,24 @@ int addInsert(float x, float y, const char* name) {
   else               { snprintf(it.name, NAME_LEN, "P%u", (unsigned)(s_nIns + 1)); }
   it.func[0] = 0;
   it.kind = 'i';
-  it.lamp = -1;                     // aucune lampe : ce point ne vient d'aucune ROM
+
+  // ⚠️ UN NUMERO DE LAMPE, sinon le point ne pourra JAMAIS etre anime.
+  //
+  // Il valait -1, au motif qu'un point pose a la main ne vient d'aucune ROM.
+  // C'est vrai de son origine, mais le numero de lampe n'est pas qu'une trace :
+  // c'est l'ADRESSE par laquelle une sequence l'allume. Le lecteur d'attract fait
+  // (masque >> lampe) & 1, et un insert a -1 est invisible pour lui - donc un
+  // plateau entierement pose a la main, le cas d'un ELECTROMECANIQUE qui n'a ni
+  // ROM ni table Visual Pinball, ne pouvait recevoir aucune animation.
+  //
+  // On lui donne le plus petit numero libre. Le masque etant un u64, il y a 64
+  // adresses : au-dela le point existe et s'affiche, mais reste hors sequence -
+  // et l'interface doit le dire plutot que de laisser croire a une panne.
+  bool pris[64] = { false };
+  for (uint8_t k = 0; k < s_nIns; k++)
+    if (s_ins[k].lamp >= 0 && s_ins[k].lamp < 64) pris[s_ins[k].lamp] = true;
+  it.lamp = -1;
+  for (uint8_t k = 0; k < 64; k++) if (!pris[k]) { it.lamp = (int8_t)k; break; }
   it.x = (x < 0) ? 0 : (x > 1 ? 1 : x);
   it.y = (y < 0) ? 0 : (y > 1 ? 1 : y);
   s_col[s_nIns] = Colour{ 0, 0, 0, 0 };

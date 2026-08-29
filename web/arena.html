@@ -351,6 +351,7 @@ header h1 img{filter:saturate(.9)}
       <div class="modes">
         <button id="wz-start" onclick="wzStart()">Map the pixels</button>
         <button onclick="grStart()">Groups</button>
+        <button onclick="plStart()">Place points</button>
         <button id="pf-gi" onclick="pfToggleGi()">show lighting pads</button>
       </div>
     </div>
@@ -372,6 +373,28 @@ header h1 img{filter:saturate(.9)}
         <button onclick="wzGo(wz.at+1)">Skip &#9654;</button>
         <button onclick="wzFinish()">Stop</button>
       </div>
+    </div>
+
+    <!-- etat "placement libre" : poser les lucarnes A LA MAIN sur une photo.
+         Indispensable pour une machine ELECTROMECANIQUE : elle n'a ni ROM a
+         capturer, ni table Visual Pinball, donc aucun plan a importer. Le
+         firmware savait deja le faire (/api/insert/add, /move, /del) mais rien
+         dans la page ne l'appelait. -->
+    <div id="wz-place" style="display:none">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <b style="opacity:.75">Placing points</b>
+        <button onclick="wzExit()" title="Escape">&larr; Close</button></div>
+      <p class="hint" id="pl-say"></p>
+      <div class="modes">
+        <button onclick="plDel()">Delete selected</button>
+        <button onclick="$('pf-file').click()">Load a photo</button>
+        <button onclick="plClear()">Remove all</button>
+      </div>
+      <!-- La photo du plateau. uploadPf() existait depuis le debut mais AUCUN
+           element ne l'appelait : charger une photo etait impossible depuis la
+           page, alors que le firmware l'acceptait. -->
+      <input type="file" id="pf-file" accept="image/*" style="display:none"
+             onchange="uploadPf(this.files[0]); this.value=''">
     </div>
 
     <!-- etat "groupes" : creer un groupe et lui donner des pixels en touchant
@@ -891,6 +914,77 @@ function rotUi() {
       : '<b>' + n + '</b> mode' + (n > 1 ? 's' : '') + ' ticked. Switch <b>rotate</b> on to start.';
 }
 
+// --- Placement libre des lucarnes -------------------------------------------
+//
+// Poser les points A LA MAIN sur une photo du plateau. C'est le seul chemin pour
+// une machine ELECTROMECANIQUE : pas de ROM a capturer, pas de table Visual
+// Pinball, donc aucun plan a importer. Le firmware savait deja le faire depuis
+// le debut - /api/insert/add, /move, /del - mais AUCUNE de ces trois routes
+// n'etait appelee par la page.
+//
+// Geste pense pour le pouce, sans glisser : on touche le vide pour poser, on
+// touche un point pour le choisir, et avec un point choisi on touche le vide
+// pour le deplacer la. Rien a maintenir, rien a viser au pixel pres.
+let plSel = -1;
+
+function plStart() {
+  wzUi('place');
+  plSel = -1;
+  pfLoad().then(() => { plSay(); wzDraw(); });
+}
+function plSay() {
+  const e = $('pl-say');
+  if (!e) return;
+  const n = PF.length;
+  e.innerHTML = (plSel >= 0)
+    ? '<b>' + (PF[plSel] ? PF[plSel].n : '?') + '</b> selected &mdash; tap the photo to move it there, ' +
+      'or use <b>Delete selected</b>. Tap it again to deselect.'
+    : n
+      ? 'Tap the photo where a light sits to add a point. Tap a point to select it. ' +
+        '<b>' + n + '</b> placed. Then <b>Map the pixels</b> tells the wall which pixel is on which.'
+      : 'No point yet. Load a photo of your playfield, then tap it wherever a light sits. ' +
+        'This is how an <i>electromechanical</i> machine is described &mdash; it has no ROM to read.';
+}
+// Un appui sur le fond de l'image, converti en coordonnees 0..1 du plateau.
+function plTap(ev) {
+  if (wzState !== 'place') return;
+  if (pfMoved > 8) return;                       // c'etait un deplacement, pas un appui
+  const svg = ev.currentTarget;
+  const p = svg.createSVGPoint();
+  p.x = ev.clientX; p.y = ev.clientY;
+  const m = svg.getScreenCTM();
+  if (!m) return;
+  const q = p.matrixTransform(m.inverse());
+  // Les pastilles sont dessinees a x*1000 et y*2074 : on refait le chemin inverse.
+  const x = Math.max(0, Math.min(1, q.x / 1000));
+  const y = Math.max(0, Math.min(1, q.y / 2074));
+  const url = (plSel >= 0)
+    ? '/api/insert/move?i=' + plSel + '&x=' + x.toFixed(4) + '&y=' + y.toFixed(4)
+    : '/api/insert/add?x=' + x.toFixed(4) + '&y=' + y.toFixed(4);
+  fetch(url).then(r => r.ok ? r.json().catch(() => null) : null)
+    .then(() => pfLoad()).then(() => { plSay(); wzDraw(); })
+    .catch(e => toast('echec : ' + e.message));
+}
+function plDel() {
+  if (plSel < 0) { toast('select a point first'); return; }
+  // ⚠️ Retirer un point DECALE tous les suivants, et le mur retient quel pixel
+  // est sur quel point par son RANG. Le firmware recale les affectations, mais
+  // le proprietaire doit savoir que ce geste touche a son mapping.
+  if (!confirm('Remove this point? Pixels mapped to the points after it are shifted back one — the wall re-aligns them, but check your mapping afterwards.')) return;
+  fetch('/api/insert/del?i=' + plSel).then(() => { plSel = -1; return pfLoad(); })
+    .then(() => { plSay(); wzDraw(); toast('point removed'); });
+}
+function plClear() {
+  if (!PF.length) return;
+  if (!confirm('Remove ALL ' + PF.length + ' points? This cannot be undone, and your pixel mapping goes with them.')) return;
+  // A l'envers : retirer le dernier ne decale jamais les precedents.
+  const suite = () => {
+    if (!PF.length) { plSay(); wzDraw(); toast('all points removed'); return; }
+    fetch('/api/insert/del?i=' + (PF.length - 1)).then(() => pfLoad()).then(suite);
+  };
+  suite();
+}
+
 const toast = m => {
   let e = $('msg');
   if (!e) {
@@ -1173,7 +1267,7 @@ function pfLoad() {
 // affiches ensemble et rien ne disait lequel etait actif.
 function wzUi(st) {
   wzState = st || wzState;
-  ['idle','map','edit','group'].forEach(k => {
+  ['idle','map','edit','group','place'].forEach(k => {
     const e = $('wz-' + k); if (e) e.style.display = (k === wzState) ? '' : 'none';
   });
   wzMode = (wzState === 'edit') ? 'edit' : 'place';
@@ -1361,6 +1455,7 @@ function wzClick(i) {
   if (wzState === 'idle') { edSelect(i); wzUi('edit'); wzDraw(); return; }
   if (wzState === 'edit')  { edSelect(i); return; }
   if (wzState === 'group') { grToggle(i); return; }
+  if (wzState === 'place')  { plSel = (plSel === i ? -1 : i); plSay(); wzDraw(); return; }
   // Rien n'est allume : un appui ne peut pas designer un pixel. On refuse plutot
   // que d'ecrire une affectation que le proprietaire n'a pas voulue.
   if (!wz.live) { toast('press "Start walking" first - no pixel is lit'); return; }
@@ -1565,8 +1660,8 @@ function wzDraw() {
 
   const owner = pfOwner(), placed = Object.keys(LEDMAP).length;
   const W = 1000, H = 2074;              // 960 x 1991 table units, normalised
-  let s = '<svg viewBox="' + pfViewBox() +
-          '" style="width:100%;max-width:430px;display:block;margin:8px auto">';
+  let s = '<svg viewBox="' + pfViewBox() + '" onclick="plTap(event)"' +
+          ' style="width:100%;max-width:430px;display:block;margin:8px auto">';
   // L'artwork REEL de la machine, extrait de la table Visual Pinball par
   // tools/vpx_bind.py. Le schema abstrait obligeait le proprietaire a deviner a
   // quoi correspondait chaque pastille ; ici il reconnait sa rampe, ses cibles,
@@ -1671,7 +1766,10 @@ function uploadPf(file) {
   toast('envoi de la photo...');
   fetch('/api/pfimg', { method: 'POST', body: file })
     .then(r => r.text())
-    .then(t => { PF_IMG = '/pf.jpg?' + Date.now(); toast(t); drawPlan && drawPlan(); })
+    // ⚠️ wzDraw, pas drawPlan : drawPlan n'existe pas. Le plan ne se redessinait
+    // donc jamais apres un envoi de photo - la nouvelle image n'apparaissait
+    // qu'au rechargement de la page.
+    .then(t => { PF_IMG = '/pf.jpg?' + Date.now(); toast(t); wzDraw(); })
     .catch(() => toast('envoi echoue'));
 }
 
