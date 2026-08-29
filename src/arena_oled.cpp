@@ -30,6 +30,7 @@ namespace arenaoled {
 static Adafruit_SSD1306 s_d(ARENA_OLED_W, ARENA_OLED_H, &Wire, -1);
 static bool     s_found = false;
 static bool     s_awake = false;
+static volatile bool s_wakeReq = false;   // voir poke() / serviceWake()
 
 // Quel poussoir porte quel role : un fait de MONTAGE, pas de firmware.
 // NETLIST.md dit BTN_LEFT=IO15, BTN_RIGHT=IO17, BTN_OK=IO7 - et sur la carte du
@@ -193,8 +194,29 @@ static bool    s_edit  = false;
 static const uint32_t CONFIRM_MS = 3000;
 static uint8_t  s_confirm  = 0;      // 0 = rien d'arme
 static uint32_t s_holdFrom = 0;
+// Un effacement se termine le doigt ENCORE POSE sur OK. Sans cela, le
+// relachement repartait en appui neuf et rearmait la confirmation qu'on venait
+// tout juste d'executer : l'ecran redemandait de confirmer un effacement deja
+// fait. On ignore donc l'appui en cours jusqu'a ce qu'il soit relache.
+static bool     s_okSwallow = false;
+
+// Sortie explicite. Revenir en arriere se faisait par un appui long de 1,2 s
+// que RIEN n'affiche : il fallait le connaitre. Sur l'ecran des modes, ou les
+// deux fleches pilotent la roue, ne pas le connaitre se lit comme un menu
+// bloque - on tourne, le mur change, et on ne retrouve jamais la liste. Le
+// retour devient donc une ENTREE de la liste, la derniere, qu'on trouve en
+// tournant comme le reste. L'appui long continue de marcher pour qui le sait.
+static const uint8_t N_BACK = 0xFF;          // pas un noeud de NODES[]
+
+// Entrees du niveau courant, la sortie comprise. La racine n'en a pas : il n'y
+// a rien au-dessus, et "Screen off" y tient deja ce role.
+static uint8_t levelCount(uint8_t depth) {
+  const uint8_t c = NODES[s_stack[depth].node].count;
+  return depth ? (uint8_t)(c + 1) : c;
+}
 
 static uint8_t curNode()   { const Frame& f = s_stack[s_depth];
+                             if (s_depth && f.cursor >= NODES[f.node].count) return N_BACK;
                              return NODES[f.node].count ? NODES[f.node].first + f.cursor : f.node; }
 static uint8_t parentNode(){ return s_stack[s_depth].node; }
 
@@ -351,6 +373,7 @@ static void infoLines(uint8_t n, String& a, String& b) {
 // mort, et on relache juste avant la fin.
 static void drawConfirm(uint32_t held) {
   s_d.clearDisplay();
+  s_d.setTextWrap(false);   // un texte trop long se coupe, il ne se replie plus sur la ligne d'en dessous
   s_d.setTextColor(SSD1306_WHITE);
   s_d.ssd1306_command(SSD1306_SETCONTRAST);
   s_d.ssd1306_command(0xCF);
@@ -359,7 +382,7 @@ static void drawConfirm(uint32_t held) {
   s_d.print(NODES[s_confirm].label);
   s_d.setCursor(0, 10);
   s_d.print(resetWhat(s_confirm));
-  s_d.setCursor(0, 20);
+  s_d.setCursor(0, 19);   // 20 mettait les jambages du p et du g sur la barre
   s_d.print(held ? F("keep holding...") : F("hold OK for 3 s"));
   const int16_t y = ARENA_OLED_H - 5;
   s_d.drawRect(0, y, ARENA_OLED_W, 5, SSD1306_WHITE);
@@ -368,6 +391,15 @@ static void drawConfirm(uint32_t held) {
     s_d.fillRect(1, y + 1, (int16_t)w, 3, SSD1306_WHITE);
   }
   s_d.display();
+}
+
+// Un libelle plus large que l'ecran se replie sur une ligne qui n'existe pas :
+// a la taille 2, "Other walls" fait 132 px et "Forget homes" 144 px pour 128
+// disponibles, et leur fin partait hors champ. On descend d'une taille plutot
+// que de raccourcir les mots - un menu de remise a zero doit se lire en entier.
+static void printFit(const char* s) {
+  s_d.setTextSize(strlen(s) * 12 <= ARENA_OLED_W ? 2 : 1);
+  s_d.print(s);
 }
 
 static void draw() {
@@ -394,9 +426,12 @@ static void draw() {
   if (s_confirm) { drawConfirm(s_holdFrom ? millis() - s_holdFrom : 0); return; }
   const uint8_t n = curNode();
 
-  if (NODES[n].kind == K_QR && s_edit) { drawQr(); return; }
+  const bool back = (n == N_BACK);
+
+  if (!back && NODES[n].kind == K_QR && s_edit) { drawQr(); return; }
 
   s_d.clearDisplay();
+  s_d.setTextWrap(false);   // un texte trop long se coupe, il ne se replie plus sur la ligne d'en dessous
   s_d.setTextColor(SSD1306_WHITE);
   // Contraste nominal partout ailleurs : le menu se lit de loin, lui.
   s_d.ssd1306_command(SSD1306_SETCONTRAST);
@@ -407,28 +442,50 @@ static void draw() {
   s_d.setTextSize(1);
   s_d.setCursor(0, 0);
   const Frame& f = s_stack[s_depth];
-  if (s_edit) {
+  if (s_edit && !back) {
     s_d.print(F("< "));
     s_d.print(NODES[n].label);
+    // Comment on sort, ecrit la ou l'ecran est libre : en reglage, la droite de
+    // la ligne de tete ne sert a rien.
+    static const char HINT[] = "OK done";
+    s_d.setCursor(ARENA_OLED_W - 6 * (int16_t)(sizeof(HINT) - 1), 0);
+    s_d.print(HINT);
   } else {
     s_d.print(NODES[f.node].label);
-    if (NODES[f.node].count) {
+    if (levelCount(s_depth)) {
       char pos[10];
-      snprintf(pos, sizeof(pos), "%u/%u", f.cursor + 1, NODES[f.node].count);
+      snprintf(pos, sizeof(pos), "%u/%u", f.cursor + 1, levelCount(s_depth));
       s_d.setCursor(ARENA_OLED_W - (int16_t)strlen(pos) * 6, 0);
       s_d.print(pos);
     }
   }
 
   s_d.setCursor(0, 11);
+  if (back) {
+    s_d.setTextSize(2);
+    s_d.print(F("< Back"));
+    s_d.display();
+    return;
+  }
   switch (NODES[n].kind) {
     case K_MENU:
-      s_d.setTextSize(2);
-      s_d.print(NODES[n].label);
+      printFit(NODES[n].label);
       break;
     case K_MODE:
       s_d.setTextSize(2);
-      s_d.print(arenaled::modeLabel(arenaled::mode()));
+      if (s_edit) { s_d.print(arenaled::modeLabel(arenaled::mode())); }
+      else {
+        // Dans la LISTE on montre le nom du reglage, et sa valeur en petit,
+        // comme Filament. Afficher le mode en grand des la liste rendait les
+        // deux ecrans identiques au pixel pres : on entrait dans le reglage
+        // sans le voir, et les fleches se mettaient a changer le mur au lieu
+        // du menu. C'est ce qui donnait un menu dont on ne sort pas.
+        s_d.print(NODES[n].label);
+        const char* v = arenaled::modeLabel(arenaled::mode());
+        s_d.setTextSize(1);
+        s_d.setCursor(ARENA_OLED_W - 6 * (int16_t)strlen(v), 18);
+        s_d.print(v);
+      }
       break;
     case K_PCT:
       s_d.setTextSize(2);
@@ -444,8 +501,18 @@ static void draw() {
       s_d.print(arenaled::incandescent() ? F("ON") : F("off"));
       break;
     case K_LINK:
+      // Meme correction que Mode : la liste montrait deja la VALEUR en grand,
+      // donc entrer dans le reglage ne changeait pas un pixel du corps de
+      // l'ecran, et les fleches se mettaient a changer le mur sans prevenir.
       s_d.setTextSize(2);
-      s_d.print(arenapeers::linkName(arenapeers::link()));
+      if (s_edit) { s_d.print(arenapeers::linkName(arenapeers::link())); }
+      else {
+        s_d.print(NODES[n].label);
+        const char* v = arenapeers::linkName(arenapeers::link());
+        s_d.setTextSize(1);
+        s_d.setCursor(ARENA_OLED_W - 6 * (int16_t)strlen(v), 18);
+        s_d.print(v);
+      }
       break;
     case K_QR:
       s_d.setTextSize(1);
@@ -454,14 +521,17 @@ static void draw() {
       s_d.print(F("pairing code"));
       break;
     case K_SLEEP:
-      s_d.setTextSize(2);
-      s_d.print(NODES[n].label);
+      printFit(NODES[n].label);
       break;
     case K_CONFIRM:
-      s_d.setTextSize(2);
-      s_d.print(NODES[n].label);
+      // Les deux lignes en taille 1, comme K_INFO. En taille 2 le libelle
+      // occupait y=11..26 et l'explication commencait a y=25 : elle mordait
+      // dessus et depassait d'un pixel les 32 de l'ecran. Or sur l'entree qui
+      // efface un appairage ou un cablage, l'explication EST ce qu'il faut
+      // lire - c'est la seule chose qui distingue "Reset look" de "Erase all".
       s_d.setTextSize(1);
-      s_d.setCursor(0, 25);
+      s_d.print(NODES[n].label);
+      s_d.setCursor(0, 22);
       s_d.print(resetWhat(n));
       break;
     case K_INFO: {
@@ -499,6 +569,18 @@ static void sleepNow(const char* why) {
 static void sleepNowImpl() {
   if (!s_awake) return;
   s_awake    = false;
+  // Et la demande de reveil en attente. onOk() commence par poke(), qui la
+  // pose ; on s'endort ensuite dans le meme appui, et le tick SUIVANT commence
+  // par serviceWake(), qui la trouvait encore la et rallumait aussitot. Les
+  // deux sorties de la racine - "Screen off" et l'appui long - eteignaient donc
+  // l'ecran deux millisecondes, puis le menu resurgissait a 1/8. Seule la veille
+  // par inactivite tenait, parce qu'elle ne passe pas par poke().
+  s_wakeReq  = false;
+  // Et l'appui EN COURS. A la racine, la sortie est un appui long : au moment
+  // ou l'ecran s'eteint le doigt est encore pose, et la regle "le premier appui
+  // ne fait que rallumer" le rallumait deux millisecondes plus tard. Effacer la
+  // demande de reveil ne suffisait donc que pour la sortie breve.
+  s_okSwallow = true;
   s_edit     = false;
   s_confirm  = 0;
   s_holdFrom = 0;
@@ -526,8 +608,6 @@ void btnRaw(bool& up, bool& okd, bool& down,
 //
 // Desormais poke() ne fait que poser deux mots en memoire ; tout l'I2C est
 // execute par tick(), c est-a-dire toujours dans la meme tache.
-static volatile bool s_wakeReq = false;
-
 void poke() {
   s_lastIn  = millis();
   s_wakeReq = true;
@@ -545,12 +625,16 @@ static void serviceWake() {
 
 void showQr() {
   if (!s_found) return;
-  s_depth = 1;
+  // Rester a la RACINE. Empiler "Pairing code", qui n'a pas d'enfants, creait
+  // un niveau ou les deux fleches ne faisaient plus rien du tout : le seul
+  // moyen d'en sortir etait l'appui long, que rien n'affiche.
+  s_depth = 0;
   s_stack[0] = { N_ROOT, (uint8_t)(N_PAIR - N_LIGHT) };
-  s_stack[1] = { N_PAIR, 0 };
   s_edit = true;
+  // Pas de draw() ici : showQr() est appele depuis la tache du serveur web, et
+  // tout l'I2C doit rester dans tick() - c'est la raison d'etre de poke().
+  // Le redessin periodique (400 ms) affiche le code.
   poke();
-  draw();
 }
 
 // Le geste est alle au bout : on execute, on l'ecrit a l'ecran, et on redemarre
@@ -671,7 +755,7 @@ static void onStep(int8_t d) {
 
   if (!s_edit) {                       // on parcourt la liste du niveau courant
     Frame& f = s_stack[s_depth];
-    const uint8_t cnt = NODES[f.node].count;
+    const uint8_t cnt = levelCount(s_depth);
     if (cnt) {
       int8_t c = (int8_t)f.cursor + d;
       while (c < 0) c += cnt;
@@ -681,6 +765,7 @@ static void onStep(int8_t d) {
     return;
   }
 
+  if (n == N_BACK) { draw(); return; }   // NODES[0xFF] n'existe pas
   switch (NODES[n].kind) {             // on modifie la valeur pointee
     case K_MODE: {
       int8_t i = (int8_t)wheelIndexOfCurrent() + d;
@@ -695,6 +780,9 @@ static void onStep(int8_t d) {
     }
     case K_BOOL:
       arenaled::setIncandescent(!arenaled::incandescent());
+      break;
+    case K_QR:                         // plein ecran : toute fleche le referme,
+      s_edit = false;                  // sinon c'est le seul ecran ou elles sont mortes
       break;
     case K_LINK: {
       int8_t v = (int8_t)arenapeers::link() + d;
@@ -728,6 +816,8 @@ static void onOk(bool longPress) {
     draw();
     return;
   }
+
+  if (n == N_BACK) { if (s_depth) s_depth--; draw(); return; }
 
   if (NODES[n].kind == K_MENU && NODES[n].count && s_depth + 1 < 4) {
     s_depth++;
@@ -827,6 +917,14 @@ static bool pollRepeat(Btn& b, uint32_t now) {
   return fire;
 }
 
+// Au niveau du fichier, et non dans tick() : l'ecran de confirmation doit
+// pouvoir les faire avancer lui aussi. Il lisait les broches directement, donc
+// wasDown restait faux et la fleche qui ANNULE etait rejouee au tour suivant
+// comme un pas de menu : on annulait un effacement, et le curseur avait bouge
+// d'un cran - vers une entree plus grave, une fois sur deux.
+static Btn s_up   = { 0, 0, 0, false };
+static Btn s_down = { 0, 0, 0, false };
+
 void tick() {
   // Sans ecran, il reste les boutons : on ne dessine pas, mais on ecoute. C'est
   // ce qui garde une remise a zero d'usine accessible sur un mur livre sans
@@ -835,6 +933,13 @@ void tick() {
   serviceWake();
   const uint32_t now = millis();
 
+  // Les deux etats de repetition sont statiques : ils retiennent la broche du
+  // PREMIER passage. Comme le brochage se regle a chaud, on la reecrit a chaque
+  // tour, sinon un remappage ne prendrait qu'au redemarrage suivant. Et avant
+  // la branche de confirmation, qui s'en sert elle aussi.
+  s_up.pin   = s_pinUp;
+  s_down.pin = s_pinDown;
+
   // Pendant une confirmation, les boutons ne veulent plus dire la meme chose :
   // OK se maintient, et TOUTE fleche annule. On court-circuite donc la gestion
   // normale plutot que de la faire cohabiter, ou un pas de menu passerait sous
@@ -842,13 +947,21 @@ void tick() {
   if (s_confirm) {
     s_lastIn = now;                            // ne pas s'endormir en pleine decision
     encTake();
-    if (digitalRead(s_pinUp) == LOW || digitalRead(s_pinDown) == LOW) {
+    // pollRepeat, et non une lecture de broche : c'est lui qui tient wasDown a
+    // jour. La fleche qui annule ne doit pas etre rejouee au tour suivant.
+    const bool escUp   = pollRepeat(s_up,   now);
+    const bool escDown = pollRepeat(s_down, now);
+    if (escUp || escDown) {
       s_confirm = 0; s_holdFrom = 0; draw();
       return;
     }
     if (digitalRead(s_pinOk) == LOW) {
       if (!s_holdFrom) s_holdFrom = now;
-      if (now - s_holdFrom >= CONFIRM_MS) { runReset(s_confirm); return; }
+      if (now - s_holdFrom >= CONFIRM_MS) {
+        runReset(s_confirm);
+        s_okSwallow = true;          // le doigt est encore pose : ne pas rearmer
+        return;
+      }
       drawConfirm(now - s_holdFrom);
     } else if (s_holdFrom) {                   // relache trop tot = on renonce
       s_confirm = 0; s_holdFrom = 0; draw();
@@ -860,15 +973,8 @@ void tick() {
 
   const int8_t d = encTake();
 
-  // Les deux etats de repetition sont statiques : ils retiennent la broche du
-  // PREMIER passage. Comme le brochage se regle a chaud, on la reecrit a chaque
-  // tour, sinon un remappage ne prendrait qu'au redemarrage suivant.
-  static Btn up   = { s_pinUp,   0, 0, false };
-  static Btn down = { s_pinDown, 0, 0, false };
-  up.pin   = s_pinUp;
-  down.pin = s_pinDown;
-  const bool upFire   = pollRepeat(up,   now);
-  const bool downFire = pollRepeat(down, now);
+  const bool upFire   = pollRepeat(s_up,   now);
+  const bool downFire = pollRepeat(s_down, now);
   const bool ok       = digitalRead(s_pinOk) == LOW;
 
   // TOUTE entree repousse la veille, les fleches comprises.
@@ -877,14 +983,24 @@ void tick() {
   // que par OK et par le demarrage. Naviguer aux fleches laissait donc le
   // compteur courir : au bout de ARENA_OLED_SLEEP_MS l'ecran s'eteignait EN
   // PLEINE navigation, et ne revenait qu'au clic suivant. Vu au banc.
-  if (d || upFire || downFire || ok) {
+  // Un OK avale - herite d'un effacement ou de l'appui qui vient d'eteindre -
+  // ne compte pas comme une entree : il ne doit ni reveiller, ni repousser la veille.
+  const bool okInput = ok && !s_okSwallow;
+  if (d || upFire || downFire || okInput) {
     const bool wasAsleep = !s_awake;
     poke();
     serviceWake();                     // l'allumage doit se voir dans CE tick
     // Ecran eteint : le premier appui ne fait que rallumer. Sinon le menu se
     // deplace dans le noir et on decouvre un autre element en le rallumant -
     // ce qui se lit comme un bouton qui saute une ligne.
-    if (wasAsleep) return;
+    if (wasAsleep) {
+      // "Le premier appui ne fait que rallumer" : le garde ne sautait que le
+      // tour ou l'ecran s'allume, mais le RELACHEMENT partait quand meme en
+      // onOk() et entrait dans l'entree pointee. Une fleche etait deja avalee
+      // par pollRepeat ; OK ne l'etait pas.
+      if (ok) s_okSwallow = true;
+      return;
+    }
   }
 
   if (d) onStep(d > 0 ? 1 : -1);
@@ -898,7 +1014,10 @@ void tick() {
   // OK, anti-rebond, avec un appui long pour "revenir en arriere".
   static uint32_t okAt  = 0;
   static bool     okLong = false;
-  if (ok && !okAt) { okAt = now; okLong = false; s_nOk++; Serial.printf("[btn] GPIO%d -> OK\n", s_pinOk); }
+  if (s_okSwallow) {                   // appui herite d'un effacement : on attend
+    if (!ok) { s_okSwallow = false; okAt = 0; okLong = false; }
+  }
+  else if (ok && !okAt) { okAt = now; okLong = false; s_nOk++; Serial.printf("[btn] GPIO%d -> OK\n", s_pinOk); }
   else if (ok && !okLong && now - okAt > OK_LONG_MS) { onOk(true); okLong = true; }
   else if (!ok && okAt) {
     if (!okLong && now - okAt > 25) onOk(false);
