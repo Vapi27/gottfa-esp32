@@ -59,10 +59,28 @@ echo "image $(basename "$IMG")  $((SIZE/1024)) ko"
 # it. The page itself is the witness: hash what the board serves, before and
 # after. (Do not fall back to comparing sizes - two builds of a page often have
 # exactly the same length.)
+# Empreinte de ce que contient reellement le systeme de fichiers.
+fsprint() {
+  printf '%s' "$1" | python3 -c '
+import json, sys
+try:
+    d = json.load(sys.stdin)
+except Exception:
+    d = None
+print("%s octets / %s inserts" % (d.get("fsu", "?"), d.get("ins", "?"))
+      if isinstance(d, dict) else "illisible")' 2>/dev/null || echo "illisible"
+}
+
 PAGEHASH=""
 if [ "$TARGET" = "fs" ]; then
-  PAGEHASH=$(curl -s -m 10 "http://$IP/" | shasum -a 256 | cut -c1-16)
-  echo "page servie actuellement: $PAGEHASH"
+  # ⚠️ NE PLUS temoigner par la page : elle est compilee DANS le firmware depuis
+  # le 2026-08-27 et ne change donc JAMAIS lors d'un envoi de systeme de fichiers.
+  # Ce test rendait un faux echec sur un envoi pourtant reussi - et un faux echec
+  # pousse a recommencer, ce qui est exactement ce qui a mis un mur hors ligne.
+  # Le vrai temoin est ce que l'envoi change : l'occupation du systeme de fichiers
+  # et le nombre d'inserts du plan qu'il contient.
+  PAGEHASH=$(fsprint "$(state)")
+  echo "systeme de fichiers actuel: $PAGEHASH"
 fi
 
   # The board must be able to reach us: bind to the LAN address, not 127.0.0.1.
@@ -174,12 +192,12 @@ for _ in $(seq 1 24); do
   AFTER=$(state) || true
   [ -n "$AFTER" ] || continue
   if [ "$TARGET" = "fs" ]; then
-    NOW=$(curl -s -m 10 "http://$IP/" | shasum -a 256 | cut -c1-16)
+    NOW=$(fsprint "$AFTER")
     [ -n "$NOW" ] || continue
     if [ "$NOW" != "$PAGEHASH" ]; then
       ok "  OK - interface remplacee"
-      echo "     page avant : $PAGEHASH"
-      echo "     page apres : $NOW"
+      echo "     avant : $PAGEHASH"
+      echo "     apres : $NOW"
       exit 0
     fi
     continue
@@ -194,7 +212,7 @@ anterieur au 2026-08-02). Impossible de prouver que la mise a jour a pris."
     exit 0
   fi
 done
-[ "$TARGET" = "fs" ] && die "la carte ressert EXACTEMENT la meme page ($PAGEHASH).
+[ "$TARGET" = "fs" ] && die "le systeme de fichiers est inchange ($PAGEHASH).
 Soit l'image est identique a celle deja en place, soit l'ecriture a echoue."
 die "la carte est revenue avec le MEME build ($FP_BEFORE).
 Soit l'image envoyee est deja celle qui tournait, soit l'ecriture a echoue et la

@@ -621,6 +621,283 @@ static void startServer() {
     r->send(rsp);
   });
 
+
+  // --- State / control ----------------------------------------------------
+  s_server.on("/api/state", HTTP_GET, [](AsyncWebServerRequest* r) {
+    r->send(200, "application/json", stateJson());
+  });
+
+  //  /api/set?mode=arena&bright=180&speed=128&r=255&g=100&b=0&w=0&count=100&budget=9000&order=grbw
+  s_server.on("/api/set", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (r->hasParam("mode")) {
+      arenaled::Mode m = arenaled::modeFromName(r->getParam("mode")->value().c_str());
+      if (m == arenaled::MODE_COUNT) { r->send(400, "text/plain", "bad mode"); return; }
+      arenaled::setMode(m);
+    }
+    if (r->hasParam("bright")) arenaled::setBrightness(param8(r, "bright", arenaled::brightness()));
+    if (r->hasParam("speed"))  arenaled::setSpeed(param8(r, "speed", arenaled::speed()));
+    if (r->hasParam("framehz")) arenaled::setFrameHz(param8(r, "framehz", arenaled::frameHz()));
+    if (r->hasParam("insb")) arenaled::setInsBright(param8(r, "insb", arenaled::insBright()));
+    // Les deux etages permanents, traites ensemble parce que le verrou fait
+    // dependre l'un de l'autre. Bouger les DEUX dans la meme requete est un
+    // reglage explicite : le verrou ne s'en mele pas, sans quoi on ne pourrait
+    // plus jamais refixer l'equilibre une fois verrouille.
+    // Deux reglages independants depuis que les champignons sont un gain et non
+    // un niveau : plus de verrou, plus de rapport a conserver.
+    if (r->hasParam("gi"))    arenaled::setGi(param8(r, "gi", arenaled::gi()));
+    if (r->hasParam("champ")) arenaled::setChamp(param8(r, "champ", arenaled::champ()));
+    if (r->hasParam("density")) arenaled::setDensity(param8(r, "density", arenaled::density()));
+    if (r->hasParam("warm"))   arenaled::setWarm(param8(r, "warm", arenaled::warm()));
+    if (r->hasParam("inc"))    arenaled::setIncandescent(r->getParam("inc")->value().toInt() != 0);
+    if (r->hasParam("boot"))   arenaled::setBootOn(r->getParam("boot")->value().toInt() != 0);
+    if (r->hasParam("r") || r->hasParam("g") || r->hasParam("b") || r->hasParam("w")) {
+      arenaled::Rgbw c = arenaled::color();
+      c.r = param8(r, "r", c.r);
+      c.g = param8(r, "g", c.g);
+      c.b = param8(r, "b", c.b);
+      c.w = param8(r, "w", c.w);
+      arenaled::setColor(c);
+    }
+    if (r->hasParam("gir") || r->hasParam("gig") ||
+        r->hasParam("gib") || r->hasParam("giw")) {
+      arenaled::Rgbw c = arenaled::giColor();
+      c.r = param8(r, "gir", c.r);
+      c.g = param8(r, "gig", c.g);
+      c.b = param8(r, "gib", c.b);
+      c.w = param8(r, "giw", c.w);
+      arenaled::setGiColor(c);
+    }
+    if (r->hasParam("order")) {
+      if (!arenaled::setOrder(r->getParam("order")->value().c_str())) {
+        r->send(400, "text/plain", "bad order (grbw|rgbw|gbrw|brgw|rbgw|bgrw)");
+        return;
+      }
+    }
+    if (r->hasParam("count"))  arenaled::setCount((uint16_t)r->getParam("count")->value().toInt());
+    if (r->hasParam("budget")) arenaled::setBudgetMa((uint16_t)r->getParam("budget")->value().toInt());
+    if (r->hasParam("repeater")) arenaled::setRepeater(r->getParam("repeater")->value().toInt() != 0);
+    if (r->hasParam("pin"))      arenaled::setPin((uint8_t)r->getParam("pin")->value().toInt());
+    if (r->hasParam("statuspin")) {
+      const uint8_t p = (uint8_t)r->getParam("statuspin")->value().toInt();
+      if (p <= 48) {
+        s_statPin = p;
+        s_prefs.putUChar("statpin", p);
+      }
+    }
+    // /api/set?btnup=7&btndown=15&btnok=17
+    // Les trois ensemble : un remappage partiel laisserait deux roles sur la
+    // meme broche, donc un poussoir muet et un autre qui fait deux choses.
+    if (r->hasParam("btnup") && r->hasParam("btndown") && r->hasParam("btnok")) {
+      arenaoled::setButtons((uint8_t)r->getParam("btnup")->value().toInt(),
+                            (uint8_t)r->getParam("btndown")->value().toInt(),
+                            (uint8_t)r->getParam("btnok")->value().toInt());
+    }
+    // /api/set?btnrot=1 : faire tourner les roles d'un cran, a l'aveugle.
+    if (r->hasParam("btnrot")) arenaoled::rotateButtons();
+    // /api/set?statusbright=0..255 - le temoin de la carte, pas le mur.
+    if (r->hasParam("statusbright")) {
+      long v = r->getParam("statusbright")->value().toInt();
+      if (v < 0)   v = 0;
+      if (v > 255) v = 255;
+      s_statBright = (uint8_t)v;
+      s_prefs.putUChar("statbr", s_statBright);
+    }
+    if (r->hasParam("statusled")) {
+      s_statOn = r->getParam("statusled")->value().toInt() != 0;
+      s_prefs.putUChar("staten", s_statOn ? 1 : 0);
+      Serial.printf("[net] pixel de statut : %s\n", s_statOn ? "allume (il peut couper la chaine)" : "eteint");
+    }
+    // /api/set?txpwr=13   puissance d emission en dBm (2..20). Baisser echange
+    // de la portee contre des rafales de courant plus petites : c est le seul
+    // levier logiciel sur un brownout, et il ne repare pas une alimentation.
+    if (r->hasParam("txpwr")) {
+      float d = r->getParam("txpwr")->value().toFloat();
+      if (d < 2)  d = 2;
+      if (d > 20) d = 20;
+      s_txq = (uint8_t)lroundf(d * 4.0f);
+      s_txDerated = false;              // choix explicite du proprietaire
+      s_prefs.putUChar("txq", s_txq);
+      applyTxPower();
+    }
+    r->send(200, "application/json", stateJson());
+  });
+
+  // /api/latch?n=L9,L48   lamps held lit through attract, by the MACHINE's name
+  // /api/latch?clear=1    release them all
+  // Named, not numbered: the owner reads L9 off the playfield, and the mask
+  // underneath is in PinMAME's numbering, which nobody should have to know.
+  s_server.on("/api/latch", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (r->hasParam("clear")) { arenaled::setLatched(0); arenaled::save(); }
+    else if (r->hasParam("n")) {
+      uint64_t m = 0;
+      String list = r->getParam("n")->value();
+      list.trim();
+      int start = 0;
+      while (start < (int)list.length()) {
+        int comma = list.indexOf(',', start);
+        if (comma < 0) comma = list.length();
+        String one = list.substring(start, comma);
+        one.trim();
+        start = comma + 1;
+        if (!one.length()) continue;
+        const int idx = arenapf::indexOf(one.c_str());
+        const arenapf::Insert* ins = (idx >= 0) ? arenapf::insert((uint8_t)idx) : nullptr;
+        if (!ins || ins->lamp < 0) {
+          r->send(400, "text/plain", "unknown insert: " + one);
+          return;
+        }
+        m |= (1ULL << ins->lamp);
+      }
+      arenaled::setLatched(m);
+      arenaled::save();
+    }
+    // Answer in the owner's names, not in the internal mask.
+    String out = "{\"latched\":[";
+    bool first = true;
+    const uint64_t m = arenaled::latched();
+    for (uint8_t i = 0; i < arenapf::insertCount(); i++) {
+      const arenapf::Insert* ins = arenapf::insert(i);
+      if (!ins || ins->lamp < 0 || !((m >> ins->lamp) & 1ULL)) continue;
+      if (!first) out += ',';
+      first = false;
+      out += "\"" + String(ins->name) + "\"";
+    }
+    out += "]}";
+    r->send(200, "application/json", out);
+  });
+
+  //  /api/music?e=..&b=..&t=..   0..255 — drive the music mode from anything
+  //  that can hit REST at ~20 Hz. Overrides the on-board mic for 2 s per push.
+  s_server.on("/api/music", HTTP_GET, [](AsyncWebServerRequest* r) {
+    arenaled::musicPush(param8(r, "e", 0), param8(r, "b", 0), param8(r, "t", 0));
+    r->send(200, "text/plain", "ok");
+  });
+
+  s_server.on("/api/save", HTTP_GET, [](AsyncWebServerRequest* r) {
+    arenaled::save();
+    r->send(200, "text/plain", "saved");
+  });
+
+  // --- Mapping wizard -----------------------------------------------------
+  //  /api/identify?led=42 | ?zone=3 | ?clear=1   (ms= optional, default 10 s)
+  s_server.on("/api/identify", HTTP_GET, [](AsyncWebServerRequest* r) {
+    uint32_t ms = r->hasParam("ms") ? (uint32_t)r->getParam("ms")->value().toInt() : 10000;
+    if (r->hasParam("clear"))     arenaled::clearIdentify();
+    else if (r->hasParam("led"))  arenaled::identifyLed(r->getParam("led")->value().toInt(), ms);
+    else if (r->hasParam("zone")) arenaled::identifyZone(r->getParam("zone")->value().toInt(), ms);
+    else { r->send(400, "text/plain", "led= | zone= | clear=1"); return; }
+    r->send(200, "text/plain", "ok");
+  });
+
+  // ---- Sub-paths must be registered BEFORE their parent --------------------
+  // This server matches a handler when the request URL equals its URI *or*
+  // starts with it followed by '/'. So "/api/zones" also answers
+  // "/api/zones/reset", and whichever was registered first wins. Registered the
+  // other way round, /api/zones/reset silently returned the zone list and the
+  // UI's "Reset to template" button did nothing at all - which is exactly what
+  // it had been doing, unnoticed, since there was no hardware to try it on.
+  s_server.on("/api/zones/reset", HTTP_GET, [](AsyncWebServerRequest* r) {
+    arenamap::reset();
+    arenamap::save();
+    r->send(200, "application/json", arenamap::toJson());
+  });
+
+  s_server.on("/api/ledmap/reset", HTTP_GET, [](AsyncWebServerRequest* r) {
+    arenapf::clearAssignment();
+    arenapf::save();
+    r->send(200, "text/plain", "cleared");
+  });
+
+  // Un pixel rejoint ou quitte un groupe, un par un : c'est le geste de la
+  // cartographie a la main. Un groupe n'etant plus une plage, il n'y a pas
+  // d'autre facon de decrire "ce bumper-la et celui d'en face, pas ce qu'il y a
+  // entre les deux".
+  //   /api/zone/assign?led=37&z=4     -> le pixel 37 rejoint le groupe 4
+  //   /api/zone/assign?led=37&z=-1    -> il n'appartient plus a rien
+  s_server.on("/api/zone/assign", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("led") || !r->hasParam("z")) {
+      r->send(400, "text/plain", "led= et z= requis (z=-1 pour retirer)");
+      return;
+    }
+    const long led = r->getParam("led")->value().toInt();
+    const long z   = r->getParam("z")->value().toInt();
+    if (led < 0 || led >= LED_MAX) { r->send(400, "text/plain", "led hors chaine"); return; }
+    const uint8_t zz = (z < 0) ? arenamap::ZONE_NONE : (uint8_t)z;
+    if (!arenamap::setLedZone((uint16_t)led, zz)) {
+      r->send(400, "text/plain", "groupe inconnu");
+      return;
+    }
+    arenamap::save();
+    r->send(200, "application/json", arenamap::toJson());
+  });
+
+  // Creer / renommer / supprimer un groupe sans reecrire toute la table.
+  //   /api/zone/add?n=pop-bumpers          -> groupe vide, a remplir pixel par pixel
+  //   /api/zone/name?z=4&n=eclairage
+  //   /api/zone/del?z=4
+  s_server.on("/api/zone/add", HTTP_GET, [](AsyncWebServerRequest* r) {
+    const String n = r->hasParam("n") ? r->getParam("n")->value() : String("groupe");
+    if (!arenamap::addZone(n.c_str(), 0, 0)) { r->send(400, "text/plain", "table pleine"); return; }
+    arenamap::save();
+    r->send(200, "application/json", arenamap::toJson());
+  });
+  s_server.on("/api/zone/name", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("z") || !r->hasParam("n")) { r->send(400, "text/plain", "z= et n= requis"); return; }
+    if (!arenamap::renameZone((uint8_t)r->getParam("z")->value().toInt(),
+                              r->getParam("n")->value().c_str())) {
+      r->send(400, "text/plain", "groupe inconnu"); return;
+    }
+    arenamap::save();
+    r->send(200, "application/json", arenamap::toJson());
+  });
+  s_server.on("/api/zone/del", HTTP_GET, [](AsyncWebServerRequest* r) {
+    if (!r->hasParam("z")) { r->send(400, "text/plain", "z= requis"); return; }
+    if (!arenamap::removeZone((uint8_t)r->getParam("z")->value().toInt())) {
+      r->send(400, "text/plain", "groupe inconnu"); return;
+    }
+    arenamap::save();
+    r->send(200, "application/json", arenamap::toJson());
+  });
+
+  // Un pixel, sa luminosite et sa teinte.
+  //   /api/pixel?led=37                 -> ce qu'il porte
+  //   /api/pixel?led=37&trim=180        -> sa luminosite propre (0..255, 255 = neutre)
+  //   /api/pixel?led=37&r=255&g=40&b=0  -> sa teinte
+  //
+  // Les deux ne vont PAS au meme endroit, et c'est deliberé. La luminosite est
+  // ecrite sur le pixel : elle corrige la lampe - dispersion du lot, taille de
+  // l'insert, epaisseur du plastique - et ces causes suivent la LED. La teinte
+  // est ecrite sur l'INSERT : c'est le plastique moule, il reste sur le plateau
+  // quand on refait passer le fil autrement.
+  //
+  // Consequence assumee : demander une teinte pour un pixel qui n'est pas encore
+  // pose n'a nulle part ou aller. On le DIT, avec le geste qui manque. Accepter
+  // en silence rendrait un reglage qui ne se voit jamais.
+  // --- la photo du plateau, et les points dessus ---------------------------
+  //
+  // POST /api/pfimg  (corps = le JPEG brut)  -> /pf.jpg
+  // Le plan prefere /pf.jpg quand il existe et retombe sur le playfield.jpg
+  // livre sinon. Deux fichiers separes, deliberement : une photo televersee est
+  // le travail du proprietaire, et /update?target=fs reecrit toute la partition
+  // - c'est deja ce qui avait fait perdre la cartographie une fois. Le sien
+  // porte un autre nom pour que la prochaine mise a jour de l'interface ne
+  // l'emporte pas avec elle.
+  s_server.on("/api/pfimg", HTTP_POST,
+    [](AsyncWebServerRequest* r) {
+      const bool ok = LittleFS.exists("/pf.jpg") && LittleFS.open("/pf.jpg", "r").size() > 0;
+      r->send(ok ? 200 : 400, "text/plain", ok ? "photo enregistree" : "rien recu");
+    },
+    nullptr,
+    [](AsyncWebServerRequest* r, uint8_t* data, size_t len, size_t index, size_t total) {
+      static File up;
+      if (index == 0) {
+        up = LittleFS.open("/pf.jpg", "w");
+        Serial.printf("[pf] photo entrante, %u octets\n", (unsigned)total);
+      }
+      if (up) up.write(data, len);
+      if (up && index + len >= total) { up.close(); Serial.println("[pf] photo enregistree"); }
+    });
+
   // --- Son d'attract -------------------------------------------------------
   //
   // Le fichier est joue par le NAVIGATEUR, pas par la carte : le mur n'a ni

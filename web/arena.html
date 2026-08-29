@@ -277,6 +277,9 @@ header h1 img{filter:saturate(.9)}
 
     <!-- etat "placement" -->
     <div id="wz-map" style="display:none">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <b style="opacity:.75">Placing pixels</b>
+        <button onclick="wzExit()" title="Escape">&larr; Close</button></div>
       <p class="hint" id="wz-say"></p>
       <div class="row">
         <span class="bar"><i id="wz-bar" style="width:0"></i></span>
@@ -298,6 +301,9 @@ header h1 img{filter:saturate(.9)}
          proprietaire s'est retrouve devant un reglage inerte et un message qui
          l'envoyait vers un panneau inexistant. -->
     <div id="wz-group" style="display:none">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <b style="opacity:.75">Groups</b>
+        <button onclick="wzExit()" title="Escape">&larr; Close</button></div>
       <p class="hint" id="gr-say"></p>
       <div class="row"><label>Group</label>
         <select id="gr-sel" onchange="grPick(this.value)"></select>
@@ -314,6 +320,9 @@ header h1 img{filter:saturate(.9)}
 
     <!-- etat "edition d'un insert" -->
     <div id="wz-edit" style="display:none">
+      <div class="row" style="justify-content:space-between;align-items:center">
+        <b style="opacity:.75">Editing a pad</b>
+        <button onclick="wzExit()" title="Escape">&larr; Close</button></div>
       <p class="hint" id="ed-say"></p>
       <div class="row"><label>Name</label>
         <input type="text" id="ed-name" maxlength="7" placeholder="from your manual">
@@ -1035,6 +1044,33 @@ function wzSpotOff() { api('/api/identify?clear=1'); wz.live = false; wzDraw(); 
 // Leaving the wizard has to put the wall back the way it was: the spotlight is
 // an overlay that outlives the panel being closed, so a wizard you merely
 // navigate away from leaves one pixel blinking white for ten minutes.
+// UNE seule facon de sortir, quel que soit l'endroit ou l'on est.
+//
+// Chaque etat avait bien une sortie, mais elle s'appelait "Stop" dans le
+// placement, "Done" dans les groupes, "Done" encore dans l'edition - et
+// c'etait toujours le DERNIER bouton d'une rangee de cinq. Rien ne disait que
+// c'etait la porte. Rapporte tel quel : "quand tu rentres dans un menu tu peux
+// plus ressortir".
+//
+// wzExit() ferme proprement n'importe quel etat : elle eteint le projecteur du
+// placement, oublie la pastille en cours d'edition, et revient au repos. Elle
+// est cablee sur un bouton place EN HAUT de chaque panneau, toujours au meme
+// endroit et sous le meme nom, et sur la touche Echap.
+function wzExit() {
+  wzSpotOff();
+  edSel = -1;
+  wzUi('idle');
+  wzDraw();
+}
+document.addEventListener('keydown', e => {
+  if (e.key !== 'Escape') return;
+  // Ne pas voler Echap a un champ de saisie : on ferme le panneau seulement si
+  // le focus n'est pas dans un champ.
+  const t = document.activeElement;
+  if (t && /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName)) { t.blur(); return; }
+  if (typeof wzState !== 'undefined' && wzState !== 'idle') wzExit();
+});
+
 function wzFinish() {
   wzUi('idle');
   wzSpotOff();
