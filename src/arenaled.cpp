@@ -677,45 +677,45 @@ static void fxMusic(Rgbw* buf) {
   // emporte ce fill avec le fond qu'il portait.
   fill(buf, scale(s_color, 0.10f * (float)s_gi / 255.0f));
 
-  // Niveau : attaque vive, retombee lente. C'est ce qui donne la frappe sans la
-  // nervosite - mesure a l'appui, les graves oscillent de 0,23 a 0,86 d'un
-  // instant a l'autre et suivre l'enveloppe brute faisait sautiller la colonne.
-  static float lvl = 0;
+  // TROIS BANDES A LEUR HAUTEUR : graves en bas, medium au milieu, aigus en haut.
+  //
+  // Le mur portait un seul niveau, tire des graves, qui montait et descendait en
+  // bloc : le contenu de la musique n'apparaissait nulle part. Le micro separe
+  // pourtant deja trois enveloppes. Sur un plateau ou la seule geometrie fiable
+  // est la hauteur, les poser du grave au bas vers l'aigu en haut donne un
+  // analyseur de spectre - et c'est ce qu'on lit instinctivement.
+  //
+  // Chacune garde son attaque vive et sa retombee lente : sans ca, mesure a
+  // l'appui, les enveloppes oscillent de 0,23 a 0,86 d'un instant a l'autre et
+  // les bandes sautillent au lieu de respirer.
+  static float bas = 0, mil = 0, hau = 0;
   {
-    const float cible = 0.10f + 0.90f * s_musB * s_musB;
-    const float tau = (cible > lvl) ? 0.030f : 0.360f;
-    lvl += (cible - lvl) * (1.0f - expf(-dt / tau));
+    const float cb = s_musB * s_musB, cm = s_musE * s_musE, ch = s_musT * s_musT;
+    const float mont = 0.030f, desc = 0.360f;
+    bas += (cb - bas) * (1.0f - expf(-dt / (cb > bas ? mont : desc)));
+    mil += (cm - mil) * (1.0f - expf(-dt / (cm > mil ? mont : desc)));
+    hau += (ch - hau) * (1.0f - expf(-dt / (ch > hau ? mont : desc)));
   }
-  static float pk = 0;
-  pk -= dt * 0.26f;
-  if (lvl > pk) pk = lvl;
-  if (pk < 0) pk = 0;
 
   // Eclat de battement : tout le mur monte d'un coup et retombe en 0,25 s. C'est
-  // la couche qui se VOIT, celle qui fait que le mur bat avec la musique.
+  // la couche qui se VOIT, celle qui fait battre le mur avec la musique.
   const float tb = (now - s_musBeatMs) / 1000.0f;
-  const float flash = (tb < 0.25f) ? (1.0f - tb / 0.25f) * 0.45f : 0.0f;
+  const float flash = (tb < 0.25f) ? (1.0f - tb / 0.25f) * 0.35f : 0.0f;
 
   for (uint16_t i = 0; i < s_count; i++) {
     const float h = s_ledH[i];
 
-    // Degrade continu : plein en bas, il s'eteint en approchant du niveau. Le
-    // bord fait 0,22 de haut - assez large pour qu'un plateau ou les pixels sont
-    // disperses montre un fondu, et non un escalier.
-    float k = (lvl - h) / 0.22f;
-    if (k > 1.0f) k = 1.0f;
-    if (k < 0.0f) k = 0.0f;
-    // Racine : l'oeil n'est pas lineaire, et sans elle le degrade parait ecrase
-    // en bas et absent en haut.
-    float v = sqrtf(k) * 0.62f;
+    // Melange des trois bandes selon la hauteur, en triangle : chaque bande a son
+    // domaine et les frontieres se fondent, sans marche d'escalier. C'est ce
+    // fondu qui distingue un analyseur d'un empilement de trois barres.
+    const float wB = h < 0.5f ? (1.0f - h * 2.0f) : 0.0f;
+    const float wH = h > 0.5f ? ((h - 0.5f) * 2.0f) : 0.0f;
+    const float wM = 1.0f - wB - wH;
+    float v = bas * wB + mil * wM + hau * wH;
 
-    // Crete : une bande large et lumineuse qui coiffe la colonne. Elle etait un
-    // trait de 0,035 - sur 75 pixels disperses, elle ne tombait sur aucun la
-    // moitie du temps et clignotait sans raison apparente.
-    const float dpk = fabsf(h - pk);
-    if (dpk < 0.09f) v += (1.0f - dpk / 0.09f) * 0.55f;
-
-    v += flash;
+    // Racine : l'oeil n'est pas lineaire. Sans elle le degrade parait ecrase en
+    // bas et absent en haut.
+    v = sqrtf(v > 0.0f ? v : 0.0f) * 0.88f + flash;
     if (v > 1.0f) v = 1.0f;
     if (v > 0.0f) buf[i] = addSat(buf[i], scale(s_color, v));
   }
@@ -736,7 +736,7 @@ static void fxMusic(Rgbw* buf) {
     for (int k = 0; k < n; k++)
       for (int essai = 0; essai < 8; essai++) {
         const uint16_t c = esp_random() % s_count;
-        if (s_ledH[c] > lvl) { s_spark[c] = 255; break; }
+        if (s_ledH[c] > 0.55f) { s_spark[c] = 255; break; }   // les aigus scintillent en haut
       }
   }
   for (uint16_t i = 0; i < s_count; i++)
