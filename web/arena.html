@@ -5,22 +5,22 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Wall Pinball Playfield</title>
 <style>
-  /* Identite FA·CONTROL : creme et cuivre, derivee de lisy.dev. Reprise de la
-     page d'installation USB, dont le commentaire dit qu'elle partage sa palette
-     avec l'interface de l'appareil « pour que les deux forment un tout ». Le mur
-     rejoint cette famille.
-     --amber et --gold sont CONSERVES : ce n'est pas du chrome, ce sont les
-     couleurs des lampes du plateau. Une ampoule reste ambree quel que soit le
-     fond de la page. */
-  :root{--bg:#F2E9DC;--panel:#FBF6EF;--panel2:#F2E9DC;
-        --dark:#33201A;--dark-2:#281713;
-        --line:#DDCEBB;--line-2:#C6B29B;
-        --cu:#A96A47;--cu-dk:#6B3A20;--cu-hi:#BE8360;
-        --txt:#2E2622;--dim:#6F6053;--accent:#A96A47;
-        --amber:#ff9b21;--gold:#ffc046;--red:#8F2A0F;--ok:#2A6E2C;--r:10px}
+  /* Identite FA·CONTROL, relevee sur l'interface elle-meme et non sur la page
+     d'installation - laquelle declare une palette creme dans son :root mais en
+     porte un SECOND qui l'ecrase. C'est ce doublon qui m'avait egare : les
+     valeurs reelles, mesurees dans le navigateur, sont sombres et ambrees.
+     Le mur y revient donc a peu de chose pres a sa palette d'origine. */
+  :root{--bg:#0c0a07;--panel:#14110c;--panel2:#1a160f;
+        --dark-2:#281713;
+        --line:#3a2e14;--line-2:#C6B29B;
+        --cu:#ffb000;--cu-dk:#7a5a10;--cu-hi:#ffd34d;
+        --txt:#cdbb91;--dim:#7d7059;--accent:#ffb000;
+        --amber:#ffb000;--gold:#ffd34d;--red:#8F2A0F;--ok:#2A6E2C;--r:0}
+  /* Le halo : c'est lui qui donne l'aspect instrument plutot que page web. */
+  h1,h2,legend,.tile .nm{text-shadow:0 0 8px rgba(255,176,0,.45)}
   *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--txt);
-       font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+  body{margin:0;background:var(--bg);color:var(--txt);line-height:1.5;
+       font:14px/1.5 ui-monospace,"Cascadia Mono",Consolas,"Lucida Console",monospace}
   /* Signature FA·CONTROL : bandeau brun profond, lisere cuivre de 3 px. */
   header{padding:14px 16px;border-bottom:3px solid var(--cu);
          background:var(--dark-2);position:sticky;top:0;z-index:10;
@@ -35,39 +35,45 @@
   #pwr.on{border-color:var(--cu-hi);color:var(--dark-2);background:var(--cu-hi);
           box-shadow:0 0 16px color-mix(in srgb, var(--amber) 45%, transparent)}
   #pwr:disabled{opacity:.4;cursor:default}
-  h1{margin:0;font-size:18px;letter-spacing:.3em;text-transform:uppercase;color:var(--bg)}
-  .stat{margin-top:6px;font-size:12px;color:#C6B29B;display:flex;gap:14px;flex-wrap:wrap}
-  .stat b{color:var(--bg);font-weight:600}
+  h1{margin:0;font-size:1.35rem;letter-spacing:.3em;text-transform:uppercase;color:var(--cu);font-weight:700}
+  .stat{margin-top:6px;font-size:11px;color:var(--dim);display:flex;gap:14px;flex-wrap:wrap}
+  .stat b{color:var(--txt);font-weight:700}
   main{max-width:820px;margin:0 auto;padding:16px}
-  /* Onglets, repris de gottfa80-lisyctrl. Quatorze panneaux qui defilent, c'est
-     une page qu'on parcourt au pouce en cherchant ; quatre onglets, c'est une
-     application. Le masquage par onglet passe par une CLASSE et non par
-     style.display, pour ne pas entrer en conflit avec les sections que
-     showRelevant() masque deja selon le mode. */
-  nav.tabs{display:flex;gap:.25rem;overflow-x:auto;padding:.55rem .6rem 0;
-           scrollbar-width:none;position:sticky;top:78px;z-index:9;
-           background:var(--bg);border-bottom:1px solid var(--line-2)}
-  nav.tabs::-webkit-scrollbar{display:none}
-  nav.tabs button{flex:none;background:transparent;color:var(--dim);border:0;
-           border-bottom:2px solid transparent;padding:.55rem .8rem;font-size:.9rem;
-           border-radius:8px 8px 0 0;cursor:pointer;white-space:nowrap}
-  nav.tabs button.active{color:var(--cu-dk);border-bottom-color:var(--cu);font-weight:600}
+  /* Menu de tuiles numerotees, repris de FA·CONTROL. Ce n'est pas une barre
+     d'onglets : c'est un sommaire. On choisit une entree, on y entre, on ressort
+     par ◀ MENU. Sur quatorze sections c'est plus lisible qu'un ruban a faire
+     defiler, et ca donne a chaque entree la place d'expliquer ce qu'elle fait.
+     Le masquage passe par une CLASSE et non par style.display, pour ne pas
+     entrer en conflit avec showRelevant() qui masque deja des sections selon le
+     mode. */
+  .menu{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));
+        gap:.6rem;margin:0 0 1rem}
+  .tile{background:var(--panel);border:1px solid var(--line-2);padding:1rem;
+        cursor:pointer;text-align:left;color:var(--txt);font:inherit;
+        letter-spacing:.1em;transition:box-shadow .12s,transform .12s}
+  .tile:hover{border-color:var(--cu);transform:translateY(-1px);
+        box-shadow:0 0 14px rgba(255,176,0,.25),inset 0 0 14px rgba(255,176,0,.05)}
+  .tile .no{color:var(--cu-dk);font-size:.68rem;display:block;margin-bottom:.3rem;font-weight:700}
+  .tile .nm{color:var(--cu);font-size:1.02rem;font-weight:700;display:block}
+  .tile .ds{color:var(--dim);font-size:.66rem;display:block;margin-top:.4rem;letter-spacing:.04em}
+  .shead{display:flex;align-items:center;gap:1rem;margin:0 0 1rem}
+  .shead button{font-size:.72rem;letter-spacing:.14em}
   section.tabhide{display:none !important}
-  section{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
+  section{background:var(--panel);border:1px solid var(--line-2);border-radius:0;
           padding:14px;margin-bottom:14px}
-  h2{margin:0 0 10px;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--cu-dk)}
+  h2{margin:0 0 10px;font-size:.95rem;letter-spacing:.28em;text-transform:uppercase;color:var(--cu-dk);font-weight:700}
   .modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px}
-  button{font:inherit;color:var(--cu-dk);background:var(--panel);border:1px solid var(--cu);
+  button{font:inherit;letter-spacing:.1em;color:var(--cu);background:transparent;border:1px solid var(--cu-dk);
          border-radius:8px;padding:10px 12px;cursor:pointer}
-  button:hover{background:var(--cu);color:#fff}
-  button.on{background:var(--cu);border-color:var(--cu-dk);color:#fff;font-weight:600}
+  button:hover{border-color:var(--cu);box-shadow:0 0 14px rgba(255,176,0,.25),inset 0 0 14px rgba(255,176,0,.05)}
+  button.on{background:rgba(255,176,0,.14);border-color:var(--cu);color:var(--cu-hi);font-weight:700}
   .row{display:flex;align-items:center;gap:12px;margin:10px 0}
   .row label{width:96px;font-size:13px;color:var(--dim);flex:none}
   .row output{width:52px;text-align:right;font-variant-numeric:tabular-nums;font-size:13px}
   input[type=range]{flex:1;accent-color:var(--accent)}
-  select{background:#fff;color:var(--txt);border:1px solid var(--line-2);
+  select{background:var(--panel2);color:var(--txt);border:1px solid var(--line-2);
          border-radius:6px;padding:7px 9px;width:100%;font:inherit}
-  input[type=number],input[type=text],input[type=password]{background:#fff;color:var(--txt);
+  input[type=number],input[type=text],input[type=password]{background:var(--panel2);color:var(--txt);
     border:1px solid var(--line);border-radius:6px;padding:7px 9px;width:100%}
   .presets{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:6px}
   .sw{width:34px;height:34px;border-radius:50%;border:2px solid var(--line);cursor:pointer}
@@ -90,7 +96,7 @@
    reellement quelque chose. */
 button.tog{background:transparent;border:1px solid var(--amber);color:var(--amber);
            font-size:12px;padding:5px 11px;border-radius:14px;font-weight:500}
-button.tog.on{background:var(--cu-hi);border-color:var(--cu-dk);color:#fff}
+button.tog.on{background:rgba(255,176,0,.14);border-color:var(--cu);color:var(--cu-hi)}
 header h1 img{filter:saturate(.9)}
 </style>
 </head>
@@ -131,8 +137,8 @@ header h1 img{filter:saturate(.9)}
   <button id="pwr" onclick="togglePower()" title="on / off" aria-label="on / off"><svg viewBox="0 0 24 24" width="1.1em" height="1.1em" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" focusable="false" style="vertical-align:-.15em"><path d="M12 3.5v8"/><path d="M7.1 6.3a7 7 0 1 0 9.8 0"/></svg></button>
 </header>
 
-<nav class="tabs" id="tabs"></nav>
 <main>
+<div class="menu" id="menu"></div>
   <section>
     <h2>Lighting mode</h2>
     <div class="modes" id="modes"></div>
@@ -730,46 +736,78 @@ function sndDel() {
   });
 }
 
-// --- Onglets ---------------------------------------------------------------
+// --- Sommaire, a la maniere de FA·CONTROL ----------------------------------
 //
-// Quatorze panneaux qui defilent, c'est une page qu'on parcourt au pouce en
-// cherchant. Quatre onglets, c'est une application - et c'est le design de
-// gottfa80-lisyctrl, pour que les deux produits de la maison se ressemblent.
-//
-// Le regroupement suit ce qu'on FAIT, pas l'ordre historique des sections :
-// ce qu'on touche tous les jours d'abord, ce qu'on regle une fois ensuite,
-// ce qu'on ouvre quand ca va mal en dernier.
-const TABS = [
-  { id: 'light',  label: 'Light',   titles: ['Lighting mode', 'Level', 'Background glow (GI)', 'Colour'] },
-  { id: 'game',   label: 'Machine', titles: ['Which machine', 'Playfield', 'Attract sound'] },
-  { id: 'setup',  label: 'Setup',   titles: ['Chain setup', 'Network', 'Other walls', 'Siri & voice assistants'] },
-  { id: 'care',   label: 'Care',    titles: ['Firmware', 'Diagnostics', 'Reset'] },
+// Un menu de tuiles numerotees plutot qu'un ruban d'onglets : sur quatorze
+// sections, un sommaire se lit d'un coup d'oeil la ou un ruban se fait defiler,
+// et chaque entree a la place de dire ce qu'elle fait. On y entre, on en sort
+// par ◀ MENU. C'est la navigation de FA·CONTROL, pour que les deux appareils de
+// la maison se pilotent pareil.
+const MENU = [
+  ['Lighting mode',        'Attract, all on, wave, music'],
+  ['Level',                'Brightness, speed, filament'],
+  ['Background glow (GI)', 'Inserts, champignons, background'],
+  ['Colour',               'The tint every mode is drawn in'],
+  ['Which machine',        'Load your pinball\'s pack'],
+  ['Playfield',            'Map the pixels, groups, photo'],
+  ['Attract sound',        'Played by this browser'],
+  ['Chain setup',          'Count, order, power budget'],
+  ['Network',              'WiFi, password'],
+  ['Other walls',          'Several walls together'],
+  ['Siri & voice',         'Matter, if the board carries it'],
+  ['Firmware',             'Update the wall'],
+  ['Diagnostics',          'What the board reports'],
+  ['Reset',                'Put things back'],
 ];
-let curTab = localStorage.getItem('tab') || 'light';
+let curSec = null;
 
-function tabOf(sec) {
-  const h = sec.querySelector('h2');
-  const t = h ? h.textContent.trim() : '';
-  for (const g of TABS) if (g.titles.some(x => t.startsWith(x.split(' &')[0]))) return g.id;
-  return TABS[0].id;                       // une section inconnue reste visible quelque part
+function secTitle(sec) { const h = sec.querySelector('h2'); return h ? h.textContent.trim() : ''; }
+function menuShow() {
+  curSec = null;
+  try { localStorage.removeItem('sec'); } catch (e) {}
+  $('menu').style.display = '';
+  document.querySelectorAll('main > section').forEach(s => s.classList.add('tabhide'));
+  window.scrollTo(0, 0);
 }
-function tabShow(id) {
-  curTab = id;
-  try { localStorage.setItem('tab', id); } catch (e) {}
-  document.querySelectorAll('main > section').forEach(sec => {
-    sec.classList.toggle('tabhide', tabOf(sec) !== id);
-  });
-  document.querySelectorAll('#tabs button').forEach(b => {
-    b.classList.toggle('active', b.dataset.tab === id);
+function secShow(title) {
+  curSec = title;
+  try { localStorage.setItem('sec', title); } catch (e) {}
+  $('menu').style.display = 'none';
+  document.querySelectorAll('main > section').forEach(s => {
+    s.classList.toggle('tabhide', secTitle(s) !== title);
   });
   window.scrollTo(0, 0);
 }
-function tabsBuild() {
-  const n = $('tabs');
-  if (!n) return;
-  n.innerHTML = TABS.map(g =>
-    '<button data-tab="' + g.id + '" onclick="tabShow(\'' + g.id + '\')">' + g.label + '</button>').join('');
-  tabShow(curTab);
+function menuBuild() {
+  const secs = [...document.querySelectorAll('main > section')];
+  // Une entree par section REELLEMENT presente : si une section disparait un
+  // jour, le sommaire ne pointera pas dans le vide.
+  const known = new Map(MENU.map(([t, d]) => [t, d]));
+  let n = 0;
+  $('menu').innerHTML = secs.map(sec => {
+    const t = secTitle(sec);
+    if (!t) return '';
+    n++;
+    const d = known.get(t) || known.get(t.replace(' &amp; voice assistants', ' & voice')) || '';
+    return '<button class="tile" onclick="secShow(' + JSON.stringify(t).replace(/"/g, '&quot;') + ')">' +
+           '<span class="no">' + String(n).padStart(2, '0') + '</span>' +
+           '<span class="nm">' + t + '</span>' +
+           (d ? '<span class="ds">' + d + '</span>' : '') + '</button>';
+  }).join('');
+  // Un retour vers le sommaire en tete de CHAQUE section.
+  secs.forEach(sec => {
+    if (sec.querySelector('.shead')) return;
+    const h = sec.querySelector('h2');
+    if (!h) return;
+    const d = document.createElement('div');
+    d.className = 'shead';
+    d.innerHTML = '<button onclick="menuShow()">&#9664; MENU</button>';
+    h.parentNode.insertBefore(d, h);
+    d.appendChild(h);
+  });
+  let want = null;
+  try { want = localStorage.getItem('sec'); } catch (e) {}
+  if (want && secs.some(s => secTitle(s) === want)) secShow(want); else menuShow();
 }
 
 const toast = m => {
@@ -1781,7 +1819,7 @@ function matterForget() {
 
 const poll = () => fetch('/api/state').then(r => r.json()).then(render).catch(() => {});
 poll(); pfBind(); pfLoad().then(wzDraw).catch(() => wzDraw());
-tabsBuild();
+menuBuild();
 setInterval(poll, 1500);
 </script>
 </body>
