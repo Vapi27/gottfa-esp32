@@ -428,6 +428,11 @@ _Static_assert(LED_POWER_BUDGET_MA <= LED_POWER_BUDGET_MAX,
 // retenu. 128 place le neutre au milieu du curseur, et laisse un facteur deux de
 // chaque cote - assez pour rattraper un capuchon epais sans transformer le
 // reglage en interrupteur.
+// Duree du maintien des TROIS boutons pour une remise a zero d'usine sans ecran.
+// Cinq secondes : assez long pour qu'on ne le fasse pas par megarde, assez court
+// pour qu'un client au telephone puisse le tenir en etant guide.
+#define ARENA_BLIND_RESET_MS 5000
+
 #define ARENA_CHAMP_NEUTRAL 128
 
 #define ARENA_GI_T 0.62f

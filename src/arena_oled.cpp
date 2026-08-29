@@ -561,6 +561,50 @@ void showQr() {
 // perdu dans les deux cas. La seule facon de les separer est que le chemin
 // volontaire le dise avant de partir. Sans cette ligne, on cherche un bug de
 // firmware la ou quelqu'un a simplement valide une entree de menu.
+// --- Remise a zero A L AVEUGLE, sans ecran ---------------------------------
+//
+// Le menu de remise a zero passe par l'ecran, qui est un module ENFICHABLE et
+// optionnel. Sur un mur livre sans panneau, un client dont la carte ne rejoint
+// plus son WiFi n'avait plus aucun recours : ni page (il ne la trouve pas), ni
+// menu (pas d'ecran), ni terminal (il n'en a pas). Le produit devenait un objet
+// mort pour une simple erreur de mot de passe.
+//
+// Le geste, volontairement difficile a faire par hasard : LES TROIS BOUTONS
+// maintenus ensemble pendant cinq secondes. Le mur lui-meme sert d'afficheur -
+// il rougit progressivement pendant le maintien, et clignote trois fois quand
+// c'est fait. Relacher avant la fin annule sans rien changer.
+static void serviceButtonsOnly() {
+  static uint32_t heldSince = 0;
+  const bool all = !digitalRead(s_pinUp) && !digitalRead(s_pinDown) && !digitalRead(s_pinOk);
+  const uint32_t now = millis();
+
+  if (!all) {                       // relache : on annule et on rend la main
+    if (heldSince) { heldSince = 0; arenaled::setOverlay(0, 0, 0); }
+    return;
+  }
+  if (!heldSince) { heldSince = now; return; }
+
+  const uint32_t held = now - heldSince;
+  if (held < ARENA_BLIND_RESET_MS) {
+    // Rougissement proportionnel : le client VOIT que quelque chose se prepare,
+    // et combien il lui reste a tenir.
+    const uint8_t k = (uint8_t)(255UL * held / ARENA_BLIND_RESET_MS);
+    arenaled::setOverlay(k, 0, 0);
+    return;
+  }
+
+  Serial.println("[btn] trois boutons 5 s - remise a zero d usine");
+  Serial.flush();
+  for (uint8_t i = 0; i < 3; i++) {              // trois clignotements = c est fait
+    arenaled::setOverlay(255, 255, 255); delay(120);
+    arenaled::setOverlay(0, 0, 0);       delay(120);
+  }
+  arenaled::resetAll();
+  arenanet::resetNetwork();
+  delay(400);
+  ESP.restart();
+}
+
 static const char* resetActionName(uint8_t n) {
   if (n == N_R_REBOOT) return "REDEMARRAGE demande par le menu";
   if (n == N_R_LOOK)   return "remise a zero de l APPARENCE (menu)";
@@ -721,8 +765,17 @@ void begin() {
   Wire.beginTransmission(ARENA_OLED_ADDR);
   s_found = (Wire.endTransmission() == 0) &&
             s_d.begin(SSD1306_SWITCHCAPVCC, ARENA_OLED_ADDR);
-  if (!s_found) { Serial.println("[oled] no panel - screen disabled"); return; }
 
+  // ⚠️ LES BOUTONS SONT CONFIGURES AVANT TOUT ABANDON.
+  //
+  // begin() sortait ici quand aucun panneau n'etait detecte - et les trois
+  // pinMode ci-dessous ne s'executaient jamais. Or l'ecran est un module
+  // ENFICHABLE et optionnel, tandis que les boutons sont soudes sur la carte :
+  // un mur livre sans ecran n'avait donc plus aucun bouton, donc plus aucune
+  // remise a zero d'usine sans terminal. Le seul recours d'un client dont le
+  // mur ne rejoint plus son WiFi devenait un cable USB et un PC.
+  //
+  // Les deux sont independants : l'ecran AFFICHE, les boutons COMMANDENT.
   s_bprefs.begin("arenabtn", false);
   s_pinUp   = s_bprefs.getUChar("up",   PIN_ARENA_BTN_UP);
   s_pinDown = s_bprefs.getUChar("down", PIN_ARENA_BTN_DOWN);
@@ -730,6 +783,11 @@ void begin() {
   pinMode(s_pinUp,   INPUT_PULLUP);
   pinMode(s_pinDown, INPUT_PULLUP);
   pinMode(s_pinOk,   INPUT_PULLUP);
+
+  if (!s_found) {
+    Serial.println("[oled] aucun panneau - ecran desactive, BOUTONS ACTIFS");
+    return;
+  }
 
 #if ARENA_ENC_ENABLE
   pinMode(PIN_ARENA_ENC_A, INPUT_PULLUP);
@@ -770,7 +828,10 @@ static bool pollRepeat(Btn& b, uint32_t now) {
 }
 
 void tick() {
-  if (!s_found) return;
+  // Sans ecran, il reste les boutons : on ne dessine pas, mais on ecoute. C'est
+  // ce qui garde une remise a zero d'usine accessible sur un mur livre sans
+  // panneau. Voir begin().
+  if (!s_found) { serviceButtonsOnly(); return; }
   serviceWake();
   const uint32_t now = millis();
 

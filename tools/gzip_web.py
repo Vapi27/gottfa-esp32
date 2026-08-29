@@ -8,6 +8,21 @@
 import gzip, os
 Import("env")
 
+# ---------------------------------------------------------------------------
+# Le mur a SON systeme de fichiers, distinct de celui du compagnon GottFA.
+#
+# Les deux produits partageaient data/, et serveStatic("/", LittleFS, "/") publie
+# TOUT ce qui s'y trouve. Un mur vendu servait donc data/index.html, qui est
+# l'interface de l'AUTRE produit - "GottFA80 · LISYcontrol", 66 mentions de coil
+# et un panneau de tir de bobines. Joignable par n'importe qui sur le reseau du
+# client, sur un appareil qui n'a rien a voir.
+#
+# Aucun fichier n'est partage en realite : index.html et les gd-*.json sont lus
+# par net.cpp et gamedata.cpp, qui ne sont pas compiles dans le mur (voir
+# build_src_filter). La separation est donc nette.
+env.Replace(PROJECT_DATA_DIR=os.path.join(env.subst("$PROJECT_DIR"), "data_wall"))
+
+
 def build_gz(*args, **kwargs):
     # La page est la SOURCE, elle ne fait plus partie de l'image de fichiers :
     # elle est compilee dans le firmware (voir plus bas). data/ ne contient plus

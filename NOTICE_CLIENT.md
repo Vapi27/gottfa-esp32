@@ -70,7 +70,24 @@ rejouer les vraies séquences de la machine.
 - Chargeur **USB-C 5 V de qualité** uniquement. Usage **intérieur**, au sec.
 - **Toujours couper l'alimentation** avant de raccorder ou modifier le câblage.
 
-## 8 · Un souci ?
+## 8 · Tout remettre à zéro, sans rien brancher
+
+Si le plateau ne rejoint plus votre réseau et que vous ne retrouvez pas sa page :
+
+**Maintenez les trois boutons de façade ensemble pendant cinq secondes.**
+
+Le mur rougit progressivement pendant que vous tenez — c'est lui qui vous dit où
+vous en êtes. Il clignote trois fois en blanc quand c'est fait, puis redémarre
+avec ses réglages d'usine et rouvre son propre WiFi (étape 3.1). Relâchez avant
+la fin et rien ne change.
+
+Ce geste fonctionne **même si votre plateau n'a pas l'écran optionnel** : les
+boutons sont soudés sur la carte, l'écran ne l'est pas.
+
+⚠️ Cela efface vos réglages, votre WiFi et vos groupes. Le plan de votre machine
+et sa photo, eux, restent en place.
+
+## 8 bis · Un souci ?
 
 - **Une LED reste noire et tout ce qui suit aussi** : c'est la première LED
   noire qui est en cause (alimentation ou raccord), pas les suivantes.
@@ -79,3 +96,18 @@ rejouer les vraies séquences de la machine.
   L'adresse en `.local` dépend du nom du mur ; en cas de doute, passez par
   l'adresse IP que votre box attribue au plateau.
 - **Support** : formulaire de contact sur **pinballs.store**
+
+## 9 · Licences et code source
+
+Le logiciel de ce plateau est **libre**. Il est distribué sous **GPL-3.0**, et
+embarque des bibliothèques sous **LGPL-3.0** (AsyncTCP, ESPAsyncWebServer,
+Adafruit NeoPixel — cette dernière dans une version modifiée par nos soins, dont
+les modifications sont listées en tête du fichier concerné) ainsi que des
+composants sous licence MIT et Apache-2.0.
+
+Vous avez le droit d'en obtenir le **code source complet**, de l'étudier, de le
+modifier et de le redistribuer. Il est publié à l'adresse indiquée dans le
+fichier `NOTICE` livré avec le produit ; à défaut, demandez-le par le formulaire
+de contact sur **pinballs.store** et il vous sera transmis.
+
+Le texte intégral des licences accompagne le code source.

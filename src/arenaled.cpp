@@ -1279,6 +1279,19 @@ float    lastAmps()   { return s_amps; }
 bool     limited()    { return s_limited; }
 uint32_t frameCount() { return s_frames; }
 uint16_t fps()        { return s_fps; }
+
+// Peint la chaine ENTIERE d'une couleur, tout de suite, sans passer par la
+// boucle de rendu.
+//
+// C'est un retour visuel de derniere instance : il sert au geste de remise a
+// zero a l'aveugle, sur un mur livre sans ecran, ou le mur lui-meme est le seul
+// afficheur disponible. Il doit ecrire IMMEDIATEMENT parce que l'appelant
+// enchaine des delay() - passer par la trame suivante ne montrerait rien, la
+// boucle etant bloquee. A (0,0,0) il rend simplement la main au rendu normal.
+void setOverlay(uint8_t r, uint8_t g, uint8_t b) {
+  for (uint16_t i = 0; i < s_count; i++) s_strip.setPixelColor(i, r, g, b, 0);
+  s_strip.show();
+}
 // Ce que le mode music entend REELLEMENT. Sans ces valeurs, un mur qui respire
 // lentement est indiscernable d'un mur qui reagit mal : dans un cas le micro
 // n'entend rien, dans l'autre l'effet est trop mou. Deux causes opposees, un

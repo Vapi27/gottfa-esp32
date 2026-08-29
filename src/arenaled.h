@@ -144,6 +144,7 @@ float    lastAmps();       // A estimated for the frame just pushed
 bool     limited();        // true if the power limiter had to scale the last frame
 uint32_t frameCount();
 uint16_t fps();
+void    setOverlay(uint8_t r, uint8_t g, uint8_t b);  // peint la chaine tout de suite (retour visuel)
 float   musEnergy();                       // ce que le mode music entend, 0..1
 float   musBass();
 float   musTreble();
