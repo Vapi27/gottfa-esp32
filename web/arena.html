@@ -5,13 +5,19 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Wall Pinball Playfield</title>
 <style>
-  :root{--bg:#0d0b09;--panel:#171310;--line:#2c241d;--txt:#efe6da;--dim:#9a8a78;
-        --amber:#ff9b21;--gold:#ffc046;--red:#e0483a;--ok:#4caf50}
+  /* Palette et structure reprises de gottfa80-lisyctrl, pour que les deux
+     produits de la maison se ressemblent. Le bleu nuit et l'accent cyan sont
+     ceux de son interface ; ce qui change ici, c'est ce qui appartient au
+     CONTENU et non a l'outil : --amber et --gold restent les couleurs des
+     lampes du plateau, elles representent une ampoule, pas un bouton. */
+  :root{--bg:#0d1017;--panel:#161b24;--panel2:#1d2430;--line:#2a3340;
+        --txt:#e7ecf3;--dim:#8b97a8;--accent:#39b6ff;
+        --amber:#ff9b21;--gold:#ffc046;--red:#ff5d5d;--ok:#3ddc84;--r:12px}
   *{box-sizing:border-box}
   body{margin:0;background:var(--bg);color:var(--txt);
        font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
   header{padding:14px 16px;border-bottom:1px solid var(--line);
-         background:linear-gradient(180deg,#1d1712,#120f0c);position:sticky;top:0;z-index:5;
+         background:#0d1017f2;backdrop-filter:blur(6px);position:sticky;top:0;z-index:10;
          display:flex;align-items:center;gap:14px}
   header .hgrow{flex:1;min-width:0}
   /* Le geste le plus frequent merite la cible la plus grande, et une place que
@@ -27,18 +33,32 @@
   .stat{margin-top:6px;font-size:12px;color:var(--dim);display:flex;gap:14px;flex-wrap:wrap}
   .stat b{color:var(--txt);font-weight:600}
   main{max-width:820px;margin:0 auto;padding:16px}
-  section{background:var(--panel);border:1px solid var(--line);border-radius:10px;
+  /* Onglets, repris de gottfa80-lisyctrl. Quatorze panneaux qui defilent, c'est
+     une page qu'on parcourt au pouce en cherchant ; quatre onglets, c'est une
+     application. Le masquage par onglet passe par une CLASSE et non par
+     style.display, pour ne pas entrer en conflit avec les sections que
+     showRelevant() masque deja selon le mode. */
+  nav.tabs{display:flex;gap:.25rem;overflow-x:auto;padding:.55rem .6rem 0;
+           scrollbar-width:none;position:sticky;top:64px;z-index:9;
+           background:#0d1017f2;backdrop-filter:blur(6px);border-bottom:1px solid var(--line)}
+  nav.tabs::-webkit-scrollbar{display:none}
+  nav.tabs button{flex:none;background:transparent;color:var(--dim);border:0;
+           border-bottom:2px solid transparent;padding:.55rem .8rem;font-size:.9rem;
+           border-radius:8px 8px 0 0;cursor:pointer;white-space:nowrap}
+  nav.tabs button.active{color:var(--txt);border-bottom-color:var(--accent)}
+  section.tabhide{display:none !important}
+  section{background:var(--panel);border:1px solid var(--line);border-radius:var(--r);
           padding:14px;margin-bottom:14px}
   h2{margin:0 0 10px;font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--dim)}
   .modes{display:grid;grid-template-columns:repeat(auto-fit,minmax(104px,1fr));gap:8px}
-  button{font:inherit;color:var(--txt);background:#241c16;border:1px solid var(--line);
+  button{font:inherit;color:var(--txt);background:var(--panel2);border:1px solid var(--line);
          border-radius:8px;padding:10px 12px;cursor:pointer}
   button:hover{border-color:var(--amber)}
   button.on{background:var(--amber);border-color:var(--amber);color:#150f08;font-weight:600}
   .row{display:flex;align-items:center;gap:12px;margin:10px 0}
   .row label{width:96px;font-size:13px;color:var(--dim);flex:none}
   .row output{width:52px;text-align:right;font-variant-numeric:tabular-nums;font-size:13px}
-  input[type=range]{flex:1;accent-color:var(--amber)}
+  input[type=range]{flex:1;accent-color:var(--accent)}
   select{background:#100d0b;color:var(--txt);border:1px solid var(--line);
          border-radius:6px;padding:7px 9px;width:100%;font:inherit}
   input[type=number],input[type=text],input[type=password]{background:#100d0b;color:var(--txt);
@@ -105,6 +125,7 @@ header h1 img{filter:saturate(.9)}
   <button id="pwr" onclick="togglePower()" title="on / off" aria-label="on / off"><svg viewBox="0 0 24 24" width="1.1em" height="1.1em" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" aria-hidden="true" focusable="false" style="vertical-align:-.15em"><path d="M12 3.5v8"/><path d="M7.1 6.3a7 7 0 1 0 9.8 0"/></svg></button>
 </header>
 
+<nav class="tabs" id="tabs"></nav>
 <main>
   <section>
     <h2>Lighting mode</h2>
@@ -701,6 +722,48 @@ function sndDel() {
     if (sndAudio) { sndAudio.pause(); sndAudio = null; }
     toast(t); poll();
   });
+}
+
+// --- Onglets ---------------------------------------------------------------
+//
+// Quatorze panneaux qui defilent, c'est une page qu'on parcourt au pouce en
+// cherchant. Quatre onglets, c'est une application - et c'est le design de
+// gottfa80-lisyctrl, pour que les deux produits de la maison se ressemblent.
+//
+// Le regroupement suit ce qu'on FAIT, pas l'ordre historique des sections :
+// ce qu'on touche tous les jours d'abord, ce qu'on regle une fois ensuite,
+// ce qu'on ouvre quand ca va mal en dernier.
+const TABS = [
+  { id: 'light',  label: 'Light',   titles: ['Lighting mode', 'Level', 'Background glow (GI)', 'Colour'] },
+  { id: 'game',   label: 'Machine', titles: ['Which machine', 'Playfield', 'Attract sound'] },
+  { id: 'setup',  label: 'Setup',   titles: ['Chain setup', 'Network', 'Other walls', 'Siri & voice assistants'] },
+  { id: 'care',   label: 'Care',    titles: ['Firmware', 'Diagnostics', 'Reset'] },
+];
+let curTab = localStorage.getItem('tab') || 'light';
+
+function tabOf(sec) {
+  const h = sec.querySelector('h2');
+  const t = h ? h.textContent.trim() : '';
+  for (const g of TABS) if (g.titles.some(x => t.startsWith(x.split(' &')[0]))) return g.id;
+  return TABS[0].id;                       // une section inconnue reste visible quelque part
+}
+function tabShow(id) {
+  curTab = id;
+  try { localStorage.setItem('tab', id); } catch (e) {}
+  document.querySelectorAll('main > section').forEach(sec => {
+    sec.classList.toggle('tabhide', tabOf(sec) !== id);
+  });
+  document.querySelectorAll('#tabs button').forEach(b => {
+    b.classList.toggle('active', b.dataset.tab === id);
+  });
+  window.scrollTo(0, 0);
+}
+function tabsBuild() {
+  const n = $('tabs');
+  if (!n) return;
+  n.innerHTML = TABS.map(g =>
+    '<button data-tab="' + g.id + '" onclick="tabShow(\'' + g.id + '\')">' + g.label + '</button>').join('');
+  tabShow(curTab);
 }
 
 const toast = m => {
@@ -1696,6 +1759,7 @@ function matterForget() {
 
 const poll = () => fetch('/api/state').then(r => r.json()).then(render).catch(() => {});
 poll(); pfBind(); pfLoad().then(wzDraw).catch(() => wzDraw());
+tabsBuild();
 setInterval(poll, 1500);
 </script>
 </body>
