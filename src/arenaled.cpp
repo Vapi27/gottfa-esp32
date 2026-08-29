@@ -669,6 +669,14 @@ static void fxMusic(Rgbw* buf) {
   // des etincelles au-dessus. Chacune a son role et sa place.
   refreshLedHeights();
 
+  // ⚠️ VIDER LE TAMPON. Tout ce qui suit ajoute (addSat) sans jamais remplacer :
+  // sans ce fill, buf porte la trame PRECEDENTE et l'accumulation sature le mur
+  // au plein en une seconde, ou il reste. Symptome : "music est juste a fond tout
+  // le temps", et un courant parfaitement constant a 1425 mA - variance NULLE sur
+  // seize mesures, ce qu'un effet anime ne peut pas produire. Ma reecriture avait
+  // emporte ce fill avec le fond qu'il portait.
+  fill(buf, scale(s_color, 0.10f * (float)s_gi / 255.0f));
+
   // Niveau : attaque vive, retombee lente. C'est ce qui donne la frappe sans la
   // nervosite - mesure a l'appui, les graves oscillent de 0,23 a 0,86 d'un
   // instant a l'autre et suivre l'enveloppe brute faisait sautiller la colonne.
@@ -763,18 +771,19 @@ static void fxArenaGeo(Rgbw* buf) {
   const bool tinted = (s_color.r | s_color.g | s_color.b | s_color.w) != 0;
   const Rgbw teinte = tinted ? s_color
                              : Rgbw{ ARENA_AMBER_R, ARENA_AMBER_G, ARENA_AMBER_B, ARENA_AMBER_W };
-  const Rgbw creteC = tinted ? s_color
-                             : Rgbw{ ARENA_GOLD_R,  ARENA_GOLD_G,  ARENA_GOLD_B,  ARENA_GOLD_W  };
 
   // Fond permanent, regle par le curseur Background. A zero, c'est noir.
   fill(buf, scale(s_color, 0.20f * (float)s_gi / 255.0f));
 
-  const float up   = phase(1.0, 1.0);           // 0..1, monte le plateau
-  const float ripT = phase(1.0, 6.0) / 6.0f;    // une onde toutes les 6 s
-  const float rip  = ripT * 1.15f;              // rayon, deborde pour sortir
+  // Une seule figure : la vague. Il y avait AUSSI une onde circulaire partant du
+  // milieu du plateau toutes les six secondes - une seconde figure superposee,
+  // sans rapport avec une vague, que le proprietaire a lue comme un morceau
+  // d'attract egare : "wave fait un peu d'attract au milieu de temps en temps".
+  // Un mode qui s'appelle Wave fait une vague.
+  const float up = phase(1.0, 1.0);             // 0..1, monte le plateau
 
   for (uint16_t i = 0; i < s_count; i++) {
-    const float h = s_ledH[i], x = s_ledX[i];
+    const float h = s_ledH[i];
 
     // Vague qui monte des flippers vers le fronton. Le profil est resserre
     // (140 au lieu de 90) : la trainee d'avant laissait un fond lumineux entre
@@ -783,11 +792,6 @@ static void fxArenaGeo(Rgbw* buf) {
     if (d > 0.5f) d = 1.0f - d;                 // enroulement : la vague est continue
     buf[i] = addSat(buf[i], scale(teinte, expf(-d * d * 140.0f)));
 
-    // Onde circulaire quittant le milieu du plateau.
-    const float dx = x - 0.5f, dy = (1.0f - h) - 0.55f;
-    const float dr = fabsf(sqrtf(dx * dx + dy * dy) - rip);
-    if (dr < 0.12f)
-      buf[i] = addSat(buf[i], scale(creteC, (1.0f - dr / 0.12f) * (1.0f - ripT) * 0.9f));
   }
 }
 
